@@ -1,4 +1,5 @@
 # common/bedrock_client.py
+import base64
 import json
 import os
 import time
@@ -40,6 +41,26 @@ def invoke_model(prompt: str, client=None, max_tokens: int = 1024) -> str:
                 time.sleep(1)
                 continue
     raise BedrockInvocationError(f"Bedrock呼び出しに失敗しました: {last_error}")
+
+
+def invoke_vision(prompt, image_bytes, media_type="image/jpeg", client=None,
+                  max_tokens: int = 1024) -> str:
+    bedrock = client or _get_client()
+    b64 = base64.b64encode(image_bytes).decode()
+    response = bedrock.invoke_model(
+        modelId=BEDROCK_MODEL_ID,
+        body=json.dumps({
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64",
+                 "media_type": media_type, "data": b64}},
+                {"type": "text", "text": prompt},
+            ]}],
+        }),
+    )
+    body = json.loads(response["body"].read())
+    return body["content"][0]["text"]
 
 
 def map_column_via_llm(header: str, target_columns, client=None):
