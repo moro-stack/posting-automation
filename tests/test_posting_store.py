@@ -112,3 +112,12 @@ def test_delete_contract_invoice_removes_lines(tmp_path):
                                        "remark": "配布"}], db_path=db, now="T")
     store.delete_contract_invoice(inv, db_path=db)
     assert store.get_contract_invoice(inv, db_path=db) is None
+    # 明細行が実際に消えたことを独立に検証（get_contract_invoice はヘッダ欠如で早期 None を返すため）
+    conn = store._connect(db)
+    try:
+        cnt = conn.execute(
+            "SELECT COUNT(*) FROM contract_invoice_lines WHERE invoice_id=?", (inv,)
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert cnt == 0
