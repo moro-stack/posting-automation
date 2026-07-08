@@ -105,6 +105,13 @@ def test_contract_invoice_roundtrip_and_amount(tmp_path):
     assert got["lines"][1]["amount"] == 540
 
 
+def test_issue_manual_cost_roundtrip(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    store.add_issue_manual_cost(1, "自社社員配布分", 8000, db_path=db, now="T")
+    rows = store.list_issue_manual_costs(project_id=1, db_path=db)
+    assert rows[0]["amount"] == 8000 and rows[0]["content"] == "自社社員配布分"
+
+
 def test_delete_contract_invoice_removes_lines(tmp_path):
     db = os.path.join(tmp_path, "t.db")
     inv = store.add_contract_invoice(1, "2026-06-30", "2026-06-01", "2026-06-05",

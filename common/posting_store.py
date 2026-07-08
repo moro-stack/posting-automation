@@ -414,3 +414,23 @@ def delete_contract_invoice(invoice_id, *, db_path=None):
     finally:
         conn.close()
     _push_remote(db_path)
+
+
+# --- issue_manual_costs ---
+def add_issue_manual_cost(project_id, content, amount, *, db_path=None, now=None):
+    return _add("issue_manual_costs", ["project_id", "content", "amount", "created_at"],
+                [_int_or_none(project_id), content, int(amount), _now(now)], db_path)
+
+
+def list_issue_manual_costs(*, project_id=None, db_path=None):
+    conn = _connect(db_path)
+    try:
+        if project_id is None:
+            rows = conn.execute("SELECT * FROM issue_manual_costs ORDER BY id DESC").fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM issue_manual_costs WHERE project_id=? ORDER BY id DESC",
+                (int(project_id),)).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
