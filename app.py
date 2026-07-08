@@ -11,6 +11,7 @@ apply_app_style()
 def _bootstrap_db():
     store.sync_from_remote()
     store.init_db()
+    store.seed_masters()
     return True
 
 

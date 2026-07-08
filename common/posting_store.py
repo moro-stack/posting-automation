@@ -87,3 +87,176 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 
 def init_db(db_path=None) -> None:
     _connect(db_path).close()
+
+
+def _add(table, columns, values, db_path):
+    conn = _connect(db_path)
+    try:
+        cols = ", ".join(columns)
+        ph = ", ".join("?" for _ in columns)
+        cur = conn.execute(f"INSERT INTO {table} ({cols}) VALUES ({ph})", values)
+        conn.commit()
+        new_id = int(cur.lastrowid)
+    finally:
+        conn.close()
+    _push_remote(db_path)
+    return new_id
+
+
+def _list(table, only_active, db_path):
+    conn = _connect(db_path)
+    try:
+        sql = f"SELECT * FROM {table}"
+        if only_active:
+            sql += " WHERE active=1"
+        sql += " ORDER BY id"
+        return [dict(r) for r in conn.execute(sql).fetchall()]
+    finally:
+        conn.close()
+
+
+def _update(table, row_id, fields, db_path):
+    sets = {k: v for k, v in fields.items() if v is not _UNSET}
+    if not sets:
+        return
+    assignments = ", ".join(f"{k}=?" for k in sets)
+    conn = _connect(db_path)
+    try:
+        conn.execute(f"UPDATE {table} SET {assignments} WHERE id=?",
+                     (*sets.values(), int(row_id)))
+        conn.commit()
+    finally:
+        conn.close()
+    _push_remote(db_path)
+
+
+def _delete(table, row_id, db_path):
+    conn = _connect(db_path)
+    try:
+        conn.execute(f"DELETE FROM {table} WHERE id=?", (int(row_id),))
+        conn.commit()
+    finally:
+        conn.close()
+    _push_remote(db_path)
+
+
+# --- projects ---
+def add_project(name, *, active=1, db_path=None):
+    return _add("projects", ["name", "active"], [name, int(active)], db_path)
+
+
+def list_projects(*, only_active=False, db_path=None):
+    return _list("projects", only_active, db_path)
+
+
+def update_project(row_id, *, name=_UNSET, active=_UNSET, db_path=None):
+    _update("projects", row_id, {"name": name, "active": active}, db_path)
+
+
+def delete_project(row_id, *, db_path=None):
+    _delete("projects", row_id, db_path)
+
+
+# --- expense_categories ---
+def add_expense_category(name, *, active=1, db_path=None):
+    return _add("expense_categories", ["name", "active"], [name, int(active)], db_path)
+
+
+def list_expense_categories(*, only_active=False, db_path=None):
+    return _list("expense_categories", only_active, db_path)
+
+
+def update_expense_category(row_id, *, name=_UNSET, active=_UNSET, db_path=None):
+    _update("expense_categories", row_id, {"name": name, "active": active}, db_path)
+
+
+def delete_expense_category(row_id, *, db_path=None):
+    _delete("expense_categories", row_id, db_path)
+
+
+# --- payables_vendors ---
+def add_payables_vendor(name, *, default_category=None, active=1, db_path=None):
+    return _add("payables_vendors", ["name", "default_category", "active"],
+                [name, default_category, int(active)], db_path)
+
+
+def list_payables_vendors(*, only_active=False, db_path=None):
+    return _list("payables_vendors", only_active, db_path)
+
+
+def update_payables_vendor(row_id, *, name=_UNSET, default_category=_UNSET, active=_UNSET, db_path=None):
+    _update("payables_vendors", row_id,
+            {"name": name, "default_category": default_category, "active": active}, db_path)
+
+
+def delete_payables_vendor(row_id, *, db_path=None):
+    _delete("payables_vendors", row_id, db_path)
+
+
+# --- receivables_clients ---
+def add_receivables_client(name, *, active=1, db_path=None):
+    return _add("receivables_clients", ["name", "active"], [name, int(active)], db_path)
+
+
+def list_receivables_clients(*, only_active=False, db_path=None):
+    return _list("receivables_clients", only_active, db_path)
+
+
+def update_receivables_client(row_id, *, name=_UNSET, active=_UNSET, db_path=None):
+    _update("receivables_clients", row_id, {"name": name, "active": active}, db_path)
+
+
+def delete_receivables_client(row_id, *, db_path=None):
+    _delete("receivables_clients", row_id, db_path)
+
+
+# --- distributors ---
+def add_distributor(name, *, kind="業務委託", active=1, db_path=None):
+    return _add("distributors", ["name", "kind", "active"], [name, kind, int(active)], db_path)
+
+
+def list_distributors(*, only_active=False, db_path=None):
+    return _list("distributors", only_active, db_path)
+
+
+def update_distributor(row_id, *, name=_UNSET, kind=_UNSET, active=_UNSET, db_path=None):
+    _update("distributors", row_id, {"name": name, "kind": kind, "active": active}, db_path)
+
+
+def delete_distributor(row_id, *, db_path=None):
+    _delete("distributors", row_id, db_path)
+
+
+_PRESET_PROJECTS = ["関西ぱど：京阪北版", "関西ぱど：京阪南版", "アドバリュー",
+                    "リビングプロシード", "その他"]
+_PRESET_CATEGORIES = ["駐車場代", "飲み物代", "その他"]
+_PRESET_VENDORS = [
+    ("京阪総合サービス株式会社", "ゴミ収集"),
+    ("大東建託パートナーズ株式会社", "家賃"),
+    ("NTTファイナンス株式会社", "電話"),
+    ("NTTコミュニケーション株式会社", "プロバイダ"),
+    ("関西電力株式会社", "電気"),
+    ("株式会社スペースリーダー", "機械警備"),
+    ("株式会社トヨタレンタリース大阪", "リース"),
+    ("株式会社ネクストレベル", "派遣"),
+    ("キャノンマーケティングジャパン株式会社", "コピー代"),
+    ("株式会社 CLOVER JAPAN", "配布"),
+    ("配夢株式会社", "配布"),
+]
+_PRESET_CLIENTS = ["株式会社関西ぱど　北大阪営業部", "株式会社進和プロモーション 大阪支社",
+                   "株式会社アド・バリュー", "株式会社リビングプロシード"]
+
+
+def seed_masters(*, db_path=None) -> None:
+    if not list_projects(db_path=db_path):
+        for n in _PRESET_PROJECTS:
+            add_project(n, db_path=db_path)
+    if not list_expense_categories(db_path=db_path):
+        for n in _PRESET_CATEGORIES:
+            add_expense_category(n, db_path=db_path)
+    if not list_payables_vendors(db_path=db_path):
+        for n, c in _PRESET_VENDORS:
+            add_payables_vendor(n, default_category=c, db_path=db_path)
+    if not list_receivables_clients(db_path=db_path):
+        for n in _PRESET_CLIENTS:
+            add_receivables_client(n, db_path=db_path)
