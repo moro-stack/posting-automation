@@ -27,11 +27,16 @@ def _parse_json(text):
 
 
 def _as_int(value):
-    if value is None:
+    if value is None or isinstance(value, bool):
         return None
+    if isinstance(value, (int, float)):
+        return int(value)
     try:
-        return int(re.sub(r"[^\d-]", "", str(value)))
-    except ValueError:
+        cleaned = re.sub(r"[^\d-]", "", str(value).split(".")[0])
+        if cleaned in ("", "-"):
+            return None
+        return int(cleaned)
+    except (ValueError, TypeError):
         return None
 
 

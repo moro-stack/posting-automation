@@ -40,3 +40,38 @@ def test_extract_invoice_parses_json():
     fake = _FakeClient('{"vendor":"関西電力株式会社","amount":16216,"note":"電気代"}')
     result = ocr.extract_invoice(b"x", client=fake)
     assert result["vendor"] == "関西電力株式会社" and result["amount"] == 16216
+
+
+def test_as_int_handles_float():
+    assert ocr._as_int(1200.0) == 1200
+
+
+def test_as_int_handles_decimal_string_with_comma():
+    assert ocr._as_int("1,200.50") == 1200
+
+
+def test_as_int_handles_yen_string():
+    assert ocr._as_int("¥16,216") == 16216
+
+
+def test_as_int_returns_none_for_unreadable_string():
+    assert ocr._as_int("読めない") is None
+
+
+def test_as_int_returns_none_for_none():
+    assert ocr._as_int(None) is None
+
+
+def test_invoke_vision_image_block_structure():
+    import base64
+    import json
+
+    fake = _FakeClient('{"date":"2026-06-19","amount":1200,"item":"駐車場代"}')
+    image_bytes = b"\xff\xd8abc"
+    ocr.extract_receipt(image_bytes, media_type="image/jpeg", client=fake)
+
+    body = json.loads(fake.called_with["body"])
+    content_block = body["messages"][0]["content"][0]
+    assert content_block["type"] == "image"
+    assert content_block["source"]["media_type"] == "image/jpeg"
+    assert base64.b64decode(content_block["source"]["data"]) == image_bytes
