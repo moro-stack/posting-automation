@@ -351,3 +351,66 @@ def list_receivables(*, month=None, project_id=None, db_path=None):
 
 def delete_receivable(row_id, *, db_path=None):
     _delete("receivables", row_id, db_path)
+
+
+# --- contract_invoices ---
+def add_contract_invoice(distributor_id, issue_date, period_from, period_to, lines,
+                         *, db_path=None, now=None):
+    conn = _connect(db_path)
+    try:
+        cur = conn.execute(
+            "INSERT INTO contract_invoices"
+            " (distributor_id, issue_date, period_from, period_to, created_at)"
+            " VALUES (?,?,?,?,?)",
+            (_int_or_none(distributor_id), issue_date, period_from, period_to, _now(now)))
+        invoice_id = int(cur.lastrowid)
+        for ln in lines:
+            qty = int(ln.get("report_qty") or 0)
+            price = int(ln.get("unit_price") or 0)
+            conn.execute(
+                "INSERT INTO contract_invoice_lines"
+                " (invoice_id, project_id, report_qty, unit_price, amount, remark)"
+                " VALUES (?,?,?,?,?,?)",
+                (invoice_id, _int_or_none(ln.get("project_id")), qty, price,
+                 qty * price, ln.get("remark")))
+        conn.commit()
+    finally:
+        conn.close()
+    _push_remote(db_path)
+    return invoice_id
+
+
+def get_contract_invoice(invoice_id, *, db_path=None):
+    conn = _connect(db_path)
+    try:
+        head = conn.execute("SELECT * FROM contract_invoices WHERE id=?",
+                            (int(invoice_id),)).fetchone()
+        if head is None:
+            return None
+        lines = conn.execute(
+            "SELECT * FROM contract_invoice_lines WHERE invoice_id=? ORDER BY id",
+            (int(invoice_id),)).fetchall()
+        return {"invoice": dict(head), "lines": [dict(r) for r in lines]}
+    finally:
+        conn.close()
+
+
+def list_contract_invoices(*, db_path=None):
+    conn = _connect(db_path)
+    try:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM contract_invoices ORDER BY id DESC").fetchall()]
+    finally:
+        conn.close()
+
+
+def delete_contract_invoice(invoice_id, *, db_path=None):
+    conn = _connect(db_path)
+    try:
+        conn.execute("DELETE FROM contract_invoice_lines WHERE invoice_id=?",
+                     (int(invoice_id),))
+        conn.execute("DELETE FROM contract_invoices WHERE id=?", (int(invoice_id),))
+        conn.commit()
+    finally:
+        conn.close()
+    _push_remote(db_path)

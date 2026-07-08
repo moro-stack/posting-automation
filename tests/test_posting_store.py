@@ -87,3 +87,28 @@ def test_receivable_roundtrip(tmp_path):
     store.add_receivable("2026-06", 1, 3184799, note="6/26号", db_path=db, now="T")
     rows = store.list_receivables(month="2026-06", db_path=db)
     assert rows[0]["amount"] == 3184799
+
+
+def test_contract_invoice_roundtrip_and_amount(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    lines = [
+        {"project_id": 1, "report_qty": 3713, "unit_price": 3, "remark": "配布"},
+        {"project_id": 1, "report_qty": 1, "unit_price": 540, "remark": "交通費"},
+    ]
+    inv = store.add_contract_invoice(5, "2026-06-30", "2026-06-19", "2026-06-27",
+                                     lines, db_path=db, now="T")
+    got = store.get_contract_invoice(inv, db_path=db)
+    assert got["invoice"]["distributor_id"] == 5
+    assert len(got["lines"]) == 2
+    # amount = report_qty * unit_price
+    assert got["lines"][0]["amount"] == 3713 * 3
+    assert got["lines"][1]["amount"] == 540
+
+
+def test_delete_contract_invoice_removes_lines(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    inv = store.add_contract_invoice(1, "2026-06-30", "2026-06-01", "2026-06-05",
+                                     [{"project_id": 1, "report_qty": 10, "unit_price": 5,
+                                       "remark": "配布"}], db_path=db, now="T")
+    store.delete_contract_invoice(inv, db_path=db)
+    assert store.get_contract_invoice(inv, db_path=db) is None
