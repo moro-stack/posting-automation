@@ -30,11 +30,13 @@ agg = posting_logic.aggregate_issue(
     manual=store.list_issue_manual_costs(),
 )
 
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("小口", f"¥{agg['petty']:,}")
-c2.metric("買掛", f"¥{agg['payables']:,}")
-c3.metric("業務委託", f"¥{agg['contract']:,}")
-c4.metric("手入力", f"¥{agg['manual']:,}")
+# 内訳は2列×2行にして金額が切れないようにする（狭い列だと値が省略されるため）
+r1c1, r1c2 = st.columns(2)
+r1c1.metric("小口", f"¥{agg['petty']:,}")
+r1c2.metric("買掛", f"¥{agg['payables']:,}")
+r2c1, r2c2 = st.columns(2)
+r2c1.metric("業務委託", f"¥{agg['contract']:,}")
+r2c2.metric("手入力", f"¥{agg['manual']:,}")
 st.metric("コスト合計", f"¥{agg['total']:,}")
 
 receivable_total = sum(int(r["amount"]) for r in store.list_receivables(project_id=pid))
