@@ -16,13 +16,16 @@ def _set(ws, coord, value):
 
 
 def build_invoice_xlsx(*, distributor_name, issue_date, period_from, period_to, lines) -> bytes:
+    if len(lines) > _MAX_LINE_ROWS:
+        raise ValueError(f"明細は最大{_MAX_LINE_ROWS}行までです（{len(lines)}行が指定されました）。案件ごとに集約してください。")
+
     wb = openpyxl.load_workbook(_TEMPLATE)
     ws = wb.active
 
     _set(ws, "F3", issue_date)
     # 発行者(配布員)名は宛名の下(B8 但し欄)に併記
     _set(ws, "B8", f"但し：{distributor_name} 配布業務分")
-    _set(ws, "A7", f"ご請求金額　　　　{posting_logic.invoice_total(lines)}　円（税込）")
+    _set(ws, "A7", f"ご請求金額　　　　{posting_logic.invoice_total(lines):,}　円（税込）")
     _set(ws, "A10", f"配布業務期間　：　{period_from}　～　{period_to}")
 
     for i, ln in enumerate(lines[:_MAX_LINE_ROWS]):
@@ -34,7 +37,7 @@ def build_invoice_xlsx(*, distributor_name, issue_date, period_from, period_to, 
 
     # 配布部数(F20)= 配布/挟み込みの報告数合計。ラベルE20は「報告数」に寄せる
     _set(ws, "E20", "報告数")
-    _set(ws, "F20", posting_logic.delivered_copies(lines))
+    _set(ws, "F20", f"{posting_logic.delivered_copies(lines):,}部")
 
     buf = io.BytesIO()
     wb.save(buf)
