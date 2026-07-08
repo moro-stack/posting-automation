@@ -30,12 +30,12 @@ agg = posting_logic.aggregate_issue(
     manual=store.list_issue_manual_costs(),
 )
 
-c1, c2, c3, c4, c5 = st.columns(5)
+c1, c2, c3, c4 = st.columns(4)
 c1.metric("小口", f"¥{agg['petty']:,}")
 c2.metric("買掛", f"¥{agg['payables']:,}")
 c3.metric("業務委託", f"¥{agg['contract']:,}")
 c4.metric("手入力", f"¥{agg['manual']:,}")
-c5.metric("コスト合計", f"¥{agg['total']:,}")
+st.metric("コスト合計", f"¥{agg['total']:,}")
 
 receivable_total = sum(int(r["amount"]) for r in store.list_receivables(project_id=pid))
 if receivable_total:

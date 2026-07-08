@@ -37,10 +37,10 @@ editor = st.data_editor(
 
 lines = []
 for _, row in editor.iterrows():
-    if not row["案件"]:
+    if not row["案件"] or pd.isna(row["案件"]):
         continue
-    qty = int(row["報告数"] or 0)
-    price = int(row["単価"] or 0)
+    qty = int(row["報告数"]) if pd.notna(row["報告数"]) else 0
+    price = int(row["単価"]) if pd.notna(row["単価"]) else 0
     lines.append({"project_id": projs.get(row["案件"]), "project_name": row["案件"],
                   "report_qty": qty, "unit_price": price, "amount": qty * price,
                   "remark": row["備考"]})
