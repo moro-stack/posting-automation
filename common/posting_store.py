@@ -35,6 +35,10 @@ def _now(now):
     return now if now is not None else datetime.now().isoformat(timespec="seconds")
 
 
+def _int_or_none(value):
+    return None if value is None else int(value)
+
+
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
@@ -260,3 +264,90 @@ def seed_masters(*, db_path=None) -> None:
     if not list_receivables_clients(db_path=db_path):
         for n in _PRESET_CLIENTS:
             add_receivables_client(n, db_path=db_path)
+
+
+# --- petty_cash ---
+def add_petty_cash(date, category_id, amount, *, project_id=None, memo=None,
+                   source="manual", db_path=None, now=None):
+    return _add("petty_cash",
+                ["date", "category_id", "amount", "project_id", "memo", "source", "created_at"],
+                [date, _int_or_none(category_id), int(amount), _int_or_none(project_id),
+                 memo, source, _now(now)], db_path)
+
+
+def list_petty_cash(*, project_id=None, date_from=None, date_to=None, db_path=None):
+    conn = _connect(db_path)
+    try:
+        sql = "SELECT * FROM petty_cash WHERE 1=1"
+        args = []
+        if project_id is not None:
+            sql += " AND project_id=?"; args.append(int(project_id))
+        if date_from is not None:
+            sql += " AND date>=?"; args.append(date_from)
+        if date_to is not None:
+            sql += " AND date<=?"; args.append(date_to)
+        sql += " ORDER BY id DESC"
+        return [dict(r) for r in conn.execute(sql, args).fetchall()]
+    finally:
+        conn.close()
+
+
+def delete_petty_cash(row_id, *, db_path=None):
+    _delete("petty_cash", row_id, db_path)
+
+
+# --- payables ---
+def add_payable(month, vendor_id, amount, *, original_status=None, note=None,
+                project_id=None, source="manual", db_path=None, now=None):
+    return _add("payables",
+                ["month", "vendor_id", "amount", "original_status", "note",
+                 "project_id", "source", "created_at"],
+                [month, _int_or_none(vendor_id), int(amount), original_status, note,
+                 _int_or_none(project_id), source, _now(now)], db_path)
+
+
+def list_payables(*, month=None, project_id=None, db_path=None):
+    conn = _connect(db_path)
+    try:
+        sql = "SELECT * FROM payables WHERE 1=1"
+        args = []
+        if month is not None:
+            sql += " AND month=?"; args.append(month)
+        if project_id is not None:
+            sql += " AND project_id=?"; args.append(int(project_id))
+        sql += " ORDER BY id DESC"
+        return [dict(r) for r in conn.execute(sql, args).fetchall()]
+    finally:
+        conn.close()
+
+
+def delete_payable(row_id, *, db_path=None):
+    _delete("payables", row_id, db_path)
+
+
+# --- receivables ---
+def add_receivable(month, client_id, amount, *, note=None, project_id=None,
+                   db_path=None, now=None):
+    return _add("receivables",
+                ["month", "client_id", "amount", "note", "project_id", "created_at"],
+                [month, _int_or_none(client_id), int(amount), note,
+                 _int_or_none(project_id), _now(now)], db_path)
+
+
+def list_receivables(*, month=None, project_id=None, db_path=None):
+    conn = _connect(db_path)
+    try:
+        sql = "SELECT * FROM receivables WHERE 1=1"
+        args = []
+        if month is not None:
+            sql += " AND month=?"; args.append(month)
+        if project_id is not None:
+            sql += " AND project_id=?"; args.append(int(project_id))
+        sql += " ORDER BY id DESC"
+        return [dict(r) for r in conn.execute(sql, args).fetchall()]
+    finally:
+        conn.close()
+
+
+def delete_receivable(row_id, *, db_path=None):
+    _delete("receivables", row_id, db_path)

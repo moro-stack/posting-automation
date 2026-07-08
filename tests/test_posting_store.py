@@ -61,3 +61,29 @@ def test_seed_masters_is_idempotent(tmp_path):
     assert "株式会社アド・バリュー" in clients
     # 2回呼んでも重複しない
     assert len(store.list_receivables_clients(db_path=db)) == len(set(clients))
+
+
+def test_petty_cash_roundtrip_and_filter(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    a = store.add_petty_cash("2026-06-19", 1, 1200, project_id=3, memo="駐車場", db_path=db, now="T")
+    store.add_petty_cash("2026-06-25", 1, 500, db_path=db, now="T")
+    assert len(store.list_petty_cash(db_path=db)) == 2
+    only = store.list_petty_cash(project_id=3, db_path=db)
+    assert len(only) == 1 and only[0]["id"] == a
+    ranged = store.list_petty_cash(date_from="2026-06-20", date_to="2026-06-30", db_path=db)
+    assert len(ranged) == 1 and ranged[0]["amount"] == 500
+
+
+def test_payable_with_original_status(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    pid = store.add_payable("2026-06", 2, 245300, original_status="本社",
+                            note="web請求書 家賃", db_path=db, now="T")
+    rows = store.list_payables(month="2026-06", db_path=db)
+    assert rows[0]["id"] == pid and rows[0]["original_status"] == "本社"
+
+
+def test_receivable_roundtrip(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    store.add_receivable("2026-06", 1, 3184799, note="6/26号", db_path=db, now="T")
+    rows = store.list_receivables(month="2026-06", db_path=db)
+    assert rows[0]["amount"] == 3184799
