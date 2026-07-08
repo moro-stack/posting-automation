@@ -1,0 +1,19 @@
+# データ（実DB・バックアップ）
+data/
+*.db
+*.sqlite
+
+# 秘密情報
+.env
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# OS/エディタ
+.DS_Store
+Thumbs.db
