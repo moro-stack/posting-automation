@@ -84,6 +84,10 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL);
         """
     )
+    # 買掛に請求書の日付(YYYY-MM-DD)を持たせる(#12)。旧DBは自動でカラム追加。
+    pay_cols = {r[1] for r in conn.execute("PRAGMA table_info(payables)")}
+    if "date" not in pay_cols:
+        conn.execute("ALTER TABLE payables ADD COLUMN date TEXT")
     conn.commit()
 
 
@@ -295,13 +299,55 @@ def delete_petty_cash(row_id, *, db_path=None):
 
 
 # --- payables ---
-def add_payable(month, vendor_id, amount, *, original_status=None, note=None,
+def add_payable(month, vendor_id, amount, *, date=None, original_status=None, note=None,
                 project_id=None, source="manual", db_path=None, now=None):
+    # 請求書の日付(date)があれば月度(month)はそこから導出する(#12)
+    if date and not month:
+        month = str(date)[:7]
     return _add("payables",
-                ["month", "vendor_id", "amount", "original_status", "note",
+                ["month", "date", "vendor_id", "amount", "original_status", "note",
                  "project_id", "source", "created_at"],
-                [month, _int_or_none(vendor_id), int(amount), original_status, note,
+                [month, date, _int_or_none(vendor_id), int(amount), original_status, note,
                  _int_or_none(project_id), source, _now(now)], db_path)
+
+
+def find_duplicate_petty(date, category_id, amount, *, db_path=None):
+    """同じ 日付・費目・金額 の小口があれば返す(#11 重複警告用)。"""
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM petty_cash WHERE IFNULL(date,'')=IFNULL(?,'')"
+            " AND IFNULL(category_id,-1)=IFNULL(?,-1) AND amount=?",
+            (date, _int_or_none(category_id), int(amount))).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def find_duplicate_payable(date, vendor_id, amount, *, db_path=None):
+    """同じ 請求書日付・取引先・金額 の買掛があれば返す(#11)。"""
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM payables WHERE IFNULL(date,'')=IFNULL(?,'')"
+            " AND IFNULL(vendor_id,-1)=IFNULL(?,-1) AND amount=?",
+            (date, _int_or_none(vendor_id), int(amount))).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def find_duplicate_receivable(month, client_id, amount, *, db_path=None):
+    """同じ 月度・売掛先・金額 の売掛があれば返す(#11)。"""
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM receivables WHERE IFNULL(month,'')=IFNULL(?,'')"
+            " AND IFNULL(client_id,-1)=IFNULL(?,-1) AND amount=?",
+            (month, _int_or_none(client_id), int(amount))).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
 
 
 def list_payables(*, month=None, project_id=None, db_path=None):

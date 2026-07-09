@@ -82,6 +82,36 @@ def test_payable_with_original_status(tmp_path):
     assert rows[0]["id"] == pid and rows[0]["original_status"] == "本社"
 
 
+def test_payable_stores_invoice_date_and_derives_month(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    pid = store.add_payable(None, 2, 50000, date="2026-07-15", db_path=db, now="T")
+    row = [r for r in store.list_payables(db_path=db) if r["id"] == pid][0]
+    assert row["date"] == "2026-07-15"
+    assert row["month"] == "2026-07"   # 日付から月度を導出
+
+
+def test_find_duplicate_petty(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    store.add_petty_cash("2026-07-01", 1, 1200, db_path=db, now="T")
+    assert store.find_duplicate_petty("2026-07-01", 1, 1200, db_path=db)
+    assert not store.find_duplicate_petty("2026-07-02", 1, 1200, db_path=db)
+    assert not store.find_duplicate_petty("2026-07-01", 1, 999, db_path=db)
+
+
+def test_find_duplicate_payable(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    store.add_payable(None, 2, 50000, date="2026-07-10", db_path=db, now="T")
+    assert store.find_duplicate_payable("2026-07-10", 2, 50000, db_path=db)
+    assert not store.find_duplicate_payable("2026-07-10", 2, 999, db_path=db)
+
+
+def test_find_duplicate_receivable(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    store.add_receivable("2026-07", 1, 300000, db_path=db, now="T")
+    assert store.find_duplicate_receivable("2026-07", 1, 300000, db_path=db)
+    assert not store.find_duplicate_receivable("2026-08", 1, 300000, db_path=db)
+
+
 def test_receivable_roundtrip(tmp_path):
     db = os.path.join(tmp_path, "t.db")
     store.add_receivable("2026-06", 1, 3184799, note="6/26号", db_path=db, now="T")
