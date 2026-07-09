@@ -2,12 +2,12 @@ import streamlit as st
 
 from common import ocr
 from common import posting_store as store
-from common.ui import apply_app_style
+from common.ui import apply_app_style, section_export
 
 apply_app_style()
-st.title("🧾 経費・買掛・売掛")
+st.title("🧾 小口/買掛/売掛登録")
 
-mode = st.radio("入力の種類", ["小口", "買掛", "売掛", "配布委託費"],
+mode = st.radio("入力の種類", ["小口", "買掛", "売掛"],
                 horizontal=True)
 
 
@@ -15,11 +15,7 @@ def _project_options():
     return {p["name"]: p["id"] for p in store.list_projects(only_active=True)}
 
 
-if mode == "配布委託費":
-    st.info("配布委託費（配布員への支払い）は『業務委託・請求書』ページで登録します。")
-    st.page_link("pages/02_業務委託・請求書.py", label="→ 業務委託・請求書へ", icon="➡️")
-
-elif mode == "小口":
+if mode == "小口":
     st.subheader("小口経費（レシートOCR / 手入力）")
     up = st.file_uploader("レシート画像（任意・AIが下書き抽出）", type=["jpg", "jpeg", "png"])
     draft = {"date": None, "amount": None, "item": None}
@@ -46,6 +42,7 @@ elif mode == "小口":
             st.success("登録しました")
             st.rerun()
     st.dataframe(store.list_petty_cash(), use_container_width=True, hide_index=True)
+    section_export(store.list_petty_cash(), "小口一覧", key="petty")
 
 elif mode == "買掛":
     st.subheader("買掛（固定費・法人業者）")
@@ -77,6 +74,7 @@ elif mode == "買掛":
             st.success("登録しました")
             st.rerun()
     st.dataframe(store.list_payables(), use_container_width=True, hide_index=True)
+    section_export(store.list_payables(), "買掛一覧", key="pay")
 
 else:  # 売掛
     st.subheader("売掛（売上）")
@@ -94,3 +92,4 @@ else:  # 売掛
             st.success("登録しました")
             st.rerun()
     st.dataframe(store.list_receivables(), use_container_width=True, hide_index=True)
+    section_export(store.list_receivables(), "売掛一覧", key="recv")

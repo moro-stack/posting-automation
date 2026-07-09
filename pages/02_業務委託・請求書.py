@@ -6,10 +6,10 @@ import streamlit as st
 from common import invoice_excel
 from common import posting_logic
 from common import posting_store as store
-from common.ui import apply_app_style
+from common.ui import apply_app_style, section_export
 
 apply_app_style()
-st.title("📄 業務委託・請求書")
+st.title("📄 業務委託/報告書兼請求書作成")
 
 dists = {d["name"]: d["id"] for d in store.list_distributors(only_active=True)}
 projs = {p["name"]: p["id"] for p in store.list_projects(only_active=True)}
@@ -84,6 +84,7 @@ if invoices:
         rows.append({"ID": inv["id"], "配布員": name, "発行日": inv["issue_date"],
                      "期間": f'{inv["period_from"]}〜{inv["period_to"]}', "請求額": total})
     st.dataframe(rows, use_container_width=True, hide_index=True)
+    section_export(rows, "業務委託費一覧", key="contract")
     st.markdown("**配布員別 報酬合計**")
     st.dataframe([{"配布員": k, "報酬合計": v} for k, v in summary.items()],
                  use_container_width=True, hide_index=True)

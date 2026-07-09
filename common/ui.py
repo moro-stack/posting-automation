@@ -1,5 +1,8 @@
 """アプリ共通のUIスタイル(モダン・水色ワンポイント・暗色サイドバー・Noto Sans JP)。各ページ先頭で apply_app_style()。"""
+import io
+
 import streamlit as st
+import streamlit.components.v1 as components
 
 _STYLE = """
 <style>
@@ -159,3 +162,31 @@ def page_header(title: str, subtitle: str = "", icon: str = ""):
     st.markdown(f"# {prefix}{title}")
     if subtitle:
         st.caption(subtitle)
+
+
+def section_export(rows, filename: str, key: str):
+    """一覧(rows: list[dict] か DataFrame)を CSV / Excel でダウンロード & 印刷できるボタン列を出す。
+    経理提出用の出力を各セクションに分散させるための共通部品。"""
+    import pandas as pd
+
+    df = rows if isinstance(rows, pd.DataFrame) else pd.DataFrame(rows)
+    if df is None or df.empty:
+        return
+    c1, c2, c3, _ = st.columns([1, 1, 1, 5])
+    csv = ("﻿" + df.to_csv(index=False)).encode("utf-8")
+    c1.download_button("⬇️ CSV", data=csv, file_name=f"{filename}.csv",
+                       mime="text/csv", key=f"{key}_csv", use_container_width=True)
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        df.to_excel(w, index=False, sheet_name="data")
+    c2.download_button(
+        "⬇️ Excel", data=buf.getvalue(), file_name=f"{filename}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key=f"{key}_xlsx", use_container_width=True)
+    with c3:
+        components.html(
+            """<button onclick="window.parent.print()"
+                style="width:100%;padding:.5rem .6rem;border:1.5px solid #14a4dc;border-radius:10px;
+                       background:#fff;color:#0f87b8;font-weight:700;cursor:pointer;
+                       font-family:'Noto Sans JP',sans-serif;">🖨️ 印刷</button>""",
+            height=46)
