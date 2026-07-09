@@ -62,6 +62,29 @@ def test_as_int_returns_none_for_none():
     assert ocr._as_int(None) is None
 
 
+def test_media_type_for_pdf_png_jpeg():
+    assert ocr.media_type_for("領収書.pdf") == "application/pdf"
+    assert ocr.media_type_for("RECEIPT.PDF") == "application/pdf"
+    assert ocr.media_type_for("a.png") == "image/png"
+    assert ocr.media_type_for("a.jpg") == "image/jpeg"
+    assert ocr.media_type_for("a.jpeg") == "image/jpeg"
+
+
+def test_invoke_vision_pdf_uses_document_block():
+    import base64
+    import json
+
+    fake = _FakeClient('{"vendor":"関西電力株式会社","amount":16216,"note":"電気"}')
+    pdf_bytes = b"%PDF-1.4 fake pdf"
+    ocr.extract_invoice(pdf_bytes, media_type="application/pdf", client=fake)
+
+    body = json.loads(fake.called_with["body"])
+    content_block = body["messages"][0]["content"][0]
+    assert content_block["type"] == "document"
+    assert content_block["source"]["media_type"] == "application/pdf"
+    assert base64.b64decode(content_block["source"]["data"]) == pdf_bytes
+
+
 def test_invoke_vision_image_block_structure():
     import base64
     import json

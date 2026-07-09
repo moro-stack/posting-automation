@@ -16,6 +16,16 @@ _INVOICE_PROMPT = (
 )
 
 
+def media_type_for(filename: str) -> str:
+    """ファイル名から Bedrock 送信用のメディア種別を返す(PDF/PNG/JPEG対応)。"""
+    n = (filename or "").lower()
+    if n.endswith(".pdf"):
+        return "application/pdf"
+    if n.endswith(".png"):
+        return "image/png"
+    return "image/jpeg"
+
+
 def _parse_json(text):
     m = re.search(r"\{.*\}", text, re.DOTALL)
     if not m:

@@ -43,18 +43,27 @@ def invoke_model(prompt: str, client=None, max_tokens: int = 1024) -> str:
     raise BedrockInvocationError(f"Bedrock呼び出しに失敗しました: {last_error}")
 
 
-def invoke_vision(prompt, image_bytes, media_type="image/jpeg", client=None,
+def _source_block(file_bytes, media_type):
+    """媒体に応じた content ブロックを組む。PDFはdocument、画像はimageブロック。"""
+    b64 = base64.b64encode(file_bytes).decode()
+    if media_type == "application/pdf":
+        return {"type": "document",
+                "source": {"type": "base64", "media_type": "application/pdf", "data": b64}}
+    return {"type": "image",
+            "source": {"type": "base64", "media_type": media_type, "data": b64}}
+
+
+def invoke_vision(prompt, file_bytes, media_type="image/jpeg", client=None,
                   max_tokens: int = 1024) -> str:
+    """画像またはPDFをClaudeに渡してテキスト応答を得る。"""
     bedrock = client or _get_client()
-    b64 = base64.b64encode(image_bytes).decode()
     response = bedrock.invoke_model(
         modelId=BEDROCK_MODEL_ID,
         body=json.dumps({
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": max_tokens,
             "messages": [{"role": "user", "content": [
-                {"type": "image", "source": {"type": "base64",
-                 "media_type": media_type, "data": b64}},
+                _source_block(file_bytes, media_type),
                 {"type": "text", "text": prompt},
             ]}],
         }),

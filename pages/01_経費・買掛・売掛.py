@@ -1,5 +1,6 @@
 from datetime import date as _date
 
+import pandas as pd
 import streamlit as st
 
 from common import ocr
@@ -11,31 +12,87 @@ st.title("🧾 小口/買掛/売掛登録")
 
 mode = st.radio("入力の種類", ["小口", "買掛", "売掛"], horizontal=True)
 
+_UPLOAD_TYPES = ["pdf", "jpg", "jpeg", "png"]
+
 
 def _project_options():
     return {p["name"]: p["id"] for p in store.list_projects(only_active=True)}
 
 
-def _ai_read(reader, image_bytes, name, state_key):
-    """AIでの下書き抽出。失敗してもページを落とさずメッセージ表示(#7の保険)。"""
-    media = "image/png" if name.lower().endswith("png") else "image/jpeg"
-    try:
-        st.session_state[state_key] = reader(image_bytes, media, client=None)
-        st.success("AIが読み取りました。下のフォームで内容を確認・修正して登録してください。")
-    except Exception as e:  # noqa: BLE001
-        st.error(f"AI読み取りに失敗しました（手入力で登録できます）: {e}")
+def _ocr_files(files, reader):
+    """複数ファイルをAIで読み取り、下書きリストを返す。失敗しても止めない(#7の保険)。"""
+    drafts = []
+    prog = st.progress(0.0)
+    for i, f in enumerate(files):
+        try:
+            d = reader(f.getvalue(), ocr.media_type_for(f.name), client=None)
+        except Exception as e:  # noqa: BLE001
+            d = {"amount": None, "_error": str(e)}
+        d["_file"] = f.name
+        drafts.append(d)
+        prog.progress((i + 1) / len(files))
+    prog.empty()
+    n_ok = sum(1 for d in drafts if d.get("amount"))
+    if n_ok < len(drafts):
+        st.warning(f"{len(drafts)}件中 {n_ok}件のみ金額を取得できました。"
+                   "（AI未設定/読取失敗分は手入力できます）")
+    else:
+        st.success(f"{len(drafts)}件を読み取りました。内容を確認・修正して登録してください。")
+    return drafts
 
 
 if mode == "小口":
     st.subheader("小口経費（レシートOCR / 手入力）")
-    up = st.file_uploader("レシート画像（任意・AIが下書き抽出）", type=["jpg", "jpeg", "png"])
-    if up is not None and st.button("画像をAIで読み取る"):
-        _ai_read(ocr.extract_receipt, up.getvalue(), up.name, "petty_draft")
+    ups = st.file_uploader("レシート画像・PDF（複数可・AIが下書き抽出）",
+                           type=_UPLOAD_TYPES, accept_multiple_files=True)
+    if ups and st.button("画像/PDFをAIで読み取る"):
+        drafts = _ocr_files(ups, ocr.extract_receipt)
+        st.session_state.pop("petty_draft", None)
+        st.session_state.pop("petty_bulk", None)
+        if len(drafts) == 1 and drafts[0].get("amount"):
+            st.session_state["petty_draft"] = {"date": drafts[0].get("date"),
+                                               "amount": drafts[0].get("amount"),
+                                               "item": drafts[0].get("item")}
+        else:
+            st.session_state["petty_bulk"] = drafts
+
+    # 複数レシートの一括登録レビュー(#9)
+    if "petty_bulk" in st.session_state:
+        st.markdown("**複数レシートの下書き（確認・修正して一括登録）**")
+        cats = {c["name"]: c["id"] for c in store.list_expense_categories(only_active=True)}
+        cat_names = list(cats.keys())
+        bulk_df = pd.DataFrame([{
+            "日付": d.get("date") or "",
+            "費目": cat_names[0] if cat_names else "",
+            "金額": int(d.get("amount") or 0),
+            "メモ": d.get("item") or d.get("_file", ""),
+        } for d in st.session_state["petty_bulk"]])
+        edited = st.data_editor(
+            bulk_df, num_rows="dynamic", use_container_width=True, key="petty_bulk_editor",
+            column_config={"費目": st.column_config.SelectboxColumn(options=cat_names),
+                           "金額": st.column_config.NumberColumn(min_value=0, step=1)})
+        b1, b2, _ = st.columns([1, 1, 4])
+        if b1.button("全部登録", type="primary", key="petty_bulk_add"):
+            cnt = 0
+            for _, r in edited.iterrows():
+                amt = int(r["金額"]) if pd.notna(r["金額"]) else 0
+                if amt <= 0:
+                    continue
+                store.add_petty_cash(str(r["日付"]) or None, cats.get(r["費目"]), amt,
+                                     memo=str(r["メモ"]) or None, source="ocr")
+                cnt += 1
+            del st.session_state["petty_bulk"]
+            st.success(f"{cnt}件を登録しました")
+            st.rerun()
+        if b2.button("やめる", key="petty_bulk_cancel"):
+            del st.session_state["petty_bulk"]
+            st.rerun()
+
     draft = st.session_state.get("petty_draft", {"date": None, "amount": None, "item": None})
     if st.session_state.get("petty_draft"):
         st.caption("✏️ AIが読み取った値は下のフォームで自由に修正できます。")
 
-    # 重複の確認待ち
+    # 重複の確認待ち(#11)
     if "petty_pending" in st.session_state:
         p = st.session_state["petty_pending"]
         st.warning("⚠️ 同様の内容が登録済みです。それでも登録しますか？")
@@ -63,7 +120,7 @@ if mode == "小口":
         if st.form_submit_button("登録") and amount > 0:
             payload = {"date": date or None, "category_id": cats.get(cat), "amount": int(amount),
                        "project_id": projs.get(proj), "memo": memo or None,
-                       "source": "ocr" if up is not None else "manual"}
+                       "source": "ocr" if ups else "manual"}
             if store.find_duplicate_petty(payload["date"], payload["category_id"], payload["amount"]):
                 st.session_state["petty_pending"] = payload
                 st.rerun()
@@ -78,10 +135,52 @@ if mode == "小口":
 
 elif mode == "買掛":
     st.subheader("買掛（固定費・法人業者）")
-    up = st.file_uploader("請求書画像（任意・AIが金額を下書き抽出）",
-                          type=["jpg", "jpeg", "png"])
-    if up is not None and st.button("画像をAIで読み取る"):
-        _ai_read(ocr.extract_invoice, up.getvalue(), up.name, "pay_draft")
+    ups = st.file_uploader("請求書画像・PDF（複数可・AIが金額を下書き抽出）",
+                           type=_UPLOAD_TYPES, accept_multiple_files=True)
+    if ups and st.button("画像/PDFをAIで読み取る"):
+        drafts = _ocr_files(ups, ocr.extract_invoice)
+        st.session_state.pop("pay_draft", None)
+        st.session_state.pop("pay_bulk", None)
+        if len(drafts) == 1 and drafts[0].get("amount"):
+            st.session_state["pay_draft"] = {"vendor": drafts[0].get("vendor"),
+                                             "amount": drafts[0].get("amount"),
+                                             "note": drafts[0].get("note")}
+        else:
+            st.session_state["pay_bulk"] = drafts
+
+    # 複数請求書の一括登録レビュー(#9)
+    if "pay_bulk" in st.session_state:
+        st.markdown("**複数請求書の下書き（確認・修正して一括登録）**")
+        vendors = {v["name"]: v["id"] for v in store.list_payables_vendors(only_active=True)}
+        vnames = list(vendors.keys())
+        bulk_df = pd.DataFrame([{
+            "請求書の日付": d.get("date") or str(_date.today()),
+            "取引先": vnames[0] if vnames else "",
+            "金額": int(d.get("amount") or 0),
+            "備考": d.get("note") or d.get("_file", ""),
+        } for d in st.session_state["pay_bulk"]])
+        edited = st.data_editor(
+            bulk_df, num_rows="dynamic", use_container_width=True, key="pay_bulk_editor",
+            column_config={"取引先": st.column_config.SelectboxColumn(options=vnames),
+                           "金額": st.column_config.NumberColumn(min_value=0, step=1)})
+        b1, b2, _ = st.columns([1, 1, 4])
+        if b1.button("全部登録", type="primary", key="pay_bulk_add"):
+            cnt = 0
+            for _, r in edited.iterrows():
+                amt = int(r["金額"]) if pd.notna(r["金額"]) else 0
+                if amt <= 0:
+                    continue
+                store.add_payable(None, vendors.get(r["取引先"]), amt,
+                                  date=str(r["請求書の日付"]), note=str(r["備考"]) or None,
+                                  source="ocr")
+                cnt += 1
+            del st.session_state["pay_bulk"]
+            st.success(f"{cnt}件を登録しました")
+            st.rerun()
+        if b2.button("やめる", key="pay_bulk_cancel"):
+            del st.session_state["pay_bulk"]
+            st.rerun()
+
     draft = st.session_state.get("pay_draft", {"vendor": None, "amount": None, "note": None})
     if st.session_state.get("pay_draft"):
         st.caption("✏️ AIが読み取った値は下のフォームで自由に修正できます。")
@@ -116,7 +215,7 @@ elif mode == "買掛":
         if st.form_submit_button("登録") and amount > 0:
             payload = {"date": str(inv_date), "vendor_id": vendors.get(vendor),
                        "amount": int(amount), "original_status": original, "note": note or None,
-                       "project_id": projs.get(proj), "source": "ocr" if up is not None else "manual"}
+                       "project_id": projs.get(proj), "source": "ocr" if ups else "manual"}
             if store.find_duplicate_payable(payload["date"], payload["vendor_id"], payload["amount"]):
                 st.session_state["pay_pending"] = payload
                 st.rerun()
