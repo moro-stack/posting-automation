@@ -105,6 +105,19 @@ h1,h2,h3,h4{ color:var(--ink); font-weight:700; }
 }
 [data-testid="stDownloadButton"]>button:hover{ background:var(--primary-soft); }
 
+/* pills(案件・期間指定)を水色ボタンで目立たせる。未選択=水色枠/選択=水色フィル */
+button[data-testid="stBaseButton-pills"]{
+  border-radius:999px !important; border:1.5px solid var(--primary) !important;
+  color:var(--primary-d) !important; background:#fff !important; font-weight:700 !important;
+}
+button[data-testid="stBaseButton-pills"] p{ color:var(--primary-d) !important; }
+button[data-testid="stBaseButton-pills"]:hover{ background:var(--primary-soft) !important; }
+button[data-testid="stBaseButton-pillsActive"]{
+  border-radius:999px !important; background:var(--primary) !important;
+  color:#fff !important; border:1.5px solid var(--primary) !important; font-weight:700 !important;
+}
+button[data-testid="stBaseButton-pillsActive"] p{ color:#fff !important; }
+
 /* page_link */
 [data-testid="stPageLink"] a{
   display:inline-flex; align-items:center; gap:.3rem; font-weight:700; color:var(--primary-d) !important;

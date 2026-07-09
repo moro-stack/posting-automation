@@ -33,3 +33,58 @@ def test_aggregate_issue_sums_each_source():
 
 def test_issue_balance():
     assert L.issue_balance(cost_total=200000, receivable_total=290703) == 90703
+
+
+# ---- 期間フィルタ ----
+def test_period_range_all_is_open():
+    assert L.period_range("all", today="2026-07-09") == (None, None)
+
+
+def test_period_range_year():
+    assert L.period_range("year", today="2026-07-09") == ("2026-01-01", "2026-12-31")
+
+
+def test_period_range_month():
+    assert L.period_range("month", today="2026-07-09") == ("2026-07-01", "2026-07-31")
+
+
+def test_period_range_month_february_leap():
+    assert L.period_range("month", today="2024-02-15") == ("2024-02-01", "2024-02-29")
+
+
+def test_period_range_week_is_monday_to_sunday():
+    # 2026-07-09 は木曜 → 週は 07-06(月)〜07-12(日)
+    assert L.period_range("week", today="2026-07-09") == ("2026-07-06", "2026-07-12")
+
+
+def test_in_period_full_date_within_and_outside():
+    assert L.in_period("2026-07-08", "2026-07-06", "2026-07-12") is True
+    assert L.in_period("2026-07-20", "2026-07-06", "2026-07-12") is False
+
+
+def test_in_period_open_range_includes_everything():
+    assert L.in_period("2026-07-08", None, None) is True
+    assert L.in_period(None, None, None) is True
+
+
+def test_in_period_none_value_excluded_when_range_set():
+    assert L.in_period(None, "2026-07-01", "2026-07-31") is False
+
+
+def test_in_period_month_value_overlaps_range():
+    # 月度 "2026-07" は 7月のどこかと重なれば含む
+    assert L.in_period("2026-07", "2026-07-01", "2026-07-31") is True
+    assert L.in_period("2026-07", "2026-06-01", "2026-06-30") is False
+    assert L.in_period("2026-07", "2026-07-15", "2026-08-15") is True
+
+
+def test_filter_rows_by_period():
+    rows = [
+        {"date": "2026-07-08", "amount": 100},
+        {"date": "2026-06-30", "amount": 200},
+        {"date": None, "amount": 300},
+    ]
+    got = L.filter_rows_by_period(rows, "date", "2026-07-01", "2026-07-31")
+    assert got == [{"date": "2026-07-08", "amount": 100}]
+    # 全期間は全件(None日付も含む)
+    assert L.filter_rows_by_period(rows, "date", None, None) == rows
