@@ -5,10 +5,10 @@ import streamlit as st
 
 from common import ocr
 from common import posting_store as store
-from common.ui import apply_app_style, section_export
+from common.ui import apply_app_style, section_export, nice_table
 
 apply_app_style()
-st.title("🧾 小口/買掛/売掛登録")
+st.title("小口／買掛／売掛の登録")
 
 mode = st.radio("入力の種類", ["小口", "買掛", "売掛"], horizontal=True)
 
@@ -17,6 +17,17 @@ _UPLOAD_TYPES = ["pdf", "jpg", "jpeg", "png"]
 
 def _project_options():
     return {p["name"]: p["id"] for p in store.list_projects(only_active=True)}
+
+
+def _yen(v):
+    try:
+        return f"¥{int(round(float(v))):,}"
+    except (TypeError, ValueError):
+        return v
+
+
+def _names(list_fn):
+    return {r["id"]: r["name"] for r in list_fn()}
 
 
 def _ocr_files(files, reader):
@@ -109,7 +120,7 @@ if mode == "小口":
             st.rerun()
 
     with st.form("petty", clear_on_submit=True):
-        date = st.text_input("日付(YYYY-MM-DD)", value=draft.get("date") or "")
+        date = st.text_input("日付（例：2026-07-05）", value=draft.get("date") or "")
         cats = {c["name"]: c["id"] for c in store.list_expense_categories(only_active=True)}
         cat = st.selectbox("費目", list(cats.keys()) or ["(費目マスタを登録)"])
         amount = st.number_input("金額(税込)", min_value=0,
@@ -130,8 +141,14 @@ if mode == "小口":
             st.session_state.pop("petty_draft", None)
             st.success("登録しました")
             st.rerun()
-    st.dataframe(store.list_petty_cash(), use_container_width=True, hide_index=True)
-    section_export(store.list_petty_cash(), "小口一覧", key="petty")
+    st.divider()
+    st.markdown("**登録済みの小口一覧**")
+    _cats, _projs = _names(store.list_expense_categories), _names(store.list_projects)
+    _disp = [{"日付": r["date"] or "", "費目": _cats.get(r["category_id"], ""),
+              "金額": _yen(r["amount"]), "案件": _projs.get(r["project_id"], ""),
+              "メモ": r["memo"] or ""} for r in store.list_petty_cash()]
+    nice_table(_disp, "小口の登録はまだありません。")
+    section_export(_disp, "小口一覧", key="petty")
 
 elif mode == "買掛":
     st.subheader("買掛（固定費・法人業者）")
@@ -225,8 +242,15 @@ elif mode == "買掛":
             st.session_state.pop("pay_draft", None)
             st.success("登録しました")
             st.rerun()
-    st.dataframe(store.list_payables(), use_container_width=True, hide_index=True)
-    section_export(store.list_payables(), "買掛一覧", key="pay")
+    st.divider()
+    st.markdown("**登録済みの買掛一覧**")
+    _vends, _projs = _names(store.list_payables_vendors), _names(store.list_projects)
+    _disp = [{"請求書の日付": r.get("date") or r.get("month") or "",
+              "取引先": _vends.get(r["vendor_id"], ""), "金額": _yen(r["amount"]),
+              "原本区分": r.get("original_status") or "", "備考": r.get("note") or "",
+              "案件": _projs.get(r["project_id"], "")} for r in store.list_payables()]
+    nice_table(_disp, "買掛の登録はまだありません。")
+    section_export(_disp, "買掛一覧", key="pay")
 
 else:  # 売掛
     st.subheader("売掛（売上）")
@@ -246,7 +270,7 @@ else:  # 売掛
             st.rerun()
 
     with st.form("receivable", clear_on_submit=True):
-        month = st.text_input("月度(YYYY-MM)")
+        month = st.text_input("月度（例：2026-07）")
         clients = {c["name"]: c["id"] for c in store.list_receivables_clients(only_active=True)}
         client = st.selectbox("売掛先", list(clients.keys()) or ["(売掛先マスタを登録)"])
         amount = st.number_input("金額(税込)", min_value=0, step=1)
@@ -263,5 +287,11 @@ else:  # 売掛
                                  note=payload["note"], project_id=payload["project_id"])
             st.success("登録しました")
             st.rerun()
-    st.dataframe(store.list_receivables(), use_container_width=True, hide_index=True)
-    section_export(store.list_receivables(), "売掛一覧", key="recv")
+    st.divider()
+    st.markdown("**登録済みの売掛一覧**")
+    _clients, _projs = _names(store.list_receivables_clients), _names(store.list_projects)
+    _disp = [{"月度": r.get("month") or "", "売掛先": _clients.get(r["client_id"], ""),
+              "金額": _yen(r["amount"]), "備考": r.get("note") or "",
+              "案件": _projs.get(r["project_id"], "")} for r in store.list_receivables()]
+    nice_table(_disp, "売掛の登録はまだありません。")
+    section_export(_disp, "売掛一覧", key="recv")

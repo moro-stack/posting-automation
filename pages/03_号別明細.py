@@ -4,10 +4,14 @@ import streamlit as st
 
 from common import posting_logic
 from common import posting_store as store
-from common.ui import apply_app_style, section_export
+from common.ui import apply_app_style, section_export, nice_table
 
 apply_app_style()
-st.title("📊 号別明細")
+st.title("号別の明細・収支")
+
+
+def _yen(v):
+    return f"¥{posting_logic.fmt_num(v)}"
 
 projs = store.list_projects(only_active=True)
 if not projs:
@@ -83,24 +87,40 @@ if receivable_total:
 
 st.divider()
 st.subheader("内訳")
+_cats = {c["id"]: c["name"] for c in store.list_expense_categories()}
+_vends = {v["id"]: v["name"] for v in store.list_payables_vendors()}
+
 st.markdown("**小口**")
-st.dataframe(petty, use_container_width=True, hide_index=True)
-section_export(petty, f"小口_{sel}", key="issue_petty")
+_petty_disp = [{"日付": r["date"] or "", "費目": _cats.get(r["category_id"], ""),
+                "金額": _yen(r["amount"]), "メモ": r.get("memo") or ""} for r in petty]
+nice_table(_petty_disp, "この期間の小口はありません。")
+section_export(_petty_disp, f"小口_{sel}", key="issue_petty")
+
 st.markdown("**買掛**")
-st.dataframe(payables, use_container_width=True, hide_index=True)
-section_export(payables, f"買掛_{sel}", key="issue_pay")
-st.markdown("**業務委託(この号の行)**")
+_pay_disp = [{"請求書の日付": r.get("date") or r.get("month") or "",
+              "取引先": _vends.get(r["vendor_id"], ""), "金額": _yen(r["amount"]),
+              "原本区分": r.get("original_status") or "", "備考": r.get("note") or ""}
+             for r in payables]
+nice_table(_pay_disp, "この期間の買掛はありません。")
+section_export(_pay_disp, f"買掛_{sel}", key="issue_pay")
+
+st.markdown("**業務委託（この号の行）**")
 issue_contract = [l for l in contract_lines if l.get("project_id") == pid]
-st.dataframe(issue_contract, use_container_width=True, hide_index=True)
-section_export(issue_contract, f"業務委託_{sel}", key="issue_contract")
+_con_disp = [{"種別": l.get("remark") or "",
+              "数量": f'{posting_logic.fmt_num(l.get("report_qty"))} {posting_logic.unit_for(l.get("remark"))}',
+              "単価": _yen(l.get("unit_price")), "合計": _yen(l.get("amount"))}
+             for l in issue_contract]
+nice_table(_con_disp, "この期間の業務委託はありません。")
+section_export(_con_disp, f"業務委託_{sel}", key="issue_contract")
 
 st.divider()
-st.subheader("この号に手入力でコストを足す（自社社員配布分 等）")
+st.subheader("この号に手入力でコストを足す（自社社員の配布分 など）")
 with st.form("manual_cost", clear_on_submit=True):
     content = st.text_input("内容")
     amount = st.number_input("金額", min_value=0, step=1)
     if st.form_submit_button("追加") and amount > 0 and content.strip():
         store.add_issue_manual_cost(pid, content.strip(), int(amount))
         st.rerun()
-st.dataframe(store.list_issue_manual_costs(project_id=pid),
-             use_container_width=True, hide_index=True)
+_manual_disp = [{"内容": r.get("content") or "", "金額": _yen(r["amount"])}
+                for r in store.list_issue_manual_costs(project_id=pid)]
+nice_table(_manual_disp, "手入力のコストはありません。")

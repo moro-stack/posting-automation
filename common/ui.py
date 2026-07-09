@@ -160,6 +160,39 @@ button[data-testid="stBaseButton-pillsActive"] p{ color:#fff !important; }
 [data-testid="stExpander"]{ border:1px solid var(--line); border-radius:12px; background:#fff; }
 [data-testid="stExpander"] summary:hover{ color:var(--primary-d); }
 [data-testid="stCaptionContainer"]{ color:var(--muted); }
+
+/* ===== 英語を減らす・実務的に整える ===== */
+/* 右上のDeploy等ツールバー、表ホバー時の英語ツールバー、入力欄下の英語ヒントを隠す */
+[data-testid="stToolbar"], [data-testid="stAppDeployButton"]{ display:none !important; }
+[data-testid="stElementToolbar"], [data-testid="stElementToolbarButton"]{ display:none !important; }
+[data-testid="InputInstructions"]{ display:none !important; }
+
+/* ファイルアップローダーを日本語化 */
+[data-testid="stFileUploaderDropzoneInstructions"]{ display:none !important; }
+[data-testid="stFileUploaderDropzone"]{ position:relative; min-height:84px; align-items:center; }
+[data-testid="stFileUploaderDropzone"]::before{
+  content:"ここにファイルをドラッグ、または右のボタンで選択（画像・PDF）";
+  color:var(--muted); font-size:.9rem; padding-left:.7rem;
+}
+[data-testid="stFileUploaderDropzone"] button,
+[data-testid="stFileUploaderDropzone"] button *{ font-size:0 !important; }
+[data-testid="stFileUploaderDropzone"] button::after{
+  content:"ファイルを選ぶ"; font-size:.9rem !important; font-weight:700;
+}
+
+/* ===== 表を見やすく（罫線・角丸・ヘッダ強調・行間ゆったり） ===== */
+[data-testid="stDataFrame"]{ border:1px solid var(--line) !important; border-radius:12px; }
+[data-testid="stDataFrame"] [role="columnheader"]{ font-weight:700 !important; background:#f1f5f9 !important; }
+[data-testid="stTable"] table{ border-collapse:separate; border-spacing:0; }
+[data-testid="stTable"] thead th{
+  background:#eef3f8; color:var(--ink); font-weight:700; font-size:.92rem;
+  padding:.6rem .8rem; border-bottom:2px solid #dbe3ec; text-align:left;
+}
+[data-testid="stTable"] tbody td{
+  padding:.55rem .8rem; border-bottom:1px solid var(--line); font-size:.92rem;
+}
+[data-testid="stTable"] tbody tr:nth-child(even) td{ background:#f7fafc; }
+[data-testid="stTable"] tbody tr:hover td{ background:var(--primary-soft); }
 </style>
 """
 
@@ -177,6 +210,21 @@ def page_header(title: str, subtitle: str = "", icon: str = ""):
         st.caption(subtitle)
 
 
+def nice_table(rows, empty_msg: str = "データはまだありません。"):
+    """見やすいHTMLテーブルで表示(英語ツールバー無し・行間ゆったり・番号列なし)。
+    rows は list[dict] か DataFrame。表示用に整形済みの値を渡すこと。"""
+    import pandas as pd
+
+    df = rows if isinstance(rows, pd.DataFrame) else pd.DataFrame(rows)
+    if df is None or df.empty:
+        st.caption(empty_msg)
+        return
+    try:
+        st.table(df.style.hide(axis="index"))
+    except Exception:  # noqa: BLE001 - 古いpandas等の保険
+        st.table(df.reset_index(drop=True))
+
+
 def section_export(rows, filename: str, key: str):
     """一覧(rows: list[dict] か DataFrame)を CSV / Excel でダウンロード & 印刷できるボタン列を出す。
     経理提出用の出力を各セクションに分散させるための共通部品。"""
@@ -185,21 +233,18 @@ def section_export(rows, filename: str, key: str):
     df = rows if isinstance(rows, pd.DataFrame) else pd.DataFrame(rows)
     if df is None or df.empty:
         return
-    c1, c2, c3, _ = st.columns([1, 1, 1, 5])
-    csv = ("﻿" + df.to_csv(index=False)).encode("utf-8")
-    c1.download_button("⬇️ CSV", data=csv, file_name=f"{filename}.csv",
-                       mime="text/csv", key=f"{key}_csv", use_container_width=True)
+    c1, c2, _ = st.columns([1, 1, 6])
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
         df.to_excel(w, index=False, sheet_name="data")
-    c2.download_button(
-        "⬇️ Excel", data=buf.getvalue(), file_name=f"{filename}.xlsx",
+    c1.download_button(
+        "Excelで保存", data=buf.getvalue(), file_name=f"{filename}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key=f"{key}_xlsx", use_container_width=True)
-    with c3:
+    with c2:
         components.html(
             """<button onclick="window.parent.print()"
                 style="width:100%;padding:.5rem .6rem;border:1.5px solid #14a4dc;border-radius:10px;
                        background:#fff;color:#0f87b8;font-weight:700;cursor:pointer;
-                       font-family:'Noto Sans JP',sans-serif;">🖨️ 印刷</button>""",
+                       font-family:'Noto Sans JP',sans-serif;">印刷する</button>""",
             height=46)

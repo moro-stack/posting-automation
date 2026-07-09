@@ -6,10 +6,10 @@ import streamlit as st
 from common import invoice_excel
 from common import posting_logic
 from common import posting_store as store
-from common.ui import apply_app_style, section_export
+from common.ui import apply_app_style, section_export, nice_table
 
 apply_app_style()
-st.title("📄 業務委託/報告書兼請求書作成")
+st.title("業務委託／報告書兼請求書の作成")
 
 dists = {d["name"]: d["id"] for d in store.list_distributors(only_active=True)}
 projs = {p["name"]: p["id"] for p in store.list_projects(only_active=True)}
@@ -58,8 +58,7 @@ if lines:
         "単価": f'¥{posting_logic.fmt_num(l["unit_price"])}',
         "合計": f'¥{posting_logic.fmt_num(l["amount"])}',
     } for l in lines]
-    st.dataframe(preview, use_container_width=True, hide_index=True,
-                 column_order=["案件", "種別", "数量", "単価", "合計"])
+    nice_table(preview)
 
     m1, m2 = st.columns(2)
     m1.metric("ご請求金額(税込)", f"¥{posting_logic.fmt_num(posting_logic.invoice_total(lines))}")
@@ -99,10 +98,11 @@ if invoices:
         total = posting_logic.invoice_total(detail["lines"])
         name = id2name.get(inv["distributor_id"], "?")
         summary[name] = summary.get(name, 0) + total
-        rows.append({"ID": inv["id"], "配布員": name, "発行日": inv["issue_date"],
-                     "期間": f'{inv["period_from"]}〜{inv["period_to"]}', "請求額": total})
-    st.dataframe(rows, use_container_width=True, hide_index=True)
+        rows.append({"配布員": name, "発行日": inv["issue_date"],
+                     "配布業務期間": f'{inv["period_from"]}〜{inv["period_to"]}',
+                     "請求額": f"¥{posting_logic.fmt_num(total)}"})
+    nice_table(rows, "登録済みの請求はまだありません。")
     section_export(rows, "業務委託費一覧", key="contract")
     st.markdown("**配布員別 報酬合計**")
-    st.dataframe([{"配布員": k, "報酬合計": v} for k, v in summary.items()],
-                 use_container_width=True, hide_index=True)
+    nice_table([{"配布員": k, "報酬合計": f"¥{posting_logic.fmt_num(v)}"}
+                for k, v in summary.items()])
