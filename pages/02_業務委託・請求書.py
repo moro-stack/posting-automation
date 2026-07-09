@@ -24,30 +24,47 @@ issue = c1.date_input("発行日", value=_date.today())
 pfrom = c2.date_input("配布業務期間(開始)")
 pto = c3.date_input("配布業務期間(終了)")
 
-st.markdown("**明細**（案件・報告数・単価・備考）")
+st.markdown("**明細**（案件・種別・数量・単価）｜数量と単価は小数点も入力できます")
 editor = st.data_editor(
-    pd.DataFrame([{"案件": "", "報告数": 0, "単価": 0, "備考": "配布"}]),
+    pd.DataFrame([{"案件": "", "種別": "配布", "数量": 0.0, "単価": 0.0}]),
     num_rows="dynamic",
     column_config={
         "案件": st.column_config.SelectboxColumn(options=list(projs.keys())),
-        "備考": st.column_config.SelectboxColumn(
+        "種別": st.column_config.SelectboxColumn(
             options=["配布", "挟み込み", "交通費", "手当", "その他"]),
+        "数量": st.column_config.NumberColumn(min_value=0.0, step=0.5, format="%g"),
+        "単価": st.column_config.NumberColumn(min_value=0.0, step=0.5, format="%g"),
     },
+    column_order=["案件", "種別", "数量", "単価"],
     use_container_width=True, key="line_editor")
 
 lines = []
 for _, row in editor.iterrows():
     if not row["案件"] or pd.isna(row["案件"]):
         continue
-    qty = int(row["報告数"]) if pd.notna(row["報告数"]) else 0
-    price = int(row["単価"]) if pd.notna(row["単価"]) else 0
+    qty = posting_logic._num(row["数量"]) if pd.notna(row["数量"]) else 0
+    price = posting_logic._num(row["単価"]) if pd.notna(row["単価"]) else 0
+    remark = row["種別"] if pd.notna(row["種別"]) else "配布"
     lines.append({"project_id": projs.get(row["案件"]), "project_name": row["案件"],
                   "report_qty": qty, "unit_price": price, "amount": qty * price,
-                  "remark": row["備考"]})
+                  "remark": remark})
 
 if lines:
-    st.metric("ご請求金額(税込)", f"¥{posting_logic.invoice_total(lines):,}")
-    st.metric("配布部数(配布+挟み込み)", f"{posting_logic.delivered_copies(lines):,} 部")
+    st.markdown("**明細（確認）**")
+    preview = [{
+        "案件": l["project_name"],
+        "種別": l["remark"],
+        "数量": f'{posting_logic.fmt_num(l["report_qty"])} {posting_logic.unit_for(l["remark"])}',
+        "単価": f'¥{posting_logic.fmt_num(l["unit_price"])}',
+        "合計": f'¥{posting_logic.fmt_num(l["amount"])}',
+    } for l in lines]
+    st.dataframe(preview, use_container_width=True, hide_index=True,
+                 column_order=["案件", "種別", "数量", "単価", "合計"])
+
+    m1, m2 = st.columns(2)
+    m1.metric("ご請求金額(税込)", f"¥{posting_logic.fmt_num(posting_logic.invoice_total(lines))}")
+    m2.metric("配布部数(配布+挟み込み)",
+              f"{posting_logic.fmt_num(posting_logic.delivered_copies(lines))} 部")
 
 col_save, col_dl = st.columns(2)
 if col_save.button("この請求を登録", type="primary", disabled=not lines):
@@ -65,9 +82,10 @@ if lines:
             distributor_name=dist_name,
             issue_date=str(issue), period_from=str(pfrom), period_to=str(pto), lines=lines)
         col_dl.download_button(
-            "完了報告書兼請求書をダウンロード", data=xlsx,
+            "⬇️ 完了報告書兼請求書をExcelでダウンロード", data=xlsx,
             file_name=f"業務完了報告書兼請求書_{dist_name}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_invoice")
 
 st.divider()
 st.subheader("登録済みの請求 / 配布員別報酬")

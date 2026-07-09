@@ -5,6 +5,26 @@ from datetime import date, datetime, timedelta
 _DELIVERY_REMARKS = ("配布", "挟み込み")
 
 
+def _num(value):
+    """None/空を0にしつつ、小数はそのまま保持する数値化。"""
+    if value is None or value == "":
+        return 0
+    return float(value)
+
+
+def unit_for(remark) -> str:
+    """種別に応じた数量の単位。配布・挟み込みは『枚』、それ以外は『一式』。"""
+    return "枚" if remark in _DELIVERY_REMARKS else "一式"
+
+
+def fmt_num(value) -> str:
+    """数値を3桁区切りで整形。小数は末尾の0を落とす(3713.0→3,713、3.5→3.5)。"""
+    f = float(value or 0)
+    if f == int(f):
+        return f"{int(f):,}"
+    return f"{f:,.2f}".rstrip("0").rstrip(".")
+
+
 def _today(today):
     if today is None:
         return date.today()
@@ -52,17 +72,17 @@ def filter_rows_by_period(rows, key, lo, hi):
     return [r for r in rows if in_period(r.get(key), lo, hi)]
 
 
-def delivered_copies(lines) -> int:
-    return sum(int(l.get("report_qty") or 0)
+def delivered_copies(lines):
+    return sum(_num(l.get("report_qty"))
                for l in lines if l.get("remark") in _DELIVERY_REMARKS)
 
 
-def invoice_total(lines) -> int:
-    return sum(int(l.get("amount") or 0) for l in lines)
+def invoice_total(lines):
+    return sum(_num(l.get("amount")) for l in lines)
 
 
-def _sum_for_project(rows, project_id) -> int:
-    return sum(int(r.get("amount") or 0) for r in rows
+def _sum_for_project(rows, project_id):
+    return sum(_num(r.get("amount")) for r in rows
                if r.get("project_id") == project_id)
 
 
@@ -75,5 +95,5 @@ def aggregate_issue(project_id, *, petty, payables, contract_lines, manual) -> d
             "total": p + pay + con + man}
 
 
-def issue_balance(cost_total, receivable_total) -> int:
-    return int(receivable_total) - int(cost_total)
+def issue_balance(cost_total, receivable_total):
+    return _num(receivable_total) - _num(cost_total)

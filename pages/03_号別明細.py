@@ -67,18 +67,19 @@ agg = posting_logic.aggregate_issue(
     pid, petty=petty, payables=payables, contract_lines=contract_lines, manual=manual)
 
 # 内訳は2列×2行にして金額が切れないようにする
+_yen = lambda v: f"¥{posting_logic.fmt_num(v)}"
 r1c1, r1c2 = st.columns(2)
-r1c1.metric("小口", f"¥{agg['petty']:,}")
-r1c2.metric("買掛", f"¥{agg['payables']:,}")
+r1c1.metric("小口", _yen(agg['petty']))
+r1c2.metric("買掛", _yen(agg['payables']))
 r2c1, r2c2 = st.columns(2)
-r2c1.metric("業務委託", f"¥{agg['contract']:,}")
-r2c2.metric("手入力", f"¥{agg['manual']:,}")
-st.metric("コスト合計", f"¥{agg['total']:,}")
+r2c1.metric("業務委託", _yen(agg['contract']))
+r2c2.metric("手入力", _yen(agg['manual']))
+st.metric("コスト合計", _yen(agg['total']))
 
-receivable_total = sum(int(r["amount"]) for r in receivables)
+receivable_total = sum(posting_logic._num(r["amount"]) for r in receivables)
 if receivable_total:
     bal = posting_logic.issue_balance(agg["total"], receivable_total)
-    st.metric("収支(売上−コスト)", f"¥{bal:,}", delta=f"売上 ¥{receivable_total:,}")
+    st.metric("収支(売上−コスト)", _yen(bal), delta=f"売上 {_yen(receivable_total)}")
 
 st.divider()
 st.subheader("内訳")

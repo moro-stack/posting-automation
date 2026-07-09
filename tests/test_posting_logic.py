@@ -78,6 +78,31 @@ def test_in_period_month_value_overlaps_range():
     assert L.in_period("2026-07", "2026-07-15", "2026-08-15") is True
 
 
+# ---- 単位・小数点・整形 ----
+def test_unit_for_delivery_is_mai_others_isshiki():
+    assert L.unit_for("配布") == "枚"
+    assert L.unit_for("挟み込み") == "枚"
+    assert L.unit_for("交通費") == "一式"
+    assert L.unit_for("手当") == "一式"
+    assert L.unit_for("その他") == "一式"
+
+
+def test_invoice_total_handles_decimals():
+    assert L.invoice_total([{"amount": 3.5}, {"amount": 2.25}]) == 5.75
+
+
+def test_delivered_copies_handles_decimals():
+    assert L.delivered_copies([{"report_qty": 3713.5, "remark": "配布"}]) == 3713.5
+
+
+def test_fmt_num_drops_trailing_zeros_and_adds_commas():
+    assert L.fmt_num(3713) == "3,713"
+    assert L.fmt_num(3713.0) == "3,713"
+    assert L.fmt_num(3.5) == "3.5"
+    assert L.fmt_num(1234.5) == "1,234.5"
+    assert L.fmt_num(1000000) == "1,000,000"
+
+
 def test_filter_rows_by_period():
     rows = [
         {"date": "2026-07-08", "amount": 100},

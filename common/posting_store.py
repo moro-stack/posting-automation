@@ -363,8 +363,8 @@ def add_contract_invoice(distributor_id, issue_date, period_from, period_to, lin
             (_int_or_none(distributor_id), issue_date, period_from, period_to, _now(now)))
         invoice_id = int(cur.lastrowid)
         for ln in lines:
-            qty = int(ln.get("report_qty") or 0)
-            price = int(ln.get("unit_price") or 0)
+            qty = float(ln.get("report_qty") or 0)
+            price = float(ln.get("unit_price") or 0)
             conn.execute(
                 "INSERT INTO contract_invoice_lines"
                 " (invoice_id, project_id, report_qty, unit_price, amount, remark)"

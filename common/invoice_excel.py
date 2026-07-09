@@ -25,19 +25,19 @@ def build_invoice_xlsx(*, distributor_name, issue_date, period_from, period_to, 
     _set(ws, "F3", issue_date)
     # 発行者(配布員)名は宛名の下(B8 但し欄)に併記
     _set(ws, "B8", f"但し：{distributor_name} 配布業務分")
-    _set(ws, "A7", f"ご請求金額　　　　{posting_logic.invoice_total(lines):,}　円（税込）")
+    _set(ws, "A7", f"ご請求金額　　　　{posting_logic.fmt_num(posting_logic.invoice_total(lines))}　円（税込）")
     _set(ws, "A10", f"配布業務期間　：　{period_from}　～　{period_to}")
 
     for i, ln in enumerate(lines[:_MAX_LINE_ROWS]):
         r = _FIRST_LINE_ROW + i
         _set(ws, f"B{r}", ln.get("project_name"))
-        _set(ws, f"D{r}", int(ln.get("report_qty") or 0))
-        _set(ws, f"E{r}", int(ln.get("unit_price") or 0))
-        _set(ws, f"F{r}", int(ln.get("amount") or 0))
+        _set(ws, f"D{r}", posting_logic._num(ln.get("report_qty")))
+        _set(ws, f"E{r}", posting_logic._num(ln.get("unit_price")))
+        _set(ws, f"F{r}", posting_logic._num(ln.get("amount")))
 
     # 配布部数(F20)= 配布/挟み込みの報告数合計。ラベルE20は「報告数」に寄せる
     _set(ws, "E20", "報告数")
-    _set(ws, "F20", f"{posting_logic.delivered_copies(lines):,}部")
+    _set(ws, "F20", f"{posting_logic.fmt_num(posting_logic.delivered_copies(lines))}部")
 
     buf = io.BytesIO()
     wb.save(buf)
