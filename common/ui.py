@@ -9,7 +9,7 @@ _STYLE = """
   --bg:#f5f8fb; --paper:#ffffff;
   --primary:#14a4dc; --primary-d:#0f87b8; --primary-soft:#e6f6fc;
   --ink:#1f2d3a; --muted:#67788a; --line:#e6ebf1; --icon:#8b98a6;
-  --side:#14273b; --side-hover:#1e3a54; --side-ink:#c6d3e0; --side-active:#eaf7fe;
+  --side:#2e3238; --side-hover:#3a3f47; --side-ink:#d6dae1; --side-active:#ffffff;
   --shadow:0 1px 2px rgba(20,40,60,.05), 0 6px 18px rgba(20,40,60,.05);
 }
 
@@ -62,7 +62,7 @@ h1,h2,h3,h4{ color:var(--ink); font-weight:700; }
 /* ===== サイドバー: 暗色ネイビー・幅狭め・水色アクセント ===== */
 [data-testid="stSidebar"]{
   background:var(--side); border-right:none;
-  width:212px !important; min-width:212px !important;
+  width:220px !important; min-width:220px !important;
 }
 [data-testid="stSidebar"] *{ color:var(--side-ink); }
 [data-testid="stSidebarNav"]{ padding-top:.5rem; }
@@ -70,7 +70,12 @@ h1,h2,h3,h4{ color:var(--ink); font-weight:700; }
   border-radius:9px; font-weight:600; margin:2px 8px; padding:.36rem .55rem;
   transition:all .12s ease;
 }
-[data-testid="stSidebarNav"] a p{ color:var(--side-ink) !important; font-size:.9rem; }
+/* ナビ名を省略(…)せず全部見せる */
+[data-testid="stSidebarNav"] a p{
+  color:var(--side-ink) !important; font-size:.88rem; line-height:1.25;
+  white-space:normal !important; overflow:visible !important; text-overflow:clip !important;
+}
+[data-testid="stSidebarNav"] a span{ overflow:visible !important; }
 [data-testid="stSidebarNav"] a:hover{ background:var(--side-hover); }
 [data-testid="stSidebarNav"] a:hover p{ color:#fff !important; }
 [data-testid="stSidebarNav"] a[aria-current="page"]{
