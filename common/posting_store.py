@@ -88,6 +88,9 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     pay_cols = {r[1] for r in conn.execute("PRAGMA table_info(payables)")}
     if "date" not in pay_cols:
         conn.execute("ALTER TABLE payables ADD COLUMN date TEXT")
+    # 取引先をAI読み取りの自由入力名で持たせる(マスタ非依存)。旧DBは自動でカラム追加。
+    if "vendor_name" not in pay_cols:
+        conn.execute("ALTER TABLE payables ADD COLUMN vendor_name TEXT")
     conn.commit()
 
 
@@ -299,16 +302,17 @@ def delete_petty_cash(row_id, *, db_path=None):
 
 
 # --- payables ---
-def add_payable(month, vendor_id, amount, *, date=None, original_status=None, note=None,
-                project_id=None, source="manual", db_path=None, now=None):
+def add_payable(month, vendor_id, amount, *, date=None, vendor_name=None,
+                original_status=None, note=None, project_id=None, source="manual",
+                db_path=None, now=None):
     # 請求書の日付(date)があれば月度(month)はそこから導出する(#12)
     if date and not month:
         month = str(date)[:7]
     return _add("payables",
-                ["month", "date", "vendor_id", "amount", "original_status", "note",
-                 "project_id", "source", "created_at"],
-                [month, date, _int_or_none(vendor_id), int(amount), original_status, note,
-                 _int_or_none(project_id), source, _now(now)], db_path)
+                ["month", "date", "vendor_id", "vendor_name", "amount", "original_status",
+                 "note", "project_id", "source", "created_at"],
+                [month, date, _int_or_none(vendor_id), vendor_name, int(amount),
+                 original_status, note, _int_or_none(project_id), source, _now(now)], db_path)
 
 
 def find_duplicate_petty(date, category_id, amount, *, db_path=None):
@@ -324,14 +328,21 @@ def find_duplicate_petty(date, category_id, amount, *, db_path=None):
         conn.close()
 
 
-def find_duplicate_payable(date, vendor_id, amount, *, db_path=None):
-    """同じ 請求書日付・取引先・金額 の買掛があれば返す(#11)。"""
+def find_duplicate_payable(date, vendor_id, amount, *, vendor_name=None, db_path=None):
+    """同じ 請求書日付・取引先・金額 の買掛があれば返す(#11)。
+    vendor_name を渡した場合は取引先名(自由入力)で突合、無ければ vendor_id で突合。"""
     conn = _connect(db_path)
     try:
-        rows = conn.execute(
-            "SELECT * FROM payables WHERE IFNULL(date,'')=IFNULL(?,'')"
-            " AND IFNULL(vendor_id,-1)=IFNULL(?,-1) AND amount=?",
-            (date, _int_or_none(vendor_id), int(amount))).fetchall()
+        if vendor_name is not None:
+            rows = conn.execute(
+                "SELECT * FROM payables WHERE IFNULL(date,'')=IFNULL(?,'')"
+                " AND IFNULL(vendor_name,'')=IFNULL(?,'') AND amount=?",
+                (date, vendor_name, int(amount))).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM payables WHERE IFNULL(date,'')=IFNULL(?,'')"
+                " AND IFNULL(vendor_id,-1)=IFNULL(?,-1) AND amount=?",
+                (date, _int_or_none(vendor_id), int(amount))).fetchall()
         return [dict(r) for r in rows]
     finally:
         conn.close()

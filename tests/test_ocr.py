@@ -42,6 +42,21 @@ def test_extract_invoice_parses_json():
     assert result["vendor"] == "関西電力株式会社" and result["amount"] == 16216
 
 
+def test_extract_invoice_parses_date_and_vendor():
+    fake = _FakeClient('{"vendor":"NTTドコモビジネス株式会社","amount":1848,'
+                       '"date":"2026-06-16","note":"通信費"}')
+    result = ocr.extract_invoice(b"x", client=fake)
+    assert result["vendor"] == "NTTドコモビジネス株式会社"
+    assert result["amount"] == 1848
+    assert result["date"] == "2026-06-16"
+
+
+def test_extract_invoice_missing_date_is_none():
+    fake = _FakeClient('{"vendor":"関西電力株式会社","amount":16216,"note":"電気"}')
+    result = ocr.extract_invoice(b"x", client=fake)
+    assert result["date"] is None
+
+
 def test_as_int_handles_float():
     assert ocr._as_int(1200.0) == 1200
 

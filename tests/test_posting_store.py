@@ -105,6 +105,26 @@ def test_find_duplicate_payable(tmp_path):
     assert not store.find_duplicate_payable("2026-07-10", 2, 999, db_path=db)
 
 
+def test_payable_stores_vendor_name_free_text(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    pid = store.add_payable(None, None, 1848, date="2026-06-16",
+                            vendor_name="NTTドコモビジネス株式会社", db_path=db, now="T")
+    row = [r for r in store.list_payables(db_path=db) if r["id"] == pid][0]
+    assert row["vendor_name"] == "NTTドコモビジネス株式会社"
+    assert row["vendor_id"] is None
+    assert row["month"] == "2026-06"   # 請求日から月度を導出
+
+
+def test_find_duplicate_payable_by_vendor_name(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    store.add_payable(None, None, 1848, date="2026-06-16",
+                      vendor_name="NTTドコモ", db_path=db, now="T")
+    assert store.find_duplicate_payable("2026-06-16", None, 1848,
+                                        vendor_name="NTTドコモ", db_path=db)
+    assert not store.find_duplicate_payable("2026-06-16", None, 1848,
+                                            vendor_name="別の会社", db_path=db)
+
+
 def test_find_duplicate_receivable(tmp_path):
     db = os.path.join(tmp_path, "t.db")
     store.add_receivable("2026-07", 1, 300000, db_path=db, now="T")

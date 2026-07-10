@@ -10,8 +10,11 @@ _RECEIPT_PROMPT = (
     "読み取れない項目は null。金額はカンマや円記号を除いた整数で。"
 )
 _INVOICE_PROMPT = (
-    "この画像は請求書です。請求元(会社名)・請求金額(税込)・内容を読み取り、"
-    'JSONのみを出力してください。形式: {"vendor":"会社名","amount":整数,"note":"内容"}。'
+    "この画像またはPDFは請求書です。請求元(会社名)・請求金額(税込)・請求日・内容を読み取り、"
+    'JSONのみを出力してください。'
+    '形式: {"vendor":"会社名","amount":整数,"date":"YYYY-MM-DD","note":"内容"}。'
+    "date は請求書の発行日(または請求日)を優先し YYYY-MM-DD 形式で。"
+    "日が特定できず年月しか分からない場合は YYYY-MM でよい。"
     "読み取れない項目は null。金額はカンマや円記号を除いた整数で。"
 )
 
@@ -63,4 +66,5 @@ def extract_invoice(image_bytes, media_type="image/jpeg", *, client=None) -> dic
     d = _parse_json(raw)
     return {"vendor": d.get("vendor") or None,
             "amount": _as_int(d.get("amount")),
+            "date": d.get("date") or None,
             "note": d.get("note") or None}
