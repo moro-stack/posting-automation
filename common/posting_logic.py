@@ -109,3 +109,11 @@ def payment_method(kind, row) -> str:
     if "振込" in status:
         return "振込"
     return "買掛"
+
+
+def cost_groups(agg) -> dict:
+    """aggregate_issue の結果を新レイアウトへ再編。
+    配布員代=業務委託+直接入力(manual)、雑費=小口+買掛、配布原価=両者の和(=total)。"""
+    labor = _num(agg.get("contract")) + _num(agg.get("manual"))
+    misc = _num(agg.get("petty")) + _num(agg.get("payables"))
+    return {"labor": labor, "misc": misc, "genka": labor + misc}

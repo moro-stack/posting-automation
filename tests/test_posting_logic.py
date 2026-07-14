@@ -124,3 +124,12 @@ def test_payment_method_payable_from_original_status():
     assert L.payment_method("payable", {"original_status": "振込用紙"}) == "振込"
     assert L.payment_method("payable", {"original_status": "原本あり"}) == "買掛"
     assert L.payment_method("payable", {}) == "買掛"
+
+
+def test_cost_groups_regroups_totals():
+    agg = {"petty": 1200, "payables": 183342, "contract": 11679, "manual": 8000,
+           "total": 1200 + 183342 + 11679 + 8000}
+    g = L.cost_groups(agg)
+    assert g["labor"] == 11679 + 8000       # 配布員代=業務委託+直接入力
+    assert g["misc"] == 1200 + 183342        # 雑費=小口+買掛
+    assert g["genka"] == agg["total"]        # 配布原価=総額(不変)
