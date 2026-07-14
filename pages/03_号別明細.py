@@ -45,17 +45,17 @@ if not sel:
     sel = names[0]
 pid = name2id[sel]
 st.markdown(
-    f'<div style="font-size:1.9rem;font-weight:800;color:#0f87b8;margin:.1rem 0 .5rem">📄 {sel}</div>',
+    f'<div style="font-size:1.9rem;font-weight:800;color:#0f87b8;margin:.1rem 0 .5rem">{sel}</div>',
     unsafe_allow_html=True)
 
 # ===== 期間指定（全期間/今月/今週/期間を指定=カレンダー） =====
 _PRESETS = {"全期間": "all", "今月": "month", "今週": "week"}
-period_label = st.pills("期間指定", list(_PRESETS.keys()) + ["📅 期間を指定"],
+period_label = st.pills("期間指定", list(_PRESETS.keys()) + ["期間を指定"],
                         selection_mode="single", default="全期間",
                         label_visibility="collapsed", key="period_pills")
 if not period_label:
     period_label = "全期間"
-if period_label == "📅 期間を指定":
+if period_label == "期間を指定":
     dr = st.date_input("期間（開始〜終了）",
                        value=(_date.today().replace(day=1), _date.today()),
                        format="YYYY/MM/DD")
@@ -136,7 +136,7 @@ _man_disp = [{"日付": r.get("work_date") or "（日付なし）",
               "作業": r.get("content") or "",
               "金額": _yen(r.get("amount"))} for r in manual]
 
-with st.expander(f"💪 配布員代の内訳（業務委託＋直接入力）　—　小計 {_yen(groups['labor'])}",
+with st.expander(f":material/groups: 配布員代の内訳（業務委託＋直接入力）　—　小計 {_yen(groups['labor'])}",
                  expanded=False):
     st.markdown("**業務委託（配布員別・報告書/請求書ページで計算）**")
     nice_table(_con_disp, "この号の業務委託はありません。")
@@ -204,7 +204,7 @@ for r in payables:
                   "支払方法": posting_logic.payment_method("payable", r),
                   "日付": r.get("date") or r.get("month") or ""})
 
-with st.expander(f"🧾 雑費の内訳（小口＋買掛）　—　小計 {_yen(groups['misc'])}",
+with st.expander(f":material/receipt_long: 雑費の内訳（小口＋買掛）　—　小計 {_yen(groups['misc'])}",
                  expanded=False):
     st.caption(f"雑費 ＝ 小口 {_yen(petty_total)} ＋ 買掛 {_yen(pay_total)}")
     nice_table(_misc, "この号の雑費（小口・買掛）はありません。")
@@ -226,7 +226,7 @@ with pd.ExcelWriter(_buf, engine="openpyxl") as writer:
                   {"項目": "雑費", "金額": groups["misc"]},
                   {"項目": "配布原価(税込)", "金額": groups["genka"]}]).to_excel(
         writer, index=False, sheet_name="合計")
-st.download_button("⬇️ 号原価まとめをExcelで保存", data=_buf.getvalue(),
+st.download_button("号原価まとめをExcelで保存", data=_buf.getvalue(),
                    file_name=f"号原価まとめ_{sel}.xlsx",
                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                   key="dl_genka")
+                   icon=":material/download:", key="dl_genka")
