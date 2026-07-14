@@ -123,7 +123,8 @@ with st.form("add_labor", clear_on_submit=True):
 
 if manual:
     st.caption("入力済みの直接入力を修正・削除")
-    opt = {f'{(r.get("work_date") or "日付なし")}｜{r.get("content") or ""}｜{_yen(r.get("amount"))}': r
+    # 行idをラベルに含めて一意化（同一日付・作業・金額の行が複数あっても取り違えない）
+    opt = {f'{(r.get("work_date") or "日付なし")}｜{r.get("content") or ""}｜{_yen(r.get("amount"))}｜No.{r.get("id")}': r
            for r in manual}
     pick = st.selectbox("対象の行", list(opt.keys()), key="edit_pick")
     target = opt[pick]
