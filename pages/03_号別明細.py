@@ -132,10 +132,13 @@ if manual:
         e1, e2, e3 = st.columns([1, 2, 1])
         cur_date = (_datetime.strptime(target["work_date"][:10], "%Y-%m-%d").date()
                     if target.get("work_date") else _date.today())
-        ew = e1.date_input("日付", value=cur_date, key="edit_date")
-        ework = e2.text_input("作業", value=target.get("content") or "", key="edit_work")
+        # key は行idごとに変える。固定keyだと session_state が保持され、対象行を
+        # 切り替えても前の行の値が残り、更新時に別の行へ誤って書き込む(Streamlit仕様)。
+        _rid = target["id"]
+        ew = e1.date_input("日付", value=cur_date, key=f"edit_date_{_rid}")
+        ework = e2.text_input("作業", value=target.get("content") or "", key=f"edit_work_{_rid}")
         eamt = e3.number_input("金額", min_value=0, step=1,
-                               value=int(target.get("amount") or 0), key="edit_amt")
+                               value=int(target.get("amount") or 0), key=f"edit_amt_{_rid}")
         u1, u2, _ = st.columns([1, 1, 4])
         if u1.form_submit_button("更新") and eamt > 0:
             store.update_issue_manual_cost(target["id"], work_date=str(ew),
