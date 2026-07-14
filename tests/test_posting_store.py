@@ -178,3 +178,41 @@ def test_delete_contract_invoice_removes_lines(tmp_path):
     finally:
         conn.close()
     assert cnt == 0
+
+
+def test_issue_manual_cost_work_date_add_and_ordering(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    pid = store.add_project("6/26号", db_path=db)
+    a = store.add_issue_manual_cost(pid, "配布", 104700, work_date="2026-06-22", db_path=db)
+    b = store.add_issue_manual_cost(pid, "挟みこみ", 32250, work_date="2026-06-23", db_path=db)
+    c = store.add_issue_manual_cost(pid, "日付なし", 8000, db_path=db)
+    rows = store.list_issue_manual_costs(project_id=pid, db_path=db)
+    assert [r["id"] for r in rows] == [a, b, c]           # 日付あり昇順→None末尾
+    assert rows[0]["work_date"] == "2026-06-22"
+    assert rows[2]["work_date"] is None
+
+
+def test_issue_manual_cost_update_and_delete(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    pid = store.add_project("号", db_path=db)
+    rid = store.add_issue_manual_cost(pid, "配布", 100, work_date="2026-06-01", db_path=db)
+    store.update_issue_manual_cost(rid, work_date="2026-06-22", content="丁合・配布",
+                                   amount=136950, db_path=db)
+    row = [r for r in store.list_issue_manual_costs(project_id=pid, db_path=db) if r["id"] == rid][0]
+    assert row["work_date"] == "2026-06-22" and row["content"] == "丁合・配布" and row["amount"] == 136950
+    store.delete_issue_manual_cost(rid, db_path=db)
+    assert all(r["id"] != rid for r in store.list_issue_manual_costs(project_id=pid, db_path=db))
+
+
+def test_issue_manual_cost_migrates_old_db(tmp_path):
+    import sqlite3
+    db = os.path.join(tmp_path, "t.db")
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE issue_manual_costs (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                 " project_id INTEGER, content TEXT, amount INTEGER NOT NULL, created_at TEXT NOT NULL)")
+    conn.execute("INSERT INTO issue_manual_costs (project_id, content, amount, created_at)"
+                 " VALUES (1, '旧行', 5000, '2026-06-01T00:00:00')")
+    conn.commit()
+    conn.close()
+    rows = store.list_issue_manual_costs(project_id=1, db_path=db)  # 接続時に自動ALTER
+    assert rows and rows[0]["content"] == "旧行" and rows[0]["work_date"] is None

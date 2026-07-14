@@ -91,6 +91,10 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     # 取引先をAI読み取りの自由入力名で持たせる(マスタ非依存)。旧DBは自動でカラム追加。
     if "vendor_name" not in pay_cols:
         conn.execute("ALTER TABLE payables ADD COLUMN vendor_name TEXT")
+    # 号別明細の手入力コストに配布作業日を持たせる。旧DBは自動でカラム追加。
+    imc_cols = {r[1] for r in conn.execute("PRAGMA table_info(issue_manual_costs)")}
+    if "work_date" not in imc_cols:
+        conn.execute("ALTER TABLE issue_manual_costs ADD COLUMN work_date TEXT")
     conn.commit()
 
 
@@ -472,20 +476,33 @@ def delete_contract_invoice(invoice_id, *, db_path=None):
 
 
 # --- issue_manual_costs ---
-def add_issue_manual_cost(project_id, content, amount, *, db_path=None, now=None):
-    return _add("issue_manual_costs", ["project_id", "content", "amount", "created_at"],
-                [_int_or_none(project_id), content, int(amount), _now(now)], db_path)
+def add_issue_manual_cost(project_id, content, amount, *, work_date=None, db_path=None, now=None):
+    return _add("issue_manual_costs",
+                ["project_id", "content", "amount", "work_date", "created_at"],
+                [_int_or_none(project_id), content, int(amount), work_date or None, _now(now)],
+                db_path)
 
 
 def list_issue_manual_costs(*, project_id=None, db_path=None):
     conn = _connect(db_path)
     try:
+        order = "ORDER BY work_date IS NULL, work_date, id"
         if project_id is None:
-            rows = conn.execute("SELECT * FROM issue_manual_costs ORDER BY id DESC").fetchall()
+            rows = conn.execute(f"SELECT * FROM issue_manual_costs {order}").fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM issue_manual_costs WHERE project_id=? ORDER BY id DESC",
+                f"SELECT * FROM issue_manual_costs WHERE project_id=? {order}",
                 (int(project_id),)).fetchall()
         return [dict(r) for r in rows]
     finally:
         conn.close()
+
+
+def update_issue_manual_cost(row_id, *, work_date=_UNSET, content=_UNSET, amount=_UNSET, db_path=None):
+    fields = {"work_date": work_date, "content": content,
+              "amount": (int(amount) if amount is not _UNSET else _UNSET)}
+    _update("issue_manual_costs", row_id, fields, db_path)
+
+
+def delete_issue_manual_cost(row_id, *, db_path=None):
+    _delete("issue_manual_costs", row_id, db_path)
