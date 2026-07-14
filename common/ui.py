@@ -88,7 +88,8 @@ h1,h2,h3,h4{ color:var(--ink); font-weight:700; }
 [data-testid="stSidebarNav"] a[aria-current="page"] p{ color:var(--side-active) !important; }
 [data-testid="stSidebarNav"] span[data-testid="stIconMaterial"]{ color:#8fa6bd !important; }
 [data-testid="stSidebarNav"] a[aria-current="page"] span[data-testid="stIconMaterial"]{ color:var(--primary) !important; }
-[data-testid="stSidebarCollapseButton"] *, [data-testid="stSidebarCollapsedControl"] *{ color:var(--side-ink) !important; }
+/* サイドバー内(暗色)のたたむボタンは明色 */
+[data-testid="stSidebarCollapseButton"] *{ color:var(--side-ink) !important; }
 
 /* ボタン: 水色フィル(登録・送信) */
 .stButton>button, [data-testid="stFormSubmitButton"]>button{
@@ -165,6 +166,18 @@ button[data-testid="stBaseButton-pillsActive"] p{ color:#fff !important; }
 /* 右上のDeploy等ツールバー、表ホバー時の英語ツールバー、入力欄下の英語ヒントを隠す */
 [data-testid="stToolbar"], [data-testid="stAppDeployButton"]{ display:none !important; }
 [data-testid="stElementToolbar"], [data-testid="stElementToolbarButton"]{ display:none !important; }
+/* サイドバーを畳んだ時の「展開」ボタンはツールバー内にあるため、ツールバー非表示だと
+   一緒に消えてしまう。展開ボタンがある時だけツールバーを出し、白丸ボタンで必ず見えるように。 */
+[data-testid="stToolbar"]:has([data-testid="stExpandSidebarButton"]){
+  display:flex !important; background:transparent !important; z-index:1000;
+}
+[data-testid="stExpandSidebarButton"]{ display:flex !important; }
+[data-testid="stExpandSidebarButton"] button{
+  background:#fff !important; border:1px solid var(--line) !important; border-radius:10px !important;
+  box-shadow:var(--shadow);
+}
+[data-testid="stExpandSidebarButton"] button:hover{ background:var(--primary-soft) !important; }
+[data-testid="stExpandSidebarButton"] *{ color:var(--primary-d) !important; }
 [data-testid="InputInstructions"]{ display:none !important; }
 
 /* ファイルアップローダーを日本語化 */
