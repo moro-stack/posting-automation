@@ -113,3 +113,14 @@ def test_filter_rows_by_period():
     assert got == [{"date": "2026-07-08", "amount": 100}]
     # 全期間は全件(None日付も含む)
     assert L.filter_rows_by_period(rows, "date", None, None) == rows
+
+
+def test_payment_method_petty_is_cash():
+    assert L.payment_method("petty", {}) == "現金"
+
+
+def test_payment_method_payable_from_original_status():
+    assert L.payment_method("payable", {"original_status": "クレジット"}) == "クレジット"
+    assert L.payment_method("payable", {"original_status": "振込用紙"}) == "振込"
+    assert L.payment_method("payable", {"original_status": "原本あり"}) == "買掛"
+    assert L.payment_method("payable", {}) == "買掛"

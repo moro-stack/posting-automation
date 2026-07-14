@@ -97,3 +97,15 @@ def aggregate_issue(project_id, *, petty, payables, contract_lines, manual) -> d
 
 def issue_balance(cost_total, receivable_total):
     return _num(receivable_total) - _num(cost_total)
+
+
+def payment_method(kind, row) -> str:
+    """雑費の支払方法ラベル。kind: 'petty'(小口=現金) / 'payable'(買掛=原本区分から判定)。"""
+    if kind == "petty":
+        return "現金"
+    status = str((row or {}).get("original_status") or "")
+    if "クレジット" in status:
+        return "クレジット"
+    if "振込" in status:
+        return "振込"
+    return "買掛"
