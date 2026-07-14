@@ -160,6 +160,11 @@ button[data-testid="stBaseButton-pillsActive"] p{ color:#fff !important; }
 [data-testid="stAlert"]{ border-radius:12px; border:1px solid var(--line); }
 [data-testid="stExpander"]{ border:1px solid var(--line); border-radius:12px; background:#fff; }
 [data-testid="stExpander"] summary:hover{ color:var(--primary-d); }
+/* 内訳(配布員代/雑費)の見出しを太く・見やすく */
+[data-testid="stExpander"] summary{ font-weight:700 !important; }
+[data-testid="stExpander"] summary p, [data-testid="stExpander"] summary span{
+  font-weight:700 !important; font-size:1.0rem; color:var(--ink);
+}
 [data-testid="stCaptionContainer"]{ color:var(--muted); }
 
 /* ===== 英語を減らす・実務的に整える ===== */
@@ -179,6 +184,9 @@ button[data-testid="stBaseButton-pillsActive"] p{ color:#fff !important; }
 [data-testid="stExpandSidebarButton"] button:hover{ background:var(--primary-soft) !important; }
 [data-testid="stExpandSidebarButton"] *{ color:var(--primary-d) !important; }
 [data-testid="InputInstructions"]{ display:none !important; }
+/* 日付レンジのカレンダーに出る英語のクイック選択(Choose a date range/None)を隠す(preset pillsで代替) */
+div[data-baseweb="popover"]:has([data-baseweb="calendar"]) [data-baseweb="select"],
+div[data-baseweb="popover"]:has([data-baseweb="calendar"]) label{ display:none !important; }
 
 /* ファイルアップローダーを日本語化 */
 [data-testid="stFileUploaderDropzoneInstructions"]{ display:none !important; }
