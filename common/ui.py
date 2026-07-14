@@ -174,9 +174,11 @@ button[data-testid="stBaseButton-pillsActive"] p{ color:#fff !important; }
   content:"ここにファイルをドラッグ、または右のボタンで選択（画像・PDF）";
   color:var(--muted); font-size:.9rem; padding-left:.7rem;
 }
-[data-testid="stFileUploaderDropzone"] button,
-[data-testid="stFileUploaderDropzone"] button *{ font-size:0 !important; }
-[data-testid="stFileUploaderDropzone"] button::after{
+/* 「Browse files」ボタンだけ日本語化。×(削除)・＋(追加)ボタンには効かせない
+   (以前は dropzone 内の全 button を対象にしていたため、ファイル選択後に出る
+    削除(×)・追加(＋)ボタンのアイコンが消え「ファイルを選ぶ」に化けていた) */
+[data-testid="stFileUploaderDropzone"] button[data-testid="stBaseButton-secondary"] > *{ display:none !important; }
+[data-testid="stFileUploaderDropzone"] button[data-testid="stBaseButton-secondary"]::after{
   content:"ファイルを選ぶ"; font-size:.9rem !important; font-weight:700;
 }
 
