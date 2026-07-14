@@ -48,26 +48,24 @@ st.markdown(
     f'<div style="font-size:1.9rem;font-weight:800;color:#0f87b8;margin:.1rem 0 .5rem">{sel}</div>',
     unsafe_allow_html=True)
 
-# ===== 期間指定（全期間/今月/今週/期間を指定=カレンダー） =====
+# ===== 期間指定：プリセット + 「期間を指定」(クリックで直接カレンダーが開く) =====
 _PRESETS = {"全期間": "all", "今月": "month", "今週": "week"}
-period_label = st.pills("期間指定", list(_PRESETS.keys()) + ["期間を指定"],
-                        selection_mode="single", default="全期間",
-                        label_visibility="collapsed", key="period_pills")
-if not period_label:
-    period_label = "全期間"
-if period_label == "期間を指定":
-    dr = st.date_input("期間（開始〜終了）",
-                       value=(_date.today().replace(day=1), _date.today()),
-                       format="YYYY/MM/DD")
-    if isinstance(dr, (list, tuple)):
-        lo = str(dr[0]) if len(dr) >= 1 else None
-        hi = str(dr[1]) if len(dr) >= 2 else lo
-    else:
-        lo = hi = str(dr)
+pc1, pc2 = st.columns([1.2, 1])
+with pc1:
+    preset = st.pills("期間指定", list(_PRESETS.keys()), selection_mode="single",
+                      default="全期間", label_visibility="collapsed", key="period_pills")
+    if not preset:
+        preset = "全期間"
+with pc2:
+    # 空(未指定)で開始。フィールドをクリックすると直接カレンダーが開く。範囲を選ぶと下記で優先採用。
+    custom = st.date_input(":material/calendar_month: 期間を指定（クリックでカレンダー）",
+                           value=(), format="YYYY/MM/DD", key="period_custom")
+if isinstance(custom, (list, tuple)) and len(custom) == 2:
+    lo, hi = str(custom[0]), str(custom[1])
 else:
-    lo, hi = posting_logic.period_range(_PRESETS[period_label])
+    lo, hi = posting_logic.period_range(_PRESETS[preset])
 period_note = "全期間" if (lo is None and hi is None) else f"{lo} 〜 {hi}"
-st.caption(f"表示期間: {period_note}")
+st.caption(f"表示期間: {period_note}　（期間を指定するとプリセットより優先。× で解除）")
 
 # ===== コストを集める =====
 petty = posting_logic.filter_rows_by_period(
