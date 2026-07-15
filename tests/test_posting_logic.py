@@ -87,6 +87,21 @@ def test_unit_for_delivery_is_mai_others_isshiki():
     assert L.unit_for("その他") == "一式"
 
 
+def test_qty_label_shows_count_only_for_delivery():
+    """配布・挟み込みは『数量＋枚』。数を数えないものは『一式』だけ(「1 一式」にしない)。"""
+    assert L.qty_label(3713, "配布") == "3,713 枚"
+    assert L.qty_label(300, "挟み込み") == "300 枚"
+    assert L.qty_label(1, "交通費") == "一式"
+    assert L.qty_label(1, "手当") == "一式"
+    assert L.qty_label(1, "その他") == "一式"
+
+
+def test_qty_label_isshiki_ignores_quantity():
+    """一式ものは数量が1以外でも『一式』のみ。"""
+    assert L.qty_label(2, "交通費") == "一式"
+    assert L.qty_label(0, "手当") == "一式"
+
+
 def test_invoice_total_handles_decimals():
     assert L.invoice_total([{"amount": 3.5}, {"amount": 2.25}]) == 5.75
 

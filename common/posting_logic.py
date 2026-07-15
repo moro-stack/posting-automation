@@ -12,9 +12,22 @@ def _num(value):
     return float(value)
 
 
+def is_delivery(remark) -> bool:
+    """部数を数える種別(配布・挟み込み)か。交通費・手当・その他は数えないので False。"""
+    return remark in _DELIVERY_REMARKS
+
+
 def unit_for(remark) -> str:
     """種別に応じた数量の単位。配布・挟み込みは『枚』、それ以外は『一式』。"""
-    return "枚" if remark in _DELIVERY_REMARKS else "一式"
+    return "枚" if is_delivery(remark) else "一式"
+
+
+def qty_label(qty, remark) -> str:
+    """明細の数量表示。配布・挟み込みは『3,713 枚』。
+    交通費・手当・その他は数を数えないので『一式』だけを出す(「1 一式」とは出さない)。"""
+    if is_delivery(remark):
+        return f"{fmt_num(qty)} {unit_for(remark)}"
+    return unit_for(remark)
 
 
 def fmt_num(value) -> str:
