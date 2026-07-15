@@ -5,6 +5,41 @@ from io import BytesIO
 import pandas as pd
 
 
+# ===== xlsx の出力を「同じ内容なら同じバイト列」に揃える =====
+# xlsx は ZIP で、openpyxl/pandas は保存のたびに「今の時刻」を
+#   ・docProps/core.xml の作成/更新日時
+#   ・ZIP内の各エントリのタイムスタンプ
+# に書き込む。そのため同じ内容でも保存のたびにバイト列が変わる。
+# Streamlit のダウンロードURL(/media/<hash>.xlsx)はファイル内容のハッシュで決まるため、
+# バイト列が毎回変わると再実行のたびに別URLが発行され、ブラウザが取得しようとしている
+# 古いURLがサーバー側から破棄されて404になる(＝「Excelがダウンロードされない」)。
+# 時刻を固定して内容を安定させ、URLが変わらないようにする。
+_ZIP_DATE = (1980, 1, 1, 0, 0, 0)   # ZIPが表現できる最小の日時
+_CORE_XML = "docProps/core.xml"
+_DCTERMS_RE = re.compile(
+    rb"(<dcterms:(?:created|modified)[^>]*>)[^<]*(</dcterms:(?:created|modified)>)")
+_FIXED_STAMP = b"2020-01-01T00:00:00Z"
+
+
+def freeze_xlsx_bytes(data: bytes) -> bytes:
+    """xlsx(ZIP)内のタイムスタンプと更新日時を固定値に揃えて詰め直す。
+    セルの値・書式は一切変えない。同じ内容なら毎回同じバイト列になる。"""
+    src = zipfile.ZipFile(BytesIO(data))
+    out = BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+        for info in src.infolist():
+            content = src.read(info.filename)
+            if info.filename == _CORE_XML:
+                content = _DCTERMS_RE.sub(rb"\g<1>" + _FIXED_STAMP + rb"\g<2>", content)
+            frozen = zipfile.ZipInfo(info.filename, date_time=_ZIP_DATE)
+            frozen.compress_type = zipfile.ZIP_DEFLATED
+            frozen.external_attr = info.external_attr
+            frozen.internal_attr = info.internal_attr
+            frozen.create_system = info.create_system
+            dst.writestr(frozen, content)
+    return out.getvalue()
+
+
 # テンプレに同梱されている円グラフ一式(描画+グラフ本体+リレーション)
 _CHART_PARTS = (
     "xl/drawings/drawing1.xml",
