@@ -9,7 +9,7 @@ from common import posting_store as store
 from common.ui import apply_app_style, section_export, nice_table
 
 apply_app_style()
-st.title("業務委託／報告書兼請求書の作成")
+st.title("業務委託登録")
 
 dists = {d["name"]: d["id"] for d in store.list_distributors(only_active=True)}
 projs = {p["name"]: p["id"] for p in store.list_projects(only_active=True)}
@@ -54,7 +54,7 @@ if lines:
     preview = [{
         "案件": l["project_name"],
         "種別": l["remark"],
-        "数量": f'{posting_logic.fmt_num(l["report_qty"])} {posting_logic.unit_for(l["remark"])}',
+        "数量": posting_logic.qty_label(l["report_qty"], l["remark"]),
         "単価": f'¥{posting_logic.fmt_num(l["unit_price"])}',
         "合計": f'¥{posting_logic.fmt_num(l["amount"])}',
     } for l in lines]
@@ -81,10 +81,10 @@ if lines:
             distributor_name=dist_name,
             issue_date=str(issue), period_from=str(pfrom), period_to=str(pto), lines=lines)
         col_dl.download_button(
-            "⬇️ 完了報告書兼請求書をExcelでダウンロード", data=xlsx,
+            "報告書兼請求書をExcelでダウンロード", data=xlsx,
             file_name=f"業務完了報告書兼請求書_{dist_name}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="dl_invoice")
+            icon=":material/download:", key="dl_invoice")
 
 st.divider()
 st.subheader("登録済みの請求 / 配布員別報酬")
@@ -103,6 +103,36 @@ if invoices:
                      "請求額": f"¥{posting_logic.fmt_num(total)}"})
     nice_table(rows, "登録済みの請求はまだありません。")
     section_export(rows, "業務委託費一覧", key="contract")
+
+    # 登録済みの請求から、報告書兼請求書をいつでも出し直せるようにする
+    st.markdown("**登録済みの請求から 業務完了報告書兼請求書 を出力**")
+    id2proj = {p["id"]: p["name"] for p in store.list_projects()}
+    picks = {}
+    for inv in invoices:
+        name = id2name.get(inv["distributor_id"], "?")
+        picks[f'No.{inv["id"]}｜{name}｜発行 {inv["issue_date"]}'
+              f'｜{inv["period_from"]}〜{inv["period_to"]}'] = inv
+    pick = st.selectbox("対象の請求", list(picks.keys()), key="inv_pick")
+    target = picks[pick]
+    detail = store.get_contract_invoice(target["id"])
+    out_lines = [{"project_name": id2proj.get(l.get("project_id"), ""),
+                  "report_qty": l.get("report_qty"), "unit_price": l.get("unit_price"),
+                  "amount": l.get("amount"), "remark": l.get("remark")}
+                 for l in detail["lines"]]
+    target_name = id2name.get(target["distributor_id"], "")
+    if len(out_lines) > 6:
+        st.warning("この請求は明細が6行を超えるため、テンプレートに収まりません。案件ごとに集約してください。")
+    else:
+        st.download_button(
+            "報告書兼請求書をExcelでダウンロード",
+            data=invoice_excel.build_invoice_xlsx(
+                distributor_name=target_name, issue_date=target["issue_date"],
+                period_from=target["period_from"], period_to=target["period_to"],
+                lines=out_lines),
+            file_name=f'業務完了報告書兼請求書_{target_name}_{target["issue_date"]}.xlsx',
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            icon=":material/download:", key="dl_saved_invoice")
+
     st.markdown("**配布員別 報酬合計**")
     nice_table([{"配布員": k, "報酬合計": f"¥{posting_logic.fmt_num(v)}"}
                 for k, v in summary.items()])
