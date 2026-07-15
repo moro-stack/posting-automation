@@ -188,6 +188,47 @@ button[data-testid="stBaseButton-pillsActive"] p{ color:#fff !important; }
 div[data-baseweb="popover"]:has([data-baseweb="calendar"]) [data-baseweb="select"],
 div[data-baseweb="popover"]:has([data-baseweb="calendar"]) label{ display:none !important; }
 
+/* カレンダーの曜日ヘッダを日本語に。元の英語(Su/Mo/Tu/We/Th/Fr/Sa)はfont-size:0で消し、
+   CSSのcontentで日月火…を出す。CSS生成文字はブラウザの自動翻訳の対象外なので、
+   万一翻訳が効いても「スーモートゥ私たちはフロリーサ」に化けない。
+   [data-baseweb="calendar"] 内の div[role="presentation"] は曜日ヘッダ行だけに一意対応。 */
+[data-baseweb="calendar"] div[role="presentation"] > div{ font-size:0 !important; }
+[data-baseweb="calendar"] div[role="presentation"] > div::after{
+  font-size:.78rem; font-weight:700; color:var(--muted);
+}
+[data-baseweb="calendar"] div[role="presentation"] > div:nth-child(1)::after{ content:"日"; color:#c0392b; }
+[data-baseweb="calendar"] div[role="presentation"] > div:nth-child(2)::after{ content:"月"; }
+[data-baseweb="calendar"] div[role="presentation"] > div:nth-child(3)::after{ content:"火"; }
+[data-baseweb="calendar"] div[role="presentation"] > div:nth-child(4)::after{ content:"水"; }
+[data-baseweb="calendar"] div[role="presentation"] > div:nth-child(5)::after{ content:"木"; }
+[data-baseweb="calendar"] div[role="presentation"] > div:nth-child(6)::after{ content:"金"; }
+[data-baseweb="calendar"] div[role="presentation"] > div:nth-child(7)::after{ content:"土"; color:#0f87b8; }
+
+/* カレンダーの月表示(July等)を日本語に。JS(_NO_TRANSLATE_JS)が月名のボタンに
+   data-jp-month="July" のような「属性」だけを付け、置換はCSSのcontentで行う。
+   テキストノードを書き換えるとReactの管理DOMとズレてremoveChildエラーを自ら招くため、
+   属性を付けるだけに留めるのが肝。年(2026)は数字なのでそのまま。 */
+[data-baseweb="calendar"] button[data-jp-month]{ font-size:0 !important; }
+[data-baseweb="calendar"] button[data-jp-month] > span{ font-size:1rem; }   /* ▼アイコンを戻す */
+[data-baseweb="calendar"] button[data-jp-month]::before{
+  font-size:.95rem; font-weight:700; color:var(--ink);
+}
+[data-baseweb="calendar"] button[data-jp-month="January"]::before{ content:"1月"; }
+[data-baseweb="calendar"] button[data-jp-month="February"]::before{ content:"2月"; }
+[data-baseweb="calendar"] button[data-jp-month="March"]::before{ content:"3月"; }
+[data-baseweb="calendar"] button[data-jp-month="April"]::before{ content:"4月"; }
+[data-baseweb="calendar"] button[data-jp-month="May"]::before{ content:"5月"; }
+[data-baseweb="calendar"] button[data-jp-month="June"]::before{ content:"6月"; }
+[data-baseweb="calendar"] button[data-jp-month="July"]::before{ content:"7月"; }
+[data-baseweb="calendar"] button[data-jp-month="August"]::before{ content:"8月"; }
+[data-baseweb="calendar"] button[data-jp-month="September"]::before{ content:"9月"; }
+[data-baseweb="calendar"] button[data-jp-month="October"]::before{ content:"10月"; }
+[data-baseweb="calendar"] button[data-jp-month="November"]::before{ content:"11月"; }
+[data-baseweb="calendar"] button[data-jp-month="December"]::before{ content:"12月"; }
+
+/* 自動翻訳を止めるための仕込み(下記 _NO_TRANSLATE_JS)で入るiframeは高さ0。行ごと消す。 */
+[data-testid="stElementContainer"]:has(iframe[height="0"]){ display:none !important; }
+
 /* ファイルアップローダーを日本語化 */
 [data-testid="stFileUploaderDropzoneInstructions"]{ display:none !important; }
 [data-testid="stFileUploaderDropzone"]{ position:relative; min-height:84px; align-items:center; }
@@ -220,9 +261,94 @@ div[data-baseweb="popover"]:has([data-baseweb="calendar"]) label{ display:none !
 """
 
 
+# Streamlit は <html lang="en"> を固定で出力する。中身が日本語でもブラウザは「英語のページ」と
+# 判定し、Chromeの自動翻訳(英語→日本語)が走る。すると
+#   ・カレンダーの Su Mo Tu We Th Fr Sa が「スーモートゥ私たちはフロリーサ」に化ける
+#   ・翻訳がテキストノードを差し替えるためReactの管理DOMとズレ、再描画時に
+#     NotFoundError: Failed to execute 'removeChild' on 'Node' が出る
+# の2つが起きる。lang を ja にし、translate=no / notranslate を明示して翻訳自体を止める。
+# st.markdown 内の <script> は実行されないため、components.html(iframe)から親documentを触る。
+_NO_TRANSLATE_JS = """
+<script>
+(function () {
+  var doc = window.parent.document;
+  if (!doc) return;
+  doc.documentElement.lang = "ja";
+  doc.documentElement.setAttribute("translate", "no");
+  doc.documentElement.classList.add("notranslate");
+  if (!doc.querySelector('meta[name="google"][content="notranslate"]')) {
+    var m = doc.createElement("meta");
+    m.name = "google";
+    m.content = "notranslate";
+    doc.head.appendChild(m);
+  }
+
+  // カレンダーの月名ボタン(July等)に data-jp-month 属性を付けるだけの処理。
+  // 実際の日本語化はCSS側(content)で行う。テキストノードを書き換えるとReactの
+  // 管理DOMとズレて removeChild エラーを招くため、属性の付与だけに留めている。
+  var MONTHS = ["January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"];
+  function tagMonthButtons() {
+    var btns = doc.querySelectorAll('[data-baseweb="calendar"] button[aria-live="polite"]');
+    for (var i = 0; i < btns.length; i++) {
+      var b = btns[i], own = "";
+      for (var j = 0; j < b.childNodes.length; j++) {
+        if (b.childNodes[j].nodeType === 3) own += b.childNodes[j].textContent;
+      }
+      own = own.trim();
+      // 月名のボタンだけ印を付ける(年ボタン=2026 は数字なので対象外)
+      if (MONTHS.indexOf(own) >= 0) {
+        if (b.getAttribute("data-jp-month") !== own) b.setAttribute("data-jp-month", own);
+      }
+    }
+  }
+  // Streamlitは頻繁にDOMを触るので、描画フレーム単位にまとめて実行する
+  var queued = false;
+  new MutationObserver(function () {
+    if (queued) return;
+    queued = true;
+    window.parent.requestAnimationFrame(function () { queued = false; tagMonthButtons(); });
+  }).observe(doc.body, { childList: true, subtree: true });
+  tagMonthButtons();
+})();
+</script>
+"""
+
+
 def apply_app_style():
-    """モダン・水色ワンポイント・暗色サイドバーのスタイルを現在のページに適用する。"""
+    """モダン・水色ワンポイント・暗色サイドバーのスタイルを現在のページに適用する。
+    あわせてブラウザの自動翻訳を止める(化け文字・removeChildエラーの防止)。"""
     st.markdown(_STYLE, unsafe_allow_html=True)
+    components.html(_NO_TRANSLATE_JS, height=0)
+
+
+_PERIOD_PRESETS = {"全期間": "all", "今月": "month", "今週": "week"}
+_PERIOD_CUSTOM = "期間指定"
+
+
+def period_picker(*, key: str):
+    """全期間 / 今月 / 今週 / 期間指定 を同じ並びのボタンで選ばせる共通の期間フィルタ。
+    「期間指定」を選んだ時だけカレンダーを出す。(lo, hi, 表示ラベル) を返す。
+    lo/hi は 'YYYY-MM-DD' 文字列、全期間なら (None, None)。"""
+    from common import posting_logic
+
+    options = list(_PERIOD_PRESETS.keys()) + [_PERIOD_CUSTOM]
+    sel = st.pills("期間", options, selection_mode="single", default="全期間",
+                   label_visibility="collapsed", key=f"{key}_pills")
+    if not sel:
+        sel = "全期間"
+
+    if sel == _PERIOD_CUSTOM:
+        custom = st.date_input(":material/calendar_month: 期間を指定（クリックでカレンダー）",
+                               value=(), format="YYYY/MM/DD", key=f"{key}_custom")
+        if isinstance(custom, (list, tuple)) and len(custom) == 2:
+            lo, hi = str(custom[0]), str(custom[1])
+            return lo, hi, f"{lo} 〜 {hi}"
+        # 開始だけ選んだ途中の状態。確定するまでは全期間のまま見せる。
+        return None, None, "全期間（開始日と終了日を選ぶと絞り込みます）"
+
+    lo, hi = posting_logic.period_range(_PERIOD_PRESETS[sel])
+    return lo, hi, ("全期間" if lo is None else f"{lo} 〜 {hi}")
 
 
 def page_header(title: str, subtitle: str = "", icon: str = ""):
@@ -256,12 +382,15 @@ def section_export(rows, filename: str, key: str):
     df = rows if isinstance(rows, pd.DataFrame) else pd.DataFrame(rows)
     if df is None or df.empty:
         return
+    from common.excel_io import freeze_xlsx_bytes
+
     c1, c2, _ = st.columns([1, 1, 6])
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
         df.to_excel(w, index=False, sheet_name="data")
+    # 内容が同じなら毎回同じバイト列に(＝ダウンロードURLが変わらず404にならない)
     c1.download_button(
-        "Excelで保存", data=buf.getvalue(), file_name=f"{filename}.xlsx",
+        "Excelで保存", data=freeze_xlsx_bytes(buf.getvalue()), file_name=f"{filename}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key=f"{key}_xlsx", use_container_width=True)
     with c2:
