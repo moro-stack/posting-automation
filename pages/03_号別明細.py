@@ -7,7 +7,8 @@ import streamlit as st
 
 from common import posting_logic
 from common import posting_store as store
-from common.ui import apply_app_style, section_export, nice_table
+from common.excel_io import freeze_xlsx_bytes
+from common.ui import apply_app_style, section_export, nice_table, period_picker
 
 apply_app_style()
 
@@ -48,24 +49,9 @@ st.markdown(
     f'<div style="font-size:1.9rem;font-weight:800;color:#0f87b8;margin:.1rem 0 .5rem">{sel}</div>',
     unsafe_allow_html=True)
 
-# ===== 期間指定：プリセット + 「期間を指定」(クリックで直接カレンダーが開く) =====
-_PRESETS = {"全期間": "all", "今月": "month", "今週": "week"}
-pc1, pc2 = st.columns([1.2, 1])
-with pc1:
-    preset = st.pills("期間指定", list(_PRESETS.keys()), selection_mode="single",
-                      default="全期間", label_visibility="collapsed", key="period_pills")
-    if not preset:
-        preset = "全期間"
-with pc2:
-    # 空(未指定)で開始。フィールドをクリックすると直接カレンダーが開く。範囲を選ぶと下記で優先採用。
-    custom = st.date_input(":material/calendar_month: 期間を指定（クリックでカレンダー）",
-                           value=(), format="YYYY/MM/DD", key="period_custom")
-if isinstance(custom, (list, tuple)) and len(custom) == 2:
-    lo, hi = str(custom[0]), str(custom[1])
-else:
-    lo, hi = posting_logic.period_range(_PRESETS[preset])
-period_note = "全期間" if (lo is None and hi is None) else f"{lo} 〜 {hi}"
-st.caption(f"表示期間: {period_note}　（期間を指定するとプリセットより優先。× で解除）")
+# ===== 期間指定：全期間 / 今月 / 今週 / 期間指定 を同じ並びのボタンで =====
+lo, hi, period_note = period_picker(key="issue_period")
+st.caption(f"表示期間: {period_note}")
 
 # ===== コストを集める =====
 petty = posting_logic.filter_rows_by_period(
@@ -126,7 +112,7 @@ st.divider()
 # ===== 配布員代（詳細は折りたたみ） =====
 issue_contract = [l for l in contract_lines if l.get("project_id") == pid]
 _con_disp = [{"種別": l.get("remark") or "",
-              "数量": f'{posting_logic.fmt_num(l.get("report_qty"))} {posting_logic.unit_for(l.get("remark"))}',
+              "数量": posting_logic.qty_label(l.get("report_qty"), l.get("remark")),
               "単価": _yen(l.get("unit_price")), "合計": _yen(l.get("amount"))}
              for l in issue_contract]
 _man_disp = [{"日付": r.get("work_date") or "（日付なし）",
@@ -224,7 +210,7 @@ with pd.ExcelWriter(_buf, engine="openpyxl") as writer:
                   {"項目": "雑費", "金額": groups["misc"]},
                   {"項目": "配布原価(税込)", "金額": groups["genka"]}]).to_excel(
         writer, index=False, sheet_name="合計")
-st.download_button("号原価まとめをExcelで保存", data=_buf.getvalue(),
+st.download_button("号原価まとめをExcelで保存", data=freeze_xlsx_bytes(_buf.getvalue()),
                    file_name=f"号原価まとめ_{sel}.xlsx",
                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                    icon=":material/download:", key="dl_genka")

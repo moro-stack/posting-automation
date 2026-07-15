@@ -4,8 +4,9 @@ import pandas as pd
 import streamlit as st
 
 from common import ocr
+from common import posting_logic
 from common import posting_store as store
-from common.ui import apply_app_style, section_export, nice_table
+from common.ui import apply_app_style, section_export, nice_table, period_picker
 
 apply_app_style()
 st.title("小口／買掛／売掛の登録")
@@ -40,13 +41,19 @@ def _names(list_fn):
     return {r["id"]: r["name"] for r in list_fn()}
 
 
-def _month_filter(rows, month_of, key):
-    """rows を月次(YYYY-MM)で絞り込む selectbox を出し、絞った rows を返す。
-    month_of(row)->'YYYY-MM' もしくは ''。"""
-    months = sorted({m for r in rows if (m := month_of(r))}, reverse=True)
-    sel = st.selectbox("月次で絞り込み", ["全て"] + months, key=key)
-    if sel != "全て":
-        rows = [r for r in rows if month_of(r) == sel]
+def _period_filter(rows, date_key, key, label):
+    """号別明細と同じ「全期間/今月/今週/期間指定」で rows を絞り、期間の合計を上に表示する。
+    date_key は日付が入っている列名('date' もしくは 'month')。絞った rows を返す。"""
+    lo, hi, note = period_picker(key=key)
+    rows = posting_logic.filter_rows_by_period(rows, date_key, lo, hi)
+    total = sum(posting_logic._num(r.get("amount")) for r in rows)
+    st.markdown(
+        f'''<div style="line-height:1.15;margin:.3rem 0 .8rem">
+  <div style="color:#67788a;font-weight:700;font-size:.86rem">{label}の合計（{note}）</div>
+  <div style="color:#1f2d3a;font-weight:800;font-size:1.8rem">¥{posting_logic.fmt_num(total)}</div>
+  <div style="color:#67788a;font-size:.82rem">{len(rows)}件</div>
+</div>''',
+        unsafe_allow_html=True)
     return rows
 
 
@@ -169,8 +176,7 @@ if mode == "小口":
     with tab_list:
         st.markdown("**登録済みの小口一覧**")
         _cats, _projs = _names(store.list_expense_categories), _names(store.list_projects)
-        _rows = _month_filter(store.list_petty_cash(),
-                              lambda r: (r.get("date") or "")[:7], "petty_month_filter")
+        _rows = _period_filter(store.list_petty_cash(), "date", "petty_period", "小口")
         _disp = [{"日付": r["date"] or "", "費目": _cats.get(r["category_id"], ""),
                   "金額": _yen(r["amount"]), "案件": _projs.get(r["project_id"], ""),
                   "メモ": r["memo"] or "",
@@ -278,8 +284,7 @@ elif mode == "買掛":
     with tab_list:
         st.markdown("**登録済みの買掛一覧**")
         _vends = _names(store.list_payables_vendors)
-        _rows = _month_filter(store.list_payables(),
-                              lambda r: r.get("month") or "", "pay_month_filter")
+        _rows = _period_filter(store.list_payables(), "month", "pay_period", "買掛")
         _disp = [{"請求月度": r.get("month") or "",
                   "請求書の日付": r.get("date") or "",
                   "取引先": r.get("vendor_name") or _vends.get(r.get("vendor_id"), ""),
@@ -332,8 +337,7 @@ else:  # 売掛
     with tab_list:
         st.markdown("**登録済みの売掛一覧**")
         _clients, _projs = _names(store.list_receivables_clients), _names(store.list_projects)
-        _rows = _month_filter(store.list_receivables(),
-                              lambda r: r.get("month") or "", "recv_month_filter")
+        _rows = _period_filter(store.list_receivables(), "month", "recv_period", "売掛")
         _disp = [{"月度": r.get("month") or "", "売掛先": _clients.get(r["client_id"], ""),
                   "金額": _yen(r["amount"]), "備考": r.get("note") or "",
                   "案件": _projs.get(r["project_id"], ""),
