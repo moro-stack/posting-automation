@@ -1,0 +1,7 @@
+[theme]
+# 既定の赤いアクセント(タブ・ラジオ・チェック等)を水色に統一
+base = "light"
+primaryColor = "#14a4dc"
+backgroundColor = "#f5f8fb"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#1f2d3a"
