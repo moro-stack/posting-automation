@@ -216,3 +216,37 @@ def test_issue_manual_cost_migrates_old_db(tmp_path):
     conn.close()
     rows = store.list_issue_manual_costs(project_id=1, db_path=db)  # 接続時に自動ALTER
     assert rows and rows[0]["content"] == "旧行" and rows[0]["work_date"] is None
+
+
+def test_contract_invoice_export_mark(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    inv = store.add_contract_invoice(1, "2026-06-30", "2026-06-01", "2026-06-05",
+                                     [{"project_id": 1, "report_qty": 10, "unit_price": 5,
+                                       "remark": "配布"}], db_path=db, now="T")
+    # 初期は未出力
+    got = [i for i in store.list_contract_invoices(db_path=db) if i["id"] == inv][0]
+    assert got["last_exported_at"] is None
+    # 出力印を付ける
+    store.mark_contract_invoice_exported(inv, db_path=db, now="2026-07-16T09:00:00")
+    got = [i for i in store.list_contract_invoices(db_path=db) if i["id"] == inv][0]
+    assert got["last_exported_at"] == "2026-07-16T09:00:00"
+
+
+def test_contract_invoice_migrates_old_db_without_last_exported(tmp_path):
+    import sqlite3
+    db = os.path.join(tmp_path, "t.db")
+    conn = sqlite3.connect(db)
+    # last_exported_at 列を持たない旧スキーマ
+    conn.execute("CREATE TABLE contract_invoices (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                 " distributor_id INTEGER, issue_date TEXT, period_from TEXT,"
+                 " period_to TEXT, created_at TEXT NOT NULL)")
+    conn.execute("INSERT INTO contract_invoices (distributor_id, issue_date, period_from,"
+                 " period_to, created_at) VALUES (1,'2026-06-30','2026-06-01','2026-06-05','T')")
+    conn.commit()
+    conn.close()
+    rows = store.list_contract_invoices(db_path=db)  # 接続時に自動ALTER
+    assert rows and rows[0]["last_exported_at"] is None
+    # マイグレーション後もマークできる
+    store.mark_contract_invoice_exported(rows[0]["id"], db_path=db, now="2026-07-16T10:00:00")
+    rows = store.list_contract_invoices(db_path=db)
+    assert rows[0]["last_exported_at"] == "2026-07-16T10:00:00"

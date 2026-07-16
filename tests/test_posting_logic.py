@@ -148,3 +148,50 @@ def test_cost_groups_regroups_totals():
     assert g["labor"] == 11679 + 8000       # 配布員代=業務委託+直接入力
     assert g["misc"] == 1200 + 183342        # 雑費=小口+買掛
     assert g["genka"] == agg["total"]        # 配布原価=総額(不変)
+
+
+def test_days_since_today_and_past_and_none():
+    assert L.days_since("2026-07-16", today="2026-07-16") == 0
+    assert L.days_since("2026-07-13", today="2026-07-16") == 3
+    assert L.days_since("2026-07-16T09:00:00", today="2026-07-16") == 0   # ISO日時もOK
+    assert L.days_since(None, today="2026-07-16") is None
+    assert L.days_since("", today="2026-07-16") is None
+    assert L.days_since("こわれた日付", today="2026-07-16") is None
+
+
+def test_issue_breakdown_rows_labels_and_order():
+    pid = 5   # 「その他」号を想定
+    petty = [{"project_id": 5, "amount": 3000, "memo": "A社折込", "category_id": 1, "date": "2026-07-05"},
+             {"project_id": 9, "amount": 999, "memo": "別の号", "category_id": 1, "date": "2026-07-05"}]
+    payables = [{"project_id": 5, "amount": 12000, "note": "B商店DM", "vendor_name": "配夢", "date": "2026-07-08"}]
+    receivables = [{"project_id": 5, "amount": 50000, "note": "その他売上", "month": "2026-07"}]
+    contract_lines = [{"project_id": 5, "amount": 8000, "remark": "配布", "issue_date": "2026-07-10"}]
+    manual = [{"project_id": 5, "amount": 5000, "content": "臨時配布", "work_date": "2026-07-11"}]
+    rows = L.issue_breakdown_rows(pid, petty=petty, payables=payables, receivables=receivables,
+                                  contract_lines=contract_lines, manual=manual,
+                                  category_names={1: "その他費目"})
+    # 別の号(project_id=9)は除外される
+    assert all(r["金額"] != 999 for r in rows)
+    # 5件（売上1・小口1・買掛1・委託1・直接1）
+    assert len(rows) == 5
+    # 並び順: 売上 → 小口 → 買掛 → 業務委託 → 直接入力
+    assert [r["区分"] for r in rows] == ["売上", "原価・小口", "原価・買掛", "原価・業務委託", "原価・直接入力"]
+    # 内容ラベル
+    売上 = rows[0]
+    assert 売上["内容"] == "その他売上" and 売上["金額"] == 50000 and 売上["日付"] == "2026-07"
+    小口 = rows[1]
+    assert "A社折込" in 小口["内容"] and 小口["日付"] == "2026-07-05"
+    買掛 = rows[2]
+    assert 買掛["内容"] == "B商店DM" and 買掛["日付"] == "2026-07-08"
+    委託 = rows[3]
+    assert 委託["内容"] == "配布" and 委託["金額"] == 8000 and 委託["日付"] == "2026-07-10"
+    直接 = rows[4]
+    assert 直接["内容"] == "臨時配布" and 直接["日付"] == "2026-07-11"
+
+
+def test_issue_breakdown_payable_falls_back_to_vendor_name():
+    rows = L.issue_breakdown_rows(
+        5, petty=[], payables=[{"project_id": 5, "amount": 100, "note": None,
+                                "vendor_name": "配夢株式会社", "date": "2026-07-01"}],
+        receivables=[], contract_lines=[], manual=[])
+    assert rows[0]["内容"] == "配夢株式会社"

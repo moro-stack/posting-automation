@@ -95,6 +95,10 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     imc_cols = {r[1] for r in conn.execute("PRAGMA table_info(issue_manual_costs)")}
     if "work_date" not in imc_cols:
         conn.execute("ALTER TABLE issue_manual_costs ADD COLUMN work_date TEXT")
+    # 業務委託の請求に「報告書を最後に出力した日時」を持たせる。旧DBは自動でカラム追加。
+    ci_cols = {r[1] for r in conn.execute("PRAGMA table_info(contract_invoices)")}
+    if "last_exported_at" not in ci_cols:
+        conn.execute("ALTER TABLE contract_invoices ADD COLUMN last_exported_at TEXT")
     conn.commit()
 
 
@@ -461,6 +465,11 @@ def list_contract_invoices(*, db_path=None):
             "SELECT * FROM contract_invoices ORDER BY id DESC").fetchall()]
     finally:
         conn.close()
+
+
+def mark_contract_invoice_exported(invoice_id, *, db_path=None, now=None):
+    """業務完了報告書を出力したことを記録する(last_exported_at を更新)。"""
+    _update("contract_invoices", invoice_id, {"last_exported_at": _now(now)}, db_path)
 
 
 def delete_contract_invoice(invoice_id, *, db_path=None):

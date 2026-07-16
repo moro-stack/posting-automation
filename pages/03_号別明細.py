@@ -66,7 +66,10 @@ for inv in store.list_contract_invoices():
     if not posting_logic.in_period(inv.get("issue_date"), lo, hi):
         continue
     detail = store.get_contract_invoice(inv["id"])
-    contract_lines.extend(detail["lines"])
+    for ln in detail["lines"]:
+        ln = dict(ln)
+        ln["issue_date"] = inv.get("issue_date")   # 内訳一覧で発行日を出すため
+        contract_lines.append(ln)
 
 # 直接入力(配布員代): work_date で期間絞り込み。日付なしは常に計上。
 all_manual = store.list_issue_manual_costs(project_id=pid)
@@ -108,6 +111,24 @@ with s3:
         unsafe_allow_html=True)
 
 st.divider()
+
+# ===== 明細（内訳）一覧：この号に何が入っているかを内容ラベル付きで =====
+# 「その他」号でも、各データの内容(メモ・備考・作業内容)で中身が分かるようにする。
+_cat_names = {c["id"]: c["name"] for c in store.list_expense_categories()}
+_vend_names = {v["id"]: v["name"] for v in store.list_payables_vendors()}
+_breakdown = posting_logic.issue_breakdown_rows(
+    pid, petty=petty, payables=payables, receivables=receivables,
+    contract_lines=contract_lines, manual=manual,
+    category_names=_cat_names, vendor_names=_vend_names)
+_bd_disp = [{"区分": r["区分"], "内容": r["内容"], "金額": _yen(r["金額"]), "日付": r["日付"]}
+            for r in _breakdown]
+with st.expander(
+        f':material/list: 明細（内訳）一覧　—　{len(_breakdown)}件（この号に入っているデータの中身）',
+        expanded=(sel == "その他")):
+    st.caption("「その他」の号でも、各データの内容（メモ・備考・作業内容）で"
+               "何の案件かが分かります。")
+    nice_table(_bd_disp, "この号（表示期間内）のデータはありません。")
+    section_export(_bd_disp, f"内訳一覧_{sel}", key="issue_breakdown")
 
 # ===== 配布員代（詳細は折りたたみ） =====
 issue_contract = [l for l in contract_lines if l.get("project_id") == pid]
