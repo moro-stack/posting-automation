@@ -8,9 +8,10 @@ import streamlit as st
 from common import posting_logic
 from common import posting_store as store
 from common.excel_io import freeze_xlsx_bytes
-from common.ui import apply_app_style, section_export, nice_table, period_picker
+from common.ui import apply_app_style, section_export, nice_table, period_picker, flash, show_flash
 
 apply_app_style()
+show_flash()
 
 _WD = ["月", "火", "水", "木", "金", "土", "日"]
 
@@ -66,7 +67,10 @@ for inv in store.list_contract_invoices():
     if not posting_logic.in_period(inv.get("issue_date"), lo, hi):
         continue
     detail = store.get_contract_invoice(inv["id"])
-    contract_lines.extend(detail["lines"])
+    for ln in detail["lines"]:
+        ln = dict(ln)
+        ln["issue_date"] = inv.get("issue_date")   # その他の案件内訳で発行日を出すため
+        contract_lines.append(ln)
 
 # 直接入力(配布員代): work_date で期間絞り込み。日付なしは常に計上。
 all_manual = store.list_issue_manual_costs(project_id=pid)
@@ -109,11 +113,24 @@ with s3:
 
 st.divider()
 
+# 案件=「その他」の号のときだけ、内訳表の左端に「案件名」(登録時に手入力した other_label)を出す。
+# 「その他」に何の案件で入れたかを、配布員代・雑費の内訳の中でそのまま確認できるようにする。
+_show_label = (sel == "その他")
+
+
+def _with_label(row, other_label):
+    """内訳表示行の左端に『案件名』列を差し込む(その他号のときだけ)。"""
+    if not _show_label:
+        return row
+    return {"案件名": other_label or "", **row}
+
+
 # ===== 配布員代（詳細は折りたたみ） =====
 issue_contract = [l for l in contract_lines if l.get("project_id") == pid]
-_con_disp = [{"種別": l.get("remark") or "",
-              "数量": posting_logic.qty_label(l.get("report_qty"), l.get("remark")),
-              "単価": _yen(l.get("unit_price")), "合計": _yen(l.get("amount"))}
+_con_disp = [_with_label({"種別": l.get("remark") or "",
+                          "数量": posting_logic.qty_label(l.get("report_qty"), l.get("remark")),
+                          "単価": _yen(l.get("unit_price")), "合計": _yen(l.get("amount"))},
+                         l.get("other_label"))
              for l in issue_contract]
 _man_disp = [{"日付": r.get("work_date") or "（日付なし）",
               "曜日": _weekday(r.get("work_date")),
@@ -137,6 +154,7 @@ with st.expander(f":material/groups: 配布員代の内訳（業務委託＋直�
         if st.form_submit_button("追加") and _parse_int(amt_str) > 0:
             store.add_issue_manual_cost(pid, work.strip() or "配布",
                                         _parse_int(amt_str), work_date=str(w))
+            flash("配布員代を追加しました")
             st.rerun()
 
     if manual:
@@ -164,9 +182,11 @@ with st.expander(f":material/groups: 配布員代の内訳（業務委託＋直�
             if u1.form_submit_button("更新") and eamt > 0:
                 store.update_issue_manual_cost(target["id"], work_date=str(ew),
                                                content=ework.strip() or "配布", amount=eamt)
+                flash("更新しました")
                 st.rerun()
             if u2.form_submit_button("削除"):
                 store.delete_issue_manual_cost(target["id"])
+                flash("削除しました")
                 st.rerun()
 
     section_export(_man_disp, f"配布員代直接入力_{sel}", key="issue_labor")
@@ -179,14 +199,16 @@ for r in petty:
     item = _cats.get(r.get("category_id"), "")
     if r.get("memo"):
         item = f'{item}（{r["memo"]}）' if item else r["memo"]
-    _misc.append({"項目": item or "小口", "金額": _yen(r.get("amount")),
-                  "支払方法": posting_logic.payment_method("petty", r),
-                  "日付": r.get("date") or ""})
+    _misc.append(_with_label(
+        {"項目": item or "小口", "金額": _yen(r.get("amount")),
+         "支払方法": posting_logic.payment_method("petty", r),
+         "日付": r.get("date") or ""}, r.get("other_label")))
 for r in payables:
     item = r.get("vendor_name") or _vends.get(r.get("vendor_id"), "")
-    _misc.append({"項目": item or "買掛", "金額": _yen(r.get("amount")),
-                  "支払方法": posting_logic.payment_method("payable", r),
-                  "日付": r.get("date") or r.get("month") or ""})
+    _misc.append(_with_label(
+        {"項目": item or "買掛", "金額": _yen(r.get("amount")),
+         "支払方法": posting_logic.payment_method("payable", r),
+         "日付": r.get("date") or r.get("month") or ""}, r.get("other_label")))
 
 with st.expander(f":material/receipt_long: 雑費の内訳（小口＋買掛）　—　小計 {_yen(groups['misc'])}",
                  expanded=False):

@@ -148,3 +148,14 @@ def test_cost_groups_regroups_totals():
     assert g["labor"] == 11679 + 8000       # 配布員代=業務委託+直接入力
     assert g["misc"] == 1200 + 183342        # 雑費=小口+買掛
     assert g["genka"] == agg["total"]        # 配布原価=総額(不変)
+
+
+def test_days_since_today_and_past_and_none():
+    assert L.days_since("2026-07-16", today="2026-07-16") == 0
+    assert L.days_since("2026-07-13", today="2026-07-16") == 3
+    assert L.days_since("2026-07-16T09:00:00", today="2026-07-16") == 0   # ISO日時もOK
+    assert L.days_since(None, today="2026-07-16") is None
+    assert L.days_since("", today="2026-07-16") is None
+    assert L.days_since("こわれた日付", today="2026-07-16") is None
+
+

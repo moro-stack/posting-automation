@@ -130,3 +130,17 @@ def cost_groups(agg) -> dict:
     labor = _num(agg.get("contract")) + _num(agg.get("manual"))
     misc = _num(agg.get("petty")) + _num(agg.get("payables"))
     return {"labor": labor, "misc": misc, "genka": labor + misc}
+
+
+def days_since(iso_str, *, today=None):
+    """iso_str(YYYY-MM-DD もしくは ISO日時)から today まで何日経ったかを返す。
+    空・不正な日付は None。today 省略時は当日。"""
+    if not iso_str:
+        return None
+    try:
+        d = datetime.strptime(str(iso_str)[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
+    return (_today(today) - d).days
+
+

@@ -351,6 +351,20 @@ def period_picker(*, key: str):
     return lo, hi, ("全期間" if lo is None else f"{lo} 〜 {hi}")
 
 
+def flash(message: str):
+    """登録直後の再実行(rerun)をまたいで1度だけ出す成功メッセージをセットする。
+    rerun 直前に st.success を出しても新しい実行で消えてしまうため、session_state に退避する。"""
+    st.session_state["_flash"] = message
+
+
+def show_flash():
+    """flash() でセットされたメッセージがあれば success で表示して消す(1回だけ)。
+    登録フォームの先頭で呼ぶ。"""
+    msg = st.session_state.pop("_flash", None)
+    if msg:
+        st.success(msg)
+
+
 def page_header(title: str, subtitle: str = "", icon: str = ""):
     """統一感のあるページ見出し(任意)。"""
     prefix = f"{icon} " if icon else ""

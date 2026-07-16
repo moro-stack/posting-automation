@@ -95,6 +95,15 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     imc_cols = {r[1] for r in conn.execute("PRAGMA table_info(issue_manual_costs)")}
     if "work_date" not in imc_cols:
         conn.execute("ALTER TABLE issue_manual_costs ADD COLUMN work_date TEXT")
+    # 業務委託の請求に「報告書を最後に出力した日時」を持たせる。旧DBは自動でカラム追加。
+    ci_cols = {r[1] for r in conn.execute("PRAGMA table_info(contract_invoices)")}
+    if "last_exported_at" not in ci_cols:
+        conn.execute("ALTER TABLE contract_invoices ADD COLUMN last_exported_at TEXT")
+    # 案件=「その他」で登録した時の『何の案件か』手入力を持たせる。旧DBは自動でカラム追加。
+    for tbl in ("petty_cash", "payables", "receivables", "contract_invoice_lines"):
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({tbl})")}
+        if "other_label" not in cols:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN other_label TEXT")
     conn.commit()
 
 
@@ -277,11 +286,12 @@ def seed_masters(*, db_path=None) -> None:
 
 # --- petty_cash ---
 def add_petty_cash(date, category_id, amount, *, project_id=None, memo=None,
-                   source="manual", db_path=None, now=None):
+                   source="manual", other_label=None, db_path=None, now=None):
     return _add("petty_cash",
-                ["date", "category_id", "amount", "project_id", "memo", "source", "created_at"],
+                ["date", "category_id", "amount", "project_id", "memo", "source",
+                 "other_label", "created_at"],
                 [date, _int_or_none(category_id), int(amount), _int_or_none(project_id),
-                 memo, source, _now(now)], db_path)
+                 memo, source, other_label, _now(now)], db_path)
 
 
 def list_petty_cash(*, project_id=None, date_from=None, date_to=None, db_path=None):
@@ -308,15 +318,16 @@ def delete_petty_cash(row_id, *, db_path=None):
 # --- payables ---
 def add_payable(month, vendor_id, amount, *, date=None, vendor_name=None,
                 original_status=None, note=None, project_id=None, source="manual",
-                db_path=None, now=None):
+                other_label=None, db_path=None, now=None):
     # 請求書の日付(date)があれば月度(month)はそこから導出する(#12)
     if date and not month:
         month = str(date)[:7]
     return _add("payables",
                 ["month", "date", "vendor_id", "vendor_name", "amount", "original_status",
-                 "note", "project_id", "source", "created_at"],
+                 "note", "project_id", "source", "other_label", "created_at"],
                 [month, date, _int_or_none(vendor_id), vendor_name, int(amount),
-                 original_status, note, _int_or_none(project_id), source, _now(now)], db_path)
+                 original_status, note, _int_or_none(project_id), source, other_label,
+                 _now(now)], db_path)
 
 
 def find_duplicate_petty(date, category_id, amount, *, db_path=None):
@@ -386,11 +397,12 @@ def delete_payable(row_id, *, db_path=None):
 
 # --- receivables ---
 def add_receivable(month, client_id, amount, *, note=None, project_id=None,
-                   db_path=None, now=None):
+                   other_label=None, db_path=None, now=None):
     return _add("receivables",
-                ["month", "client_id", "amount", "note", "project_id", "created_at"],
+                ["month", "client_id", "amount", "note", "project_id",
+                 "other_label", "created_at"],
                 [month, _int_or_none(client_id), int(amount), note,
-                 _int_or_none(project_id), _now(now)], db_path)
+                 _int_or_none(project_id), other_label, _now(now)], db_path)
 
 
 def list_receivables(*, month=None, project_id=None, db_path=None):
@@ -428,10 +440,10 @@ def add_contract_invoice(distributor_id, issue_date, period_from, period_to, lin
             price = float(ln.get("unit_price") or 0)
             conn.execute(
                 "INSERT INTO contract_invoice_lines"
-                " (invoice_id, project_id, report_qty, unit_price, amount, remark)"
-                " VALUES (?,?,?,?,?,?)",
+                " (invoice_id, project_id, report_qty, unit_price, amount, remark, other_label)"
+                " VALUES (?,?,?,?,?,?,?)",
                 (invoice_id, _int_or_none(ln.get("project_id")), qty, price,
-                 qty * price, ln.get("remark")))
+                 qty * price, ln.get("remark"), ln.get("other_label")))
         conn.commit()
     finally:
         conn.close()
@@ -461,6 +473,11 @@ def list_contract_invoices(*, db_path=None):
             "SELECT * FROM contract_invoices ORDER BY id DESC").fetchall()]
     finally:
         conn.close()
+
+
+def mark_contract_invoice_exported(invoice_id, *, db_path=None, now=None):
+    """業務完了報告書を出力したことを記録する(last_exported_at を更新)。"""
+    _update("contract_invoices", invoice_id, {"last_exported_at": _now(now)}, db_path)
 
 
 def delete_contract_invoice(invoice_id, *, db_path=None):
