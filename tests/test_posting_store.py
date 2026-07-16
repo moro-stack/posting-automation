@@ -232,6 +232,50 @@ def test_contract_invoice_export_mark(tmp_path):
     assert got["last_exported_at"] == "2026-07-16T09:00:00"
 
 
+def test_petty_cash_stores_other_label(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    store.add_petty_cash("2026-07-05", 1, 3000, project_id=5,
+                         other_label="A社折込チラシ", db_path=db)
+    rows = store.list_petty_cash(project_id=5, db_path=db)
+    assert rows[0]["other_label"] == "A社折込チラシ"
+
+
+def test_payable_and_receivable_store_other_label(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    store.add_payable(None, None, 12000, date="2026-07-08", vendor_name="配夢",
+                      project_id=5, other_label="B商店DM印刷", db_path=db)
+    store.add_receivable("2026-07", 1, 50000, project_id=5,
+                         other_label="C社スポット売上", db_path=db)
+    assert store.list_payables(project_id=5, db_path=db)[0]["other_label"] == "B商店DM印刷"
+    assert store.list_receivables(project_id=5, db_path=db)[0]["other_label"] == "C社スポット売上"
+
+
+def test_contract_invoice_line_stores_other_label(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    inv = store.add_contract_invoice(
+        1, "2026-07-10", "2026-07-01", "2026-07-05",
+        [{"project_id": 5, "report_qty": 100, "unit_price": 5, "remark": "配布",
+          "other_label": "臨時ポスティング"}], db_path=db, now="T")
+    lines = store.get_contract_invoice(inv, db_path=db)["lines"]
+    assert lines[0]["other_label"] == "臨時ポスティング"
+
+
+def test_other_label_migrates_old_db(tmp_path):
+    import sqlite3
+    db = os.path.join(tmp_path, "t.db")
+    conn = sqlite3.connect(db)
+    # other_label 列を持たない旧スキーマ（petty_cash）
+    conn.execute("CREATE TABLE petty_cash (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                 " date TEXT, category_id INTEGER, amount INTEGER NOT NULL,"
+                 " project_id INTEGER, memo TEXT, source TEXT, created_at TEXT NOT NULL)")
+    conn.execute("INSERT INTO petty_cash (amount, project_id, created_at)"
+                 " VALUES (100, 5, 'T')")
+    conn.commit()
+    conn.close()
+    rows = store.list_petty_cash(project_id=5, db_path=db)  # 接続時に自動ALTER
+    assert rows and rows[0]["other_label"] is None
+
+
 def test_contract_invoice_migrates_old_db_without_last_exported(tmp_path):
     import sqlite3
     db = os.path.join(tmp_path, "t.db")

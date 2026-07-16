@@ -68,7 +68,7 @@ for inv in store.list_contract_invoices():
     detail = store.get_contract_invoice(inv["id"])
     for ln in detail["lines"]:
         ln = dict(ln)
-        ln["issue_date"] = inv.get("issue_date")   # 内訳一覧で発行日を出すため
+        ln["issue_date"] = inv.get("issue_date")   # その他の案件内訳で発行日を出すため
         contract_lines.append(ln)
 
 # 直接入力(配布員代): work_date で期間絞り込み。日付なしは常に計上。
@@ -112,23 +112,22 @@ with s3:
 
 st.divider()
 
-# ===== 明細（内訳）一覧：この号に何が入っているかを内容ラベル付きで =====
-# 「その他」号でも、各データの内容(メモ・備考・作業内容)で中身が分かるようにする。
-_cat_names = {c["id"]: c["name"] for c in store.list_expense_categories()}
-_vend_names = {v["id"]: v["name"] for v in store.list_payables_vendors()}
-_breakdown = posting_logic.issue_breakdown_rows(
+# ===== その他の案件内訳：登録時に手入力した「何の案件か」を表示 =====
+# 案件=「その他」で登録したデータが実際は何だったか(other_label)を一覧で見せる。
+_label_rows = posting_logic.other_label_rows(
     pid, petty=petty, payables=payables, receivables=receivables,
-    contract_lines=contract_lines, manual=manual,
-    category_names=_cat_names, vendor_names=_vend_names)
-_bd_disp = [{"区分": r["区分"], "内容": r["内容"], "金額": _yen(r["金額"]), "日付": r["日付"]}
-            for r in _breakdown]
-with st.expander(
-        f':material/list: 明細（内訳）一覧　—　{len(_breakdown)}件（この号に入っているデータの中身）',
-        expanded=(sel == "その他")):
-    st.caption("「その他」の号でも、各データの内容（メモ・備考・作業内容）で"
-               "何の案件かが分かります。")
-    nice_table(_bd_disp, "この号（表示期間内）のデータはありません。")
-    section_export(_bd_disp, f"内訳一覧_{sel}", key="issue_breakdown")
+    contract_lines=contract_lines)
+if sel == "その他" or _label_rows:
+    _lbl_disp = [{"案件名": r["案件名"], "区分": r["区分"],
+                  "金額": _yen(r["金額"]), "日付": r["日付"]} for r in _label_rows]
+    with st.expander(
+            f':material/label: その他の案件内訳　—　{len(_label_rows)}件（登録時に入力した案件名）',
+            expanded=(sel == "その他")):
+        st.caption("小口・買掛・売掛・業務委託の登録で案件を「その他」にした際に"
+                   "入力した『何の案件か』を表示します。")
+        nice_table(_lbl_disp, "その他の案件名が入力されたデータはまだありません。"
+                   "（登録画面で案件を『その他』にすると入力欄が出ます）")
+        section_export(_lbl_disp, f"その他案件内訳_{sel}", key="other_labels")
 
 # ===== 配布員代（詳細は折りたたみ） =====
 issue_contract = [l for l in contract_lines if l.get("project_id") == pid]

@@ -144,50 +144,31 @@ def days_since(iso_str, *, today=None):
     return (_today(today) - d).days
 
 
-def issue_breakdown_rows(project_id, *, petty, payables, receivables,
-                         contract_lines, manual, category_names=None, vendor_names=None):
-    """号(案件)の中身を1データ=1行に正規化した内訳を返す。
-    「その他」号に何を入れたか(内容ラベル)を一覧で見えるようにするのが目的。
-    各行 = {区分, 内容, 金額, 日付}。並び順は 売上 → 原価(小口→買掛→業務委託→直接入力)。
+def other_label_rows(project_id, *, petty, payables, receivables, contract_lines):
+    """『その他』号などで登録時に手入力した案件名(other_label)を集めて返す。
+    案件=「その他」で登録したデータが実際は何の案件だったかを、号別明細で見えるようにする。
+    other_label が空のもの・別の号のものは含めない。
+    各行 = {案件名, 区分, 金額, 日付}。並び順は 売上 → 小口 → 買掛 → 業務委託。
     金額は数値(表示整形は呼び出し側)。DB非依存の純関数。"""
-    cats = category_names or {}
-    vends = vendor_names or {}
     rows = []
 
-    def _match(r):
-        return r.get("project_id") == project_id
+    def _labeled(r):
+        return r.get("project_id") == project_id and str(r.get("other_label") or "").strip()
 
-    # 売上(売掛)
     for r in receivables:
-        if _match(r):
-            rows.append({"区分": "売上", "内容": r.get("note") or "（内容なし）",
+        if _labeled(r):
+            rows.append({"案件名": r["other_label"], "区分": "売上",
                          "金額": _num(r.get("amount")), "日付": r.get("month") or ""})
-    # 原価・小口(内容 = メモ。費目名があれば接頭に付す)
     for r in petty:
-        if not _match(r):
-            continue
-        cat = cats.get(r.get("category_id"), "")
-        memo = r.get("memo") or ""
-        label = f"{cat}（{memo}）" if cat and memo else (memo or cat or "小口")
-        rows.append({"区分": "原価・小口", "内容": label,
-                     "金額": _num(r.get("amount")), "日付": r.get("date") or ""})
-    # 原価・買掛(内容 = 備考、無ければ取引先名)
+        if _labeled(r):
+            rows.append({"案件名": r["other_label"], "区分": "小口",
+                         "金額": _num(r.get("amount")), "日付": r.get("date") or ""})
     for r in payables:
-        if not _match(r):
-            continue
-        label = r.get("note") or r.get("vendor_name") or vends.get(r.get("vendor_id"), "") or "買掛"
-        rows.append({"区分": "原価・買掛", "内容": label,
-                     "金額": _num(r.get("amount")), "日付": r.get("date") or r.get("month") or ""})
-    # 原価・業務委託(内容 = 種別。日付は請求の発行日=issue_date を呼び出し側で付与)
+        if _labeled(r):
+            rows.append({"案件名": r["other_label"], "区分": "買掛",
+                         "金額": _num(r.get("amount")), "日付": r.get("date") or r.get("month") or ""})
     for l in contract_lines:
-        if not _match(l):
-            continue
-        rows.append({"区分": "原価・業務委託", "内容": l.get("remark") or "業務委託",
-                     "金額": _num(l.get("amount")), "日付": l.get("issue_date") or ""})
-    # 原価・直接入力(内容 = 作業内容)
-    for r in manual:
-        if not _match(r):
-            continue
-        rows.append({"区分": "原価・直接入力", "内容": r.get("content") or "配布",
-                     "金額": _num(r.get("amount")), "日付": r.get("work_date") or ""})
+        if _labeled(l):
+            rows.append({"案件名": l["other_label"], "区分": "業務委託",
+                         "金額": _num(l.get("amount")), "日付": l.get("issue_date") or ""})
     return rows

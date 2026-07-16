@@ -142,7 +142,8 @@ if mode == "小口":
             cc1, cc2, _ = st.columns([1, 1, 4])
             if cc1.button("はい、登録する", type="primary", key="petty_ok"):
                 store.add_petty_cash(p["date"], p["category_id"], p["amount"],
-                                     project_id=p["project_id"], memo=p["memo"], source=p["source"])
+                                     project_id=p["project_id"], memo=p["memo"],
+                                     source=p["source"], other_label=p.get("other_label"))
                 del st.session_state["petty_pending"]
                 st.success("登録しました")
                 st.rerun()
@@ -158,17 +159,21 @@ if mode == "小口":
                                      value=int(draft.get("amount") or 0), step=1)
             projs = _project_options()
             proj = st.selectbox("案件(任意)", ["(なし)"] + list(projs.keys()))
+            other_label = st.text_input(
+                "その他の案件名", placeholder="案件を「その他」にしたとき、何の案件か入力",
+                help="案件を『その他』にしたときだけ使われます。号別明細の『その他』で確認できます。")
             memo = st.text_input("メモ", value=draft.get("item") or "")
             if st.form_submit_button("登録") and amount > 0:
                 payload = {"date": date or None, "category_id": cats.get(cat), "amount": int(amount),
                            "project_id": projs.get(proj), "memo": memo or None,
-                           "source": "ocr" if ups else "manual"}
+                           "source": "ocr" if ups else "manual",
+                           "other_label": (other_label.strip() or None) if proj == "その他" else None}
                 if store.find_duplicate_petty(payload["date"], payload["category_id"], payload["amount"]):
                     st.session_state["petty_pending"] = payload
                     st.rerun()
                 store.add_petty_cash(payload["date"], payload["category_id"], payload["amount"],
                                      project_id=payload["project_id"], memo=payload["memo"],
-                                     source=payload["source"])
+                                     source=payload["source"], other_label=payload["other_label"])
                 st.session_state.pop("petty_draft", None)
                 st.success("登録しました")
                 st.rerun()
@@ -248,7 +253,8 @@ elif mode == "買掛":
             if cc1.button("はい、登録する", type="primary", key="pay_ok"):
                 store.add_payable(None, None, p["amount"], date=p["date"],
                                   vendor_name=p["vendor_name"], original_status=p["original_status"],
-                                  note=p["note"], source=p["source"])
+                                  note=p["note"], source=p["source"],
+                                  project_id=p.get("project_id"), other_label=p.get("other_label"))
                 del st.session_state["pay_pending"]
                 st.success("登録しました")
                 st.rerun()
@@ -264,11 +270,18 @@ elif mode == "買掛":
                                      value=int(draft.get("amount") or 0), step=1)
             original = st.selectbox("原本区分",
                                     ["原本あり", "本社", "クレジット", "振込用紙", "なし"])
+            pay_projs = _project_options()
+            pay_proj = st.selectbox("案件(任意)", ["(なし)"] + list(pay_projs.keys()))
+            pay_other = st.text_input(
+                "その他の案件名", placeholder="案件を「その他」にしたとき、何の案件か入力",
+                help="案件を『その他』にしたときだけ使われます。号別明細の『その他』で確認できます。")
             note = st.text_input("備考", value=draft.get("note") or "")
             if st.form_submit_button("登録") and amount > 0:
                 payload = {"date": str(inv_date), "vendor_name": vendor or None,
                            "amount": int(amount), "original_status": original, "note": note or None,
-                           "source": "ocr" if ups else "manual"}
+                           "source": "ocr" if ups else "manual",
+                           "project_id": pay_projs.get(pay_proj),
+                           "other_label": (pay_other.strip() or None) if pay_proj == "その他" else None}
                 if store.find_duplicate_payable(payload["date"], None, payload["amount"],
                                                 vendor_name=payload["vendor_name"]):
                     st.session_state["pay_pending"] = payload
@@ -276,7 +289,8 @@ elif mode == "買掛":
                 store.add_payable(None, None, payload["amount"], date=payload["date"],
                                   vendor_name=payload["vendor_name"],
                                   original_status=payload["original_status"], note=payload["note"],
-                                  source=payload["source"])
+                                  source=payload["source"], project_id=payload["project_id"],
+                                  other_label=payload["other_label"])
                 st.session_state.pop("pay_draft", None)
                 st.success("登録しました")
                 st.rerun()
@@ -307,7 +321,8 @@ else:  # 売掛
             cc1, cc2, _ = st.columns([1, 1, 4])
             if cc1.button("はい、登録する", type="primary", key="recv_ok"):
                 store.add_receivable(p["month"], p["client_id"], p["amount"],
-                                     note=p["note"], project_id=p["project_id"])
+                                     note=p["note"], project_id=p["project_id"],
+                                     other_label=p.get("other_label"))
                 del st.session_state["recv_pending"]
                 st.success("登録しました")
                 st.rerun()
@@ -323,14 +338,19 @@ else:  # 売掛
             note = st.text_input("備考(号)")
             projs = _project_options()
             proj = st.selectbox("案件(任意)", ["(なし)"] + list(projs.keys()))
+            recv_other = st.text_input(
+                "その他の案件名", placeholder="案件を「その他」にしたとき、何の案件か入力",
+                help="案件を『その他』にしたときだけ使われます。号別明細の『その他』で確認できます。")
             if st.form_submit_button("登録") and amount > 0:
                 payload = {"month": month or None, "client_id": clients.get(client),
-                           "amount": int(amount), "note": note or None, "project_id": projs.get(proj)}
+                           "amount": int(amount), "note": note or None, "project_id": projs.get(proj),
+                           "other_label": (recv_other.strip() or None) if proj == "その他" else None}
                 if store.find_duplicate_receivable(payload["month"], payload["client_id"], payload["amount"]):
                     st.session_state["recv_pending"] = payload
                     st.rerun()
                 store.add_receivable(payload["month"], payload["client_id"], payload["amount"],
-                                     note=payload["note"], project_id=payload["project_id"])
+                                     note=payload["note"], project_id=payload["project_id"],
+                                     other_label=payload["other_label"])
                 st.success("登録しました")
                 st.rerun()
 

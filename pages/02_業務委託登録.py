@@ -33,8 +33,10 @@ with tab_reg:
     pto = c3.date_input("配布業務期間(終了)")
 
     st.markdown("**明細**（案件・種別・数量・単価）｜数量と単価は小数点も入力できます")
+    st.caption("案件を「その他」にした行は、右の『その他の案件名』に何の案件か入力してください"
+               "（号別明細の『その他』で確認できます）。")
     editor = st.data_editor(
-        pd.DataFrame([{"案件": "", "種別": "配布", "数量": 0.0, "単価": 0.0}]),
+        pd.DataFrame([{"案件": "", "種別": "配布", "数量": 0.0, "単価": 0.0, "その他の案件名": ""}]),
         num_rows="dynamic",
         column_config={
             "案件": st.column_config.SelectboxColumn(options=list(projs.keys())),
@@ -42,8 +44,10 @@ with tab_reg:
                 options=["配布", "挟み込み", "交通費", "手当", "その他"]),
             "数量": st.column_config.NumberColumn(min_value=0.0, step=0.5, format="%g"),
             "単価": st.column_config.NumberColumn(min_value=0.0, step=0.5, format="%g"),
+            "その他の案件名": st.column_config.TextColumn(
+                help="案件を『その他』にしたとき、何の案件か"),
         },
-        column_order=["案件", "種別", "数量", "単価"],
+        column_order=["案件", "種別", "数量", "単価", "その他の案件名"],
         use_container_width=True, key="line_editor")
 
     lines = []
@@ -53,9 +57,11 @@ with tab_reg:
         qty = posting_logic._num(row["数量"]) if pd.notna(row["数量"]) else 0
         price = posting_logic._num(row["単価"]) if pd.notna(row["単価"]) else 0
         remark = row["種別"] if pd.notna(row["種別"]) else "配布"
+        olabel = row.get("その他の案件名") if "その他の案件名" in row else None
+        olabel = (str(olabel).strip() or None) if (pd.notna(olabel) and row["案件"] == "その他") else None
         lines.append({"project_id": projs.get(row["案件"]), "project_name": row["案件"],
                       "report_qty": qty, "unit_price": price, "amount": qty * price,
-                      "remark": remark})
+                      "remark": remark, "other_label": olabel})
 
     if lines:
         st.markdown("**明細（確認）**")
@@ -78,7 +84,8 @@ with tab_reg:
         store.add_contract_invoice(
             dists[dist_name], str(issue), str(pfrom), str(pto),
             [{"project_id": l["project_id"], "report_qty": l["report_qty"],
-              "unit_price": l["unit_price"], "remark": l["remark"]} for l in lines])
+              "unit_price": l["unit_price"], "remark": l["remark"],
+              "other_label": l.get("other_label")} for l in lines])
         st.success("登録しました")
 
     if lines:
@@ -124,23 +131,26 @@ with tab_list:
     id2proj = {p["id"]: p["name"] for p in store.list_projects()}
     today = _date.today().isoformat()
 
-    # --- 期間フィルタ（号別明細と同じ部品・対象は請求の発行日） ---
-    lo, hi, note = period_picker(key="contract_period")
-    st.caption(f"表示期間: {note}")
-    invoices = [i for i in invoices if posting_logic.in_period(i.get("issue_date"), lo, hi)]
+    # --- 期間フィルタ（左）＋ 配布員フィルタ（右）を横並びで ---
+    col_period, col_dist = st.columns([2, 1])
+    with col_period:
+        lo, hi, note = period_picker(key="contract_period")
+        st.caption(f"表示期間: {note}")
+    with col_dist:
+        # 実際に請求のある配布員だけを候補に出す
+        names_in_use = sorted({id2name.get(i["distributor_id"], "?") for i in invoices})
+        dist_filter = st.selectbox("配布員で絞り込み", ["全員"] + names_in_use,
+                                   key="contract_dist_filter",
+                                   help="選んだ配布員の明細だけ表示します。")
 
-    # --- 並べ替え ---
-    order = st.radio("並び順", ["発行日（新しい順）", "発行日（古い順）", "配布員名"],
-                     horizontal=True, key="contract_order")
-    if order == "発行日（古い順）":
-        invoices = sorted(invoices, key=lambda i: i.get("issue_date") or "")
-    elif order == "配布員名":
-        invoices = sorted(invoices, key=lambda i: id2name.get(i["distributor_id"], ""))
-    else:
-        invoices = sorted(invoices, key=lambda i: i.get("issue_date") or "", reverse=True)
+    invoices = [i for i in invoices if posting_logic.in_period(i.get("issue_date"), lo, hi)]
+    if dist_filter != "全員":
+        invoices = [i for i in invoices if id2name.get(i["distributor_id"], "?") == dist_filter]
+    # 既定は発行日の新しい順（並び順の切替は廃止）
+    invoices = sorted(invoices, key=lambda i: i.get("issue_date") or "", reverse=True)
 
     if not invoices:
-        st.caption("表示期間内の請求はありません。")
+        st.caption("表示期間・配布員の条件に合う請求はありません。")
         st.stop()
 
     # --- 一覧（チェックで複数選択） ---
