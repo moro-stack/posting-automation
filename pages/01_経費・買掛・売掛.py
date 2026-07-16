@@ -6,7 +6,7 @@ import streamlit as st
 from common import ocr
 from common import posting_logic
 from common import posting_store as store
-from common.ui import apply_app_style, section_export, nice_table, period_picker
+from common.ui import apply_app_style, section_export, nice_table, period_picker, flash, show_flash
 
 apply_app_style()
 st.title("小口／買掛／売掛の登録")
@@ -84,6 +84,7 @@ if mode == "小口":
     tab_reg, tab_list = st.tabs([_REG_TAB, _LIST_TAB])
 
     with tab_reg:
+        show_flash()
         ups = st.file_uploader("レシート画像・PDF（複数可・AIが下書き抽出）",
                                type=_UPLOAD_TYPES, accept_multiple_files=True)
         if ups and st.button("画像/PDFをAIで読み取る"):
@@ -124,7 +125,7 @@ if mode == "小口":
                                          memo=str(r["メモ"]) or None, source="ocr")
                     cnt += 1
                 del st.session_state["petty_bulk"]
-                st.success(f"{cnt}件を登録しました")
+                flash(f"{cnt}件を登録しました")
                 st.rerun()
             if b2.button("やめる", key="petty_bulk_cancel"):
                 del st.session_state["petty_bulk"]
@@ -145,7 +146,7 @@ if mode == "小口":
                                      project_id=p["project_id"], memo=p["memo"],
                                      source=p["source"], other_label=p.get("other_label"))
                 del st.session_state["petty_pending"]
-                st.success("登録しました")
+                flash("登録しました")
                 st.rerun()
             if cc2.button("やめる", key="petty_no"):
                 del st.session_state["petty_pending"]
@@ -175,7 +176,7 @@ if mode == "小口":
                                      project_id=payload["project_id"], memo=payload["memo"],
                                      source=payload["source"], other_label=payload["other_label"])
                 st.session_state.pop("petty_draft", None)
-                st.success("登録しました")
+                flash("登録しました")
                 st.rerun()
 
     with tab_list:
@@ -194,6 +195,7 @@ elif mode == "買掛":
     tab_reg, tab_list = st.tabs([_REG_TAB, _LIST_TAB])
 
     with tab_reg:
+        show_flash()
         ups = st.file_uploader("請求書画像・PDF（複数可・AIが取引先・金額・請求日を下書き抽出）",
                                type=_UPLOAD_TYPES, accept_multiple_files=True)
         if ups and st.button("画像/PDFをAIで読み取る"):
@@ -234,7 +236,7 @@ elif mode == "買掛":
                                       note=str(r["備考"]) or None, source="ocr")
                     cnt += 1
                 del st.session_state["pay_bulk"]
-                st.success(f"{cnt}件を登録しました")
+                flash(f"{cnt}件を登録しました")
                 st.rerun()
             if b2.button("やめる", key="pay_bulk_cancel"):
                 del st.session_state["pay_bulk"]
@@ -256,7 +258,7 @@ elif mode == "買掛":
                                   note=p["note"], source=p["source"],
                                   project_id=p.get("project_id"), other_label=p.get("other_label"))
                 del st.session_state["pay_pending"]
-                st.success("登録しました")
+                flash("登録しました")
                 st.rerun()
             if cc2.button("やめる", key="pay_no"):
                 del st.session_state["pay_pending"]
@@ -292,7 +294,7 @@ elif mode == "買掛":
                                   source=payload["source"], project_id=payload["project_id"],
                                   other_label=payload["other_label"])
                 st.session_state.pop("pay_draft", None)
-                st.success("登録しました")
+                flash("登録しました")
                 st.rerun()
 
     with tab_list:
@@ -314,6 +316,7 @@ else:  # 売掛
     tab_reg, tab_list = st.tabs([_REG_TAB, _LIST_TAB])
 
     with tab_reg:
+        show_flash()
         if "recv_pending" in st.session_state:
             p = st.session_state["recv_pending"]
             st.warning("⚠️ 同様の内容が登録済みです。それでも登録しますか？")
@@ -324,7 +327,7 @@ else:  # 売掛
                                      note=p["note"], project_id=p["project_id"],
                                      other_label=p.get("other_label"))
                 del st.session_state["recv_pending"]
-                st.success("登録しました")
+                flash("登録しました")
                 st.rerun()
             if cc2.button("やめる", key="recv_no"):
                 del st.session_state["recv_pending"]
@@ -351,7 +354,7 @@ else:  # 売掛
                 store.add_receivable(payload["month"], payload["client_id"], payload["amount"],
                                      note=payload["note"], project_id=payload["project_id"],
                                      other_label=payload["other_label"])
-                st.success("登録しました")
+                flash("登録しました")
                 st.rerun()
 
     with tab_list:

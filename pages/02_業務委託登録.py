@@ -8,7 +8,8 @@ import streamlit as st
 from common import invoice_excel
 from common import posting_logic
 from common import posting_store as store
-from common.ui import apply_app_style, section_export, nice_table, period_picker
+from common.ui import (apply_app_style, section_export, nice_table, period_picker,
+                       flash, show_flash)
 from common.excel_io import freeze_xlsx_bytes
 
 apply_app_style()
@@ -25,6 +26,7 @@ tab_reg, tab_list = st.tabs(["✒️ 登録", "📋 登録済み一覧"])
 
 # ============================================================ 登録タブ
 with tab_reg:
+    show_flash()
     dist_name = st.selectbox("配布員", list(dists.keys()),
                              help="配布員名を入力すると絞り込めます。新規は『マスタ管理』で登録してください。")
     c1, c2, c3 = st.columns(3)
@@ -86,7 +88,10 @@ with tab_reg:
             [{"project_id": l["project_id"], "report_qty": l["report_qty"],
               "unit_price": l["unit_price"], "remark": l["remark"],
               "other_label": l.get("other_label")} for l in lines])
-        st.success("登録しました")
+        # 明細エディタを空に戻して次の登録をしやすく（登録しましたは再実行後に表示）
+        st.session_state.pop("line_editor", None)
+        flash("登録しました")
+        st.rerun()
 
     if lines:
         if len(lines) > 6:

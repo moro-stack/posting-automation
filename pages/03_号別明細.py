@@ -8,9 +8,10 @@ import streamlit as st
 from common import posting_logic
 from common import posting_store as store
 from common.excel_io import freeze_xlsx_bytes
-from common.ui import apply_app_style, section_export, nice_table, period_picker
+from common.ui import apply_app_style, section_export, nice_table, period_picker, flash, show_flash
 
 apply_app_style()
+show_flash()
 
 _WD = ["月", "火", "水", "木", "金", "土", "日"]
 
@@ -153,6 +154,7 @@ with st.expander(f":material/groups: 配布員代の内訳（業務委託＋直�
         if st.form_submit_button("追加") and _parse_int(amt_str) > 0:
             store.add_issue_manual_cost(pid, work.strip() or "配布",
                                         _parse_int(amt_str), work_date=str(w))
+            flash("配布員代を追加しました")
             st.rerun()
 
     if manual:
@@ -180,9 +182,11 @@ with st.expander(f":material/groups: 配布員代の内訳（業務委託＋直�
             if u1.form_submit_button("更新") and eamt > 0:
                 store.update_issue_manual_cost(target["id"], work_date=str(ew),
                                                content=ework.strip() or "配布", amount=eamt)
+                flash("更新しました")
                 st.rerun()
             if u2.form_submit_button("削除"):
                 store.delete_issue_manual_cost(target["id"])
+                flash("削除しました")
                 st.rerun()
 
     section_export(_man_disp, f"配布員代直接入力_{sel}", key="issue_labor")
