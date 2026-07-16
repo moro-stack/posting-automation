@@ -112,28 +112,24 @@ with s3:
 
 st.divider()
 
-# ===== その他の案件内訳：登録時に手入力した「何の案件か」を表示 =====
-# 案件=「その他」で登録したデータが実際は何だったか(other_label)を一覧で見せる。
-_label_rows = posting_logic.other_label_rows(
-    pid, petty=petty, payables=payables, receivables=receivables,
-    contract_lines=contract_lines)
-if sel == "その他" or _label_rows:
-    _lbl_disp = [{"案件名": r["案件名"], "区分": r["区分"],
-                  "金額": _yen(r["金額"]), "日付": r["日付"]} for r in _label_rows]
-    with st.expander(
-            f':material/label: その他の案件内訳　—　{len(_label_rows)}件（登録時に入力した案件名）',
-            expanded=(sel == "その他")):
-        st.caption("小口・買掛・売掛・業務委託の登録で案件を「その他」にした際に"
-                   "入力した『何の案件か』を表示します。")
-        nice_table(_lbl_disp, "その他の案件名が入力されたデータはまだありません。"
-                   "（登録画面で案件を『その他』にすると入力欄が出ます）")
-        section_export(_lbl_disp, f"その他案件内訳_{sel}", key="other_labels")
+# 案件=「その他」の号のときだけ、内訳表の左端に「案件名」(登録時に手入力した other_label)を出す。
+# 「その他」に何の案件で入れたかを、配布員代・雑費の内訳の中でそのまま確認できるようにする。
+_show_label = (sel == "その他")
+
+
+def _with_label(row, other_label):
+    """内訳表示行の左端に『案件名』列を差し込む(その他号のときだけ)。"""
+    if not _show_label:
+        return row
+    return {"案件名": other_label or "", **row}
+
 
 # ===== 配布員代（詳細は折りたたみ） =====
 issue_contract = [l for l in contract_lines if l.get("project_id") == pid]
-_con_disp = [{"種別": l.get("remark") or "",
-              "数量": posting_logic.qty_label(l.get("report_qty"), l.get("remark")),
-              "単価": _yen(l.get("unit_price")), "合計": _yen(l.get("amount"))}
+_con_disp = [_with_label({"種別": l.get("remark") or "",
+                          "数量": posting_logic.qty_label(l.get("report_qty"), l.get("remark")),
+                          "単価": _yen(l.get("unit_price")), "合計": _yen(l.get("amount"))},
+                         l.get("other_label"))
              for l in issue_contract]
 _man_disp = [{"日付": r.get("work_date") or "（日付なし）",
               "曜日": _weekday(r.get("work_date")),
@@ -199,14 +195,16 @@ for r in petty:
     item = _cats.get(r.get("category_id"), "")
     if r.get("memo"):
         item = f'{item}（{r["memo"]}）' if item else r["memo"]
-    _misc.append({"項目": item or "小口", "金額": _yen(r.get("amount")),
-                  "支払方法": posting_logic.payment_method("petty", r),
-                  "日付": r.get("date") or ""})
+    _misc.append(_with_label(
+        {"項目": item or "小口", "金額": _yen(r.get("amount")),
+         "支払方法": posting_logic.payment_method("petty", r),
+         "日付": r.get("date") or ""}, r.get("other_label")))
 for r in payables:
     item = r.get("vendor_name") or _vends.get(r.get("vendor_id"), "")
-    _misc.append({"項目": item or "買掛", "金額": _yen(r.get("amount")),
-                  "支払方法": posting_logic.payment_method("payable", r),
-                  "日付": r.get("date") or r.get("month") or ""})
+    _misc.append(_with_label(
+        {"項目": item or "買掛", "金額": _yen(r.get("amount")),
+         "支払方法": posting_logic.payment_method("payable", r),
+         "日付": r.get("date") or r.get("month") or ""}, r.get("other_label")))
 
 with st.expander(f":material/receipt_long: 雑費の内訳（小口＋買掛）　—　小計 {_yen(groups['misc'])}",
                  expanded=False):

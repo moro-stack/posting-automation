@@ -159,29 +159,3 @@ def test_days_since_today_and_past_and_none():
     assert L.days_since("こわれた日付", today="2026-07-16") is None
 
 
-def test_other_label_rows_collects_only_labeled_entries_of_the_project():
-    pid = 5   # 「その他」号
-    petty = [{"project_id": 5, "amount": 3000, "other_label": "A社折込チラシ", "date": "2026-07-05"},
-             {"project_id": 5, "amount": 500, "other_label": None, "date": "2026-07-05"},   # ラベル無しは除外
-             {"project_id": 9, "amount": 999, "other_label": "別の号", "date": "2026-07-05"}]  # 別号は除外
-    payables = [{"project_id": 5, "amount": 12000, "other_label": "B商店DM印刷", "date": "2026-07-08"}]
-    receivables = [{"project_id": 5, "amount": 50000, "other_label": "C社スポット売上", "month": "2026-07"}]
-    contract_lines = [{"project_id": 5, "amount": 8000, "other_label": "臨時ポスティング",
-                       "issue_date": "2026-07-10"}]
-    rows = L.other_label_rows(pid, petty=petty, payables=payables, receivables=receivables,
-                              contract_lines=contract_lines)
-    # ラベルありの その他 号のエントリだけ（4件）。ラベル無し・別号は除外
-    assert len(rows) == 4
-    labels = [r["案件名"] for r in rows]
-    assert labels == ["C社スポット売上", "A社折込チラシ", "B商店DM印刷", "臨時ポスティング"]
-    assert [r["区分"] for r in rows] == ["売上", "小口", "買掛", "業務委託"]
-    assert rows[0]["金額"] == 50000 and rows[0]["日付"] == "2026-07"
-    assert rows[1]["金額"] == 3000 and rows[1]["日付"] == "2026-07-05"
-    assert rows[3]["日付"] == "2026-07-10"
-
-
-def test_other_label_rows_empty_when_no_labels():
-    rows = L.other_label_rows(
-        5, petty=[{"project_id": 5, "amount": 100, "other_label": "", "date": "2026-07-01"}],
-        payables=[], receivables=[], contract_lines=[])
-    assert rows == []

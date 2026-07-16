@@ -144,31 +144,3 @@ def days_since(iso_str, *, today=None):
     return (_today(today) - d).days
 
 
-def other_label_rows(project_id, *, petty, payables, receivables, contract_lines):
-    """『その他』号などで登録時に手入力した案件名(other_label)を集めて返す。
-    案件=「その他」で登録したデータが実際は何の案件だったかを、号別明細で見えるようにする。
-    other_label が空のもの・別の号のものは含めない。
-    各行 = {案件名, 区分, 金額, 日付}。並び順は 売上 → 小口 → 買掛 → 業務委託。
-    金額は数値(表示整形は呼び出し側)。DB非依存の純関数。"""
-    rows = []
-
-    def _labeled(r):
-        return r.get("project_id") == project_id and str(r.get("other_label") or "").strip()
-
-    for r in receivables:
-        if _labeled(r):
-            rows.append({"案件名": r["other_label"], "区分": "売上",
-                         "金額": _num(r.get("amount")), "日付": r.get("month") or ""})
-    for r in petty:
-        if _labeled(r):
-            rows.append({"案件名": r["other_label"], "区分": "小口",
-                         "金額": _num(r.get("amount")), "日付": r.get("date") or ""})
-    for r in payables:
-        if _labeled(r):
-            rows.append({"案件名": r["other_label"], "区分": "買掛",
-                         "金額": _num(r.get("amount")), "日付": r.get("date") or r.get("month") or ""})
-    for l in contract_lines:
-        if _labeled(l):
-            rows.append({"案件名": l["other_label"], "区分": "業務委託",
-                         "金額": _num(l.get("amount")), "日付": l.get("issue_date") or ""})
-    return rows
