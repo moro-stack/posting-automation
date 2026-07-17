@@ -10,6 +10,12 @@ st.title("マスタ管理")
 
 _ORIGINAL_STATUSES = posting_logic.ORIGINAL_STATUSES
 _PAY_TYPES = ["歩合", "日当", "時給", "月給"]
+_KINDS = ["業務委託", "自社社員", "アルバイト"]
+
+
+def _index_of(options, value):
+    """selectbox の初期選択位置。今の値が選択肢に無ければ先頭に落とす(既存データの保険)。"""
+    return options.index(value) if value in options else 0
 
 
 def _split_active(rows):
@@ -71,23 +77,126 @@ def _inactive_ui(master, inactive, *, update_fn):
                 st.rerun()
 
 
-def _rows_ui(master, rows, *, update_fn, label_name):
-    """有効な行を1行ずつ出し、右端に削除(or 停止中)ボタンを置く。
-    確認UIは列の外＝全幅に出す(狭い列に押し込むと確認文が読めないため)。"""
+def _edit_slot(master):
+    """そのタブで「今どの行を編集中か」を覚えておく場所(行idを入れる)。
+    開くのは常に1行だけ＝一覧が縦に伸びず、どこを直しているのか迷わない。"""
+    return f"_edit_row_{master}"
+
+
+def _open_edit(master, row_id):
+    st.session_state[_edit_slot(master)] = row_id
+
+
+def _close_edit(master):
+    st.session_state.pop(_edit_slot(master), None)
+
+
+def _edit_ui(master, row, *, update_fn, fields_fn, button_container=None):
+    """編集ボタン→その行の項目を直せるフォーム。confirm_delete と同じ考え方で、
+    ボタンだけを button_container(行の右端の狭い列)に置き、フォームは呼び出した場所
+    ＝全幅に出す(狭い列に押し込むと画面幅3%に潰れて読めないため)。
+
+    fields_fn(row) が入力欄を描き、update_fn に渡す kwargs の dict を返す。
+    開く・閉じるは on_click のコールバックで行う。コールバックはスクリプト本体より先に
+    走るため、押したその実行で対象行が切り替わる(st.rerun が要らない)。
+
+    ⚠️ fields_fn の中のウィジェット key には必ず行idを入れること。固定keyだと
+    Streamlit が session_state を保持し、編集する行を切り替えても前の行に入力した値が
+    残ったまま描画され、更新時に別の行へ誤って書き込む(2026-07-14に実際に起きた事故)。
+    """
+    target = button_container if button_container is not None else st
+    target.button("編集", key=f"edit_{master}_{row['id']}",
+                  on_click=_open_edit, args=(master, row["id"]))
+    if st.session_state.get(_edit_slot(master)) != row["id"]:
+        return
+    st.markdown(f"**「{row['name']}」を編集**")
+    with st.form(f"edit_form_{master}_{row['id']}"):
+        kwargs = fields_fn(row)
+        c1, c2, _ = st.columns([1, 1, 4])
+        ok = c1.form_submit_button("更新")
+        c2.form_submit_button("やめる", on_click=_close_edit, args=(master,))
+        if ok and str(kwargs.get("name") or "").strip():
+            update_fn(row["id"], **kwargs)
+            _close_edit(master)
+            # section(=master)を付けないと、最初に描画される案件タブの show_flash() が
+            # メッセージを奪い、操作したタブには何も出ない。
+            flash("更新しました", master)
+            st.rerun()
+
+
+def _name_fields(master, label_name):
+    """名前だけを直すマスタ(案件・費目・売掛先)の入力欄。"""
+    def _fields(row):
+        name = st.text_input(f"{label_name}名", value=row["name"],
+                             key=f"edit_name_{master}_{row['id']}")
+        return {"name": name.strip()}
+    return _fields
+
+
+def _vendor_fields(row):
+    rid = row["id"]
+    n = st.text_input("取引先名", value=row["name"], key=f"edit_name_payables_vendor_{rid}")
+    c = st.text_input("既定の費目（家賃・電気 など）", value=row.get("default_category") or "",
+                      key=f"edit_cat_payables_vendor_{rid}")
+    opts = ["(なし)"] + _ORIGINAL_STATUSES
+    o = st.selectbox("既定の原本区分", opts,
+                     index=_index_of(opts, row.get("default_original_status")),
+                     key=f"edit_orig_payables_vendor_{rid}")
+    return {"name": n.strip(), "default_category": (c.strip() or None),
+            "default_original_status": (None if o == "(なし)" else o)}
+
+
+def _distributor_fields(row):
+    rid = row["id"]
+    n = st.text_input("氏名", value=row["name"], key=f"edit_name_distributor_{rid}")
+    kind = st.selectbox("区分（雇用形態）", _KINDS, index=_index_of(_KINDS, row.get("kind")),
+                        key=f"edit_kind_distributor_{rid}")
+    pay_type = st.selectbox("支払形態（報酬の計算方法）", _PAY_TYPES,
+                            index=_index_of(_PAY_TYPES, row.get("pay_type")),
+                            key=f"edit_pay_distributor_{rid}")
+    bank = st.text_area("振込先", value=row.get("bank_info") or "",
+                        key=f"edit_bank_distributor_{rid}")
+    h1, h2 = st.columns(2)
+    # st.form の中では「支払形態を選んだ瞬間に出し分ける」ができない(Streamlitの仕様)ため、
+    # 時給額・月額は両方出して caption で補う(登録フォームと同じ形)。
+    hourly = h1.number_input("時給額", min_value=0, step=1,
+                             value=int(row.get("hourly_rate") or 0),
+                             key=f"edit_hourly_distributor_{rid}")
+    monthly = h2.number_input("月額", min_value=0, step=1,
+                              value=int(row.get("monthly_rate") or 0),
+                              key=f"edit_monthly_distributor_{rid}")
+    st.caption("時給額は支払形態が「時給」のとき、月額は「月給」のときだけ使います。"
+               "日当の金額は下の「日当金額の設定」で入れてください。")
+    return {"name": n.strip(), "kind": kind, "pay_type": pay_type,
+            "bank_info": (bank.strip() or None),
+            "hourly_rate": (int(hourly) or None),
+            "monthly_rate": (int(monthly) or None)}
+
+
+def _row_ui(master, row, *, update_fn, label_name, fields_fn):
+    """有効な行1つ。右端に編集・削除(or 停止中)ボタンを置く。
+    編集フォーム・確認UIは列の外＝全幅に出す(狭い列に押し込むと読めないため)。"""
+    c1, c2, c3 = st.columns([4, 1, 1])
+    c1.write(row["name"])
+    _edit_ui(master, row, update_fn=update_fn, fields_fn=fields_fn, button_container=c2)
+    _remove_ui(master, row, label_name=label_name, update_fn=update_fn,
+               button_container=c3)
+
+
+def _rows_ui(master, rows, *, update_fn, label_name, fields_fn):
     if not rows:
         st.caption(f"{label_name}はまだ登録されていません。")
         return
     for r in rows:
-        c1, c2 = st.columns([4, 1])
-        c1.write(r["name"])
-        _remove_ui(master, r, label_name=label_name, update_fn=update_fn,
-                   button_container=c2)
+        _row_ui(master, r, update_fn=update_fn, label_name=label_name,
+                fields_fn=fields_fn)
 
 
 def _simple_master(label, master, list_fn, add_fn, update_fn):
     show_flash(master)
     active, inactive = _split_active(list_fn())
-    _rows_ui(master, active, update_fn=update_fn, label_name=label)
+    _rows_ui(master, active, update_fn=update_fn, label_name=label,
+             fields_fn=_name_fields(master, label))
     _inactive_ui(master, inactive, update_fn=update_fn)
     with st.form(f"add_{label}", clear_on_submit=True):
         name = st.text_input(f"{label}名を追加")
@@ -116,10 +225,8 @@ with tab3:
     nice_table(disp, "買掛先はまだ登録されていません。")
     st.caption("既定の原本区分を入れておくと、買掛登録で取引先名が一致したときに自動で入ります。")
     for r in active:
-        c1, c2 = st.columns([4, 1])
-        c1.write(r["name"])
-        _remove_ui(master, r, label_name="買掛先",
-                   update_fn=store.update_payables_vendor, button_container=c2)
+        _row_ui(master, r, update_fn=store.update_payables_vendor,
+                label_name="買掛先", fields_fn=_vendor_fields)
     _inactive_ui(master, inactive, update_fn=store.update_payables_vendor)
     with st.form("add_vendor", clear_on_submit=True):
         n = st.text_input("取引先名")
@@ -146,15 +253,13 @@ with tab5:
              "振込先": r.get("bank_info") or ""} for r in active]
     nice_table(disp, "業務委託はまだ登録されていません。")
     for r in active:
-        c1, c2 = st.columns([4, 1])
-        c1.write(r["name"])
-        _remove_ui(master, r, label_name="業務委託",
-                   update_fn=store.update_distributor, button_container=c2)
+        _row_ui(master, r, update_fn=store.update_distributor,
+                label_name="業務委託", fields_fn=_distributor_fields)
     _inactive_ui(master, inactive, update_fn=store.update_distributor)
 
     with st.form("add_dist", clear_on_submit=True):
         n = st.text_input("配布員 氏名")
-        kind = st.selectbox("区分（雇用形態）", ["業務委託", "自社社員", "アルバイト"])
+        kind = st.selectbox("区分（雇用形態）", _KINDS)
         pay_type = st.selectbox("支払形態（報酬の計算方法）", _PAY_TYPES)
         bank = st.text_area("振込先", placeholder="例：三井住友銀行 梅田支店 普通 1234567 ヤマダ タロウ")
         h1, h2 = st.columns(2)

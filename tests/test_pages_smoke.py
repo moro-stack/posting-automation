@@ -117,6 +117,259 @@ def test_master_page_deactivates_distributor_in_use(db):
     assert not rows["使用中の人"]["active"]
 
 
+# ===== マスタの編集 =====
+_MASTER_PAGE = "05_マスタ管理.py"
+
+
+def _edit_widget(seq, prefix):
+    """開いている編集フォームの入力欄を、ウィジェットkeyの先頭一致で取る。
+    行idまでは指定しない＝固定キーへの退行後も同じように取れるので、テストの判定は
+    「DBの中身がどうなったか」だけに依存する(keyの形を変えただけでは通ってしまわない)。
+    登録フォーム側の同名ラベル(振込先・時給額など)は key を持たないので混ざらない。"""
+    hits = [w for w in seq if (w.key or "").startswith(prefix)]
+    assert len(hits) == 1, f"{prefix}: {len(hits)}件(編集フォームは1つだけ開くはず)"
+    return hits[0]
+
+
+def _submit_edit(at):
+    """開いている編集フォームの「更新」を押す。"""
+    [b for b in at.button if b.label == "更新"][0].click().run()
+
+
+def test_master_page_edit_distributor_updates_all_fields(db):
+    """業務委託の編集で、行そのものの項目(氏名・区分・支払形態・振込先・時給額・月額)が
+    DBに反映されること。振込先の打ち間違いを直せない、が今回の改修の動機。"""
+    did = store.add_distributor("山田太郎", kind="業務委託", pay_type="日当",
+                                bank_info="三井住友 1111111", db_path=db)
+    at = _run(_MASTER_PAGE)
+    at.button(key=f"edit_distributor_{did}").click().run()
+    assert not at.exception
+
+    _edit_widget(at.text_input, "edit_name_distributor").set_value("山田太郎改")
+    _edit_widget(at.selectbox, "edit_kind_distributor").set_value("アルバイト")
+    _edit_widget(at.selectbox, "edit_pay_distributor").set_value("時給")
+    _edit_widget(at.text_area, "edit_bank_distributor").set_value("三井住友 2222222")
+    _edit_widget(at.number_input, "edit_hourly_distributor").set_value(1500)
+    _edit_widget(at.number_input, "edit_monthly_distributor").set_value(250000)
+    _submit_edit(at)
+
+    assert not at.exception
+    row = {r["id"]: r for r in store.list_distributors(db_path=db)}[did]
+    assert row["name"] == "山田太郎改"
+    assert row["kind"] == "アルバイト"
+    assert row["pay_type"] == "時給"
+    assert row["bank_info"] == "三井住友 2222222"
+    assert row["hourly_rate"] == 1500
+    assert row["monthly_rate"] == 250000
+    assert row["active"]      # 編集で停止中に落ちない
+
+
+def test_master_page_edit_payables_vendor_updates_fields(db):
+    """買掛先の編集で、取引先名・既定の費目・既定の原本区分が反映されること。"""
+    from common import posting_logic
+
+    vid = store.add_payables_vendor("ABC商事", default_category="家賃",
+                                    default_original_status=None, db_path=db)
+    at = _run(_MASTER_PAGE)
+    at.button(key=f"edit_payables_vendor_{vid}").click().run()
+    assert not at.exception
+
+    _edit_widget(at.text_input, "edit_name_payables_vendor").set_value("ABC商事株式会社")
+    _edit_widget(at.text_input, "edit_cat_payables_vendor").set_value("電気")
+    _edit_widget(at.selectbox, "edit_orig_payables_vendor").set_value(
+        posting_logic.ORIGINAL_STATUSES[-1])
+    _submit_edit(at)
+
+    assert not at.exception
+    row = {r["id"]: r for r in store.list_payables_vendors(db_path=db)}[vid]
+    assert row["name"] == "ABC商事株式会社"
+    assert row["default_category"] == "電気"
+    assert row["default_original_status"] == posting_logic.ORIGINAL_STATUSES[-1]
+
+
+def test_master_page_edit_project_updates_name(db):
+    pid = store.add_project("案件A", db_path=db)
+    at = _run(_MASTER_PAGE)
+    at.button(key=f"edit_project_{pid}").click().run()
+    _edit_widget(at.text_input, "edit_name_project").set_value("案件A改")
+    _submit_edit(at)
+
+    assert not at.exception
+    assert {r["id"]: r for r in store.list_projects(db_path=db)}[pid]["name"] == "案件A改"
+
+
+def test_master_page_edit_widget_keys_are_per_row(db):
+    """🔴 編集フォームのウィジェットkeyに行idが入っていること。
+    固定keyだと Streamlit が session_state を保持し、対象行を切り替えても前の行の値が
+    残る(＝別の行を上書きする。2026-07-14の事故)。下の
+    test_master_page_edit_updates_only_the_target_row が本命だが、key の形そのものも
+    ここで固定しておく。"""
+    a = store.add_distributor("Aさん", db_path=db)
+    b = store.add_distributor("Bさん", db_path=db)
+    at = _run(_MASTER_PAGE)
+    at.button(key=f"edit_distributor_{a}").click().run()
+    keys = {w.key for w in at.text_input} | {w.key for w in at.text_area}
+    assert f"edit_name_distributor_{a}" in keys
+    assert f"edit_bank_distributor_{a}" in keys
+    assert "edit_name_distributor" not in keys       # 固定キーへの退行
+    assert f"edit_name_distributor_{b}" not in keys  # 開いていない行の欄は出さない
+
+
+def test_master_page_edit_updates_only_the_target_row(db):
+    """🔴🔴 このタスクで一番大事なテスト(2026-07-14の事故の再発防止)。
+    Aさんを編集して振込先を直したあと、Bさんを編集して氏名だけを直す。
+    Bさんの振込先・月額は元のまま、Aさんも氏名は元のままであること。
+
+    編集フォームのウィジェットkeyが固定(行idを含まない)だと、Bさんのフォームに
+    Aさんで入力した値が残ったまま描画され、更新でBさんの振込先がAさんの値に化ける。"""
+    a = store.add_distributor("山田太郎", kind="業務委託", pay_type="時給",
+                              bank_info="A銀行 1111111", hourly_rate=1000, db_path=db)
+    b = store.add_distributor("佐藤花子", kind="自社社員", pay_type="月給",
+                              bank_info="B銀行 2222222", monthly_rate=200000, db_path=db)
+
+    at = _run(_MASTER_PAGE)
+    # 1) Aさんの編集を開いて振込先を打ち直す
+    at.button(key=f"edit_distributor_{a}").click().run()
+    _edit_widget(at.text_area, "edit_bank_distributor").set_value("A銀行 9999999")
+    # 2) 更新せずにBさんの編集へ切り替え、Bさんは氏名だけ直す
+    #    (振込先・月額・区分・支払形態には触らない)
+    at.button(key=f"edit_distributor_{b}").click().run()
+    _edit_widget(at.text_input, "edit_name_distributor").set_value("佐藤花")
+    _submit_edit(at)
+    assert not at.exception
+
+    rows = {r["id"]: r for r in store.list_distributors(db_path=db)}
+    # Bさんは触っていない項目が元のまま。
+    # 固定キーだと 1) でAさんの欄に入力した "A銀行 9999999" がBさんのフォームに残り、
+    # Bさんの振込先がAさんの口座に化ける(＝2026-07-14の事故)。
+    assert rows[b]["name"] == "佐藤花"
+    assert rows[b]["bank_info"] == "B銀行 2222222"
+    assert rows[b]["kind"] == "自社社員"
+    assert rows[b]["pay_type"] == "月給"
+    assert rows[b]["monthly_rate"] == 200000
+    assert rows[b]["hourly_rate"] is None   # 使わない項目は空のまま(0を書かない)
+    # Aさんは1行たりとも変わっていない(更新していないので入力は捨てられる)
+    assert rows[a]["name"] == "山田太郎"
+    assert rows[a]["bank_info"] == "A銀行 1111111"
+    assert rows[a]["hourly_rate"] == 1000
+
+
+def test_master_page_edit_announces_in_the_tab_that_was_operated(db):
+    """🔴 更新のアナウンスは操作したタブに出ること。
+    flash に section を付けないと、最初に描画される案件タブの show_flash() が
+    メッセージを奪い、業務委託タブには何も出ない(＝更新できたのか分からない)。"""
+    did = store.add_distributor("山田太郎", db_path=db)
+    at = _run(_MASTER_PAGE)
+    at.button(key=f"edit_distributor_{did}").click().run()
+    _edit_widget(at.text_input, "edit_name_distributor").set_value("山田太郎改")
+    _submit_edit(at)
+
+    assert not at.exception
+    labels = [t.label for t in at.tabs]
+    assert [s.value for s in at.tabs[labels.index("業務委託")].success] == ["更新しました"]
+    assert [s.value for s in at.tabs[labels.index("案件")].success] == []
+
+
+def test_master_page_edit_closes_the_form_after_updating(db):
+    """更新したら編集フォームは閉じること(開きっぱなしだと、直した後もフォームが残って
+    「まだ保存できていないのか」と迷う。編集中の行は _edit_row_<master> で覚えている)。
+    ※ st.rerun をまたぐと AppTest の要素ツリーに前の実行の残骸が残るため、
+      「閉じたこと」は画面ではなく session_state で見る。"""
+    did = store.add_distributor("山田太郎", db_path=db)
+    at = _run(_MASTER_PAGE)
+    at.button(key=f"edit_distributor_{did}").click().run()
+    assert at.session_state["_edit_row_distributor"] == did
+    _edit_widget(at.text_input, "edit_name_distributor").set_value("山田太郎改")
+    _submit_edit(at)
+
+    assert not at.exception
+    assert "_edit_row_distributor" not in at.session_state
+
+
+def test_master_page_edit_form_is_not_shown_until_button_is_pressed(db):
+    """編集フォームは押すまで出さない(一覧が縦に伸びない)。"""
+    did = store.add_distributor("山田太郎", db_path=db)
+    at = _run(_MASTER_PAGE)
+    assert f"edit_distributor_{did}" in {b.key for b in at.button}
+    assert not [w for w in at.text_input if (w.key or "").startswith("edit_name_")]
+
+
+def test_master_page_edit_cancel_does_not_update(db):
+    """「やめる」で閉じるだけ。入力した値はDBに入らない。"""
+    did = store.add_distributor("山田太郎", db_path=db)
+    at = _run(_MASTER_PAGE)
+    at.button(key=f"edit_distributor_{did}").click().run()
+    _edit_widget(at.text_input, "edit_name_distributor").set_value("押し間違え")
+    [b for b in at.button if b.label == "やめる"][0].click().run()
+
+    assert not at.exception
+    assert {r["id"]: r for r in store.list_distributors(db_path=db)}[did]["name"] == "山田太郎"
+    # 閉じているのでフォームは消えている
+    assert not [w for w in at.text_input if (w.key or "").startswith("edit_name_distributor")]
+
+
+def test_master_page_edit_vendor_name_only_keeps_other_fields(db):
+    """買掛先の氏名だけを直したとき、既定の費目・既定の原本区分が消えないこと。
+    編集フォームが今の値を初期選択しない(いつも先頭＝「(なし)」に落ちる)と、
+    名前を直しただけで既定の原本区分が黙って消え、買掛登録の自動入力が効かなくなる。"""
+    from common import posting_logic
+
+    keep = posting_logic.ORIGINAL_STATUSES[-1]
+    vid = store.add_payables_vendor("ABC商事", default_category="家賃",
+                                    default_original_status=keep, db_path=db)
+    at = _run(_MASTER_PAGE)
+    at.button(key=f"edit_payables_vendor_{vid}").click().run()
+    _edit_widget(at.text_input, "edit_name_payables_vendor").set_value("ABC商事株式会社")
+    _submit_edit(at)
+
+    assert not at.exception
+    row = {r["id"]: r for r in store.list_payables_vendors(db_path=db)}[vid]
+    assert row["name"] == "ABC商事株式会社"
+    assert row["default_category"] == "家賃"
+    assert row["default_original_status"] == keep
+
+
+def test_master_page_edit_vendor_can_clear_original_status(db):
+    """既定の原本区分を「(なし)」に戻すと、空(NULL)で保存されること。
+    見た目の「(なし)」をそのまま文字列で保存すると、買掛登録の原本区分に
+    選択肢に無い「(なし)」が既定として流れ込む。"""
+    from common import posting_logic
+
+    vid = store.add_payables_vendor(
+        "ABC商事", default_original_status=posting_logic.ORIGINAL_STATUSES[0], db_path=db)
+    at = _run(_MASTER_PAGE)
+    at.button(key=f"edit_payables_vendor_{vid}").click().run()
+    _edit_widget(at.selectbox, "edit_orig_payables_vendor").set_value("(なし)")
+    _submit_edit(at)
+
+    assert not at.exception
+    row = {r["id"]: r for r in store.list_payables_vendors(db_path=db)}[vid]
+    assert row["default_original_status"] is None
+
+
+def test_master_page_edit_ignores_empty_name(db):
+    """名前を空にして「更新」を押しても、名前無しのマスタは作らない(登録フォームと同じ)。
+    空名を通すと、一覧・報告書に名前の無い行ができる。"""
+    did = store.add_distributor("山田太郎", db_path=db)
+    at = _run(_MASTER_PAGE)
+    at.button(key=f"edit_distributor_{did}").click().run()
+    _edit_widget(at.text_input, "edit_name_distributor").set_value("   ")
+    _submit_edit(at)
+
+    assert not at.exception
+    assert {r["id"]: r for r in store.list_distributors(db_path=db)}[did]["name"] == "山田太郎"
+
+
+def test_master_page_edit_button_only_for_active_rows(db):
+    """編集は有効な行にだけ。停止中は「有効に戻す」→編集で足りる(非対称性を保つ)。"""
+    alive = store.add_distributor("現役の人", db_path=db)
+    gone = store.add_distributor("辞めた人", active=0, db_path=db)
+    at = _run(_MASTER_PAGE)
+    keys = {b.key for b in at.button}
+    assert f"edit_distributor_{alive}" in keys
+    assert f"edit_distributor_{gone}" not in keys
+
+
 def test_confirm_delete_shows_confirmation_before_running(db):
     """confirm_delete は押しただけでは実行せず、確認を出す。"""
 
