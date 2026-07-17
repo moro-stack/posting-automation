@@ -342,6 +342,48 @@ def test_contract_invoice_migrates_old_db_without_last_exported(tmp_path):
     assert rows[0]["last_exported_at"] == "2026-07-16T10:00:00"
 
 
+def test_contract_invoice_stores_pay_type_snapshot(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", pay_type="日当", db_path=db)
+    pid = store.add_project("関西ぱど：京阪北版", db_path=db)
+    iid = store.add_contract_invoice(
+        did, "2026-07-17", "2026-07-01", "2026-07-15",
+        [{"project_id": pid, "report_qty": 3, "unit_price": 8000, "remark": "配布",
+          "copies": 3713}],
+        pay_type="日当", db_path=db)
+    detail = store.get_contract_invoice(iid, db_path=db)
+    assert detail["invoice"]["pay_type"] == "日当"
+    assert detail["lines"][0]["copies"] == 3713
+    assert detail["lines"][0]["amount"] == 3 * 8000
+
+
+def test_contract_invoice_pay_type_survives_master_change(tmp_path):
+    """登録後にマスタの支払形態を変えても、過去の請求の支払形態は変わらない。"""
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", pay_type="日当", db_path=db)
+    pid = store.add_project("案件", db_path=db)
+    iid = store.add_contract_invoice(
+        did, "2026-07-17", "2026-07-01", "2026-07-15",
+        [{"project_id": pid, "report_qty": 3, "unit_price": 8000, "remark": "配布"}],
+        pay_type="日当", db_path=db)
+    store.update_distributor(did, pay_type="歩合", db_path=db)
+    assert store.get_contract_invoice(iid, db_path=db)["invoice"]["pay_type"] == "日当"
+
+
+def test_contract_invoice_without_pay_type_is_null(tmp_path):
+    """pay_type を渡さない既存の呼び出しは NULL のまま(=歩合扱い・後方互換)。"""
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", db_path=db)
+    pid = store.add_project("案件", db_path=db)
+    iid = store.add_contract_invoice(
+        did, "2026-07-17", "2026-07-01", "2026-07-15",
+        [{"project_id": pid, "report_qty": 3713, "unit_price": 2.5, "remark": "配布"}],
+        db_path=db)
+    detail = store.get_contract_invoice(iid, db_path=db)
+    assert detail["invoice"]["pay_type"] is None
+    assert detail["lines"][0]["copies"] is None
+
+
 def test_distributor_stores_bank_and_pay_type(tmp_path):
     db = os.path.join(tmp_path, "t.db")
     did = store.add_distributor(

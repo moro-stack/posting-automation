@@ -104,6 +104,14 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     ci_cols = {r[1] for r in conn.execute("PRAGMA table_info(contract_invoices)")}
     if "last_exported_at" not in ci_cols:
         conn.execute("ALTER TABLE contract_invoices ADD COLUMN last_exported_at TEXT")
+    # 業務委託の請求に「登録時点の支払形態」のスナップショットを持たせる。
+    # マスタの現在値を見て過去請求を描くと後からの支払形態変更で数量の意味が変わってしまうため。
+    if "pay_type" not in ci_cols:
+        conn.execute("ALTER TABLE contract_invoices ADD COLUMN pay_type TEXT")
+    # 歩合以外(日当・時給・月給)は数量が部数でないため、配布部数を別列で持つ。
+    cil_cols = {r[1] for r in conn.execute("PRAGMA table_info(contract_invoice_lines)")}
+    if "copies" not in cil_cols:
+        conn.execute("ALTER TABLE contract_invoice_lines ADD COLUMN copies INTEGER")
     # 案件=「その他」で登録した時の『何の案件か』手入力を持たせる。旧DBは自動でカラム追加。
     for tbl in ("petty_cash", "payables", "receivables", "contract_invoice_lines"):
         cols = {r[1] for r in conn.execute(f"PRAGMA table_info({tbl})")}
@@ -509,24 +517,27 @@ def delete_receivable(row_id, *, db_path=None):
 
 # --- contract_invoices ---
 def add_contract_invoice(distributor_id, issue_date, period_from, period_to, lines,
-                         *, db_path=None, now=None):
+                         *, pay_type=None, db_path=None, now=None):
     conn = _connect(db_path)
     try:
         cur = conn.execute(
             "INSERT INTO contract_invoices"
-            " (distributor_id, issue_date, period_from, period_to, created_at)"
-            " VALUES (?,?,?,?,?)",
-            (_int_or_none(distributor_id), issue_date, period_from, period_to, _now(now)))
+            " (distributor_id, issue_date, period_from, period_to, pay_type, created_at)"
+            " VALUES (?,?,?,?,?,?)",
+            (_int_or_none(distributor_id), issue_date, period_from, period_to,
+             pay_type, _now(now)))
         invoice_id = int(cur.lastrowid)
         for ln in lines:
             qty = float(ln.get("report_qty") or 0)
             price = float(ln.get("unit_price") or 0)
             conn.execute(
                 "INSERT INTO contract_invoice_lines"
-                " (invoice_id, project_id, report_qty, unit_price, amount, remark, other_label)"
-                " VALUES (?,?,?,?,?,?,?)",
+                " (invoice_id, project_id, report_qty, unit_price, amount, remark,"
+                "  other_label, copies)"
+                " VALUES (?,?,?,?,?,?,?,?)",
                 (invoice_id, _int_or_none(ln.get("project_id")), qty, price,
-                 qty * price, ln.get("remark"), ln.get("other_label")))
+                 qty * price, ln.get("remark"), ln.get("other_label"),
+                 _int_or_none(ln.get("copies"))))
         conn.commit()
     finally:
         conn.close()
