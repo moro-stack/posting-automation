@@ -489,3 +489,58 @@ def test_replace_daily_rates_with_empty_clears(tmp_path):
     store.replace_daily_rates(did, [{"work_name": "配布", "amount": 8000}], db_path=db)
     store.replace_daily_rates(did, [], db_path=db)
     assert store.list_daily_rates(did, db_path=db) == []
+
+
+def test_count_master_usage_project_counts_all_sources(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    pid = store.add_project("案件", db_path=db)
+    did = store.add_distributor("山田太郎", db_path=db)
+    store.add_petty_cash("2026-07-17", None, 1500, project_id=pid, db_path=db)
+    store.add_payable(None, None, 8000, date="2026-07-17", project_id=pid, db_path=db)
+    store.add_receivable("2026-07", None, 90000, project_id=pid, db_path=db)
+    store.add_issue_manual_cost(pid, "配布", 50000, db_path=db)
+    store.add_contract_invoice(did, "2026-07-17", "2026-07-01", "2026-07-15",
+                               [{"project_id": pid, "report_qty": 1, "unit_price": 100,
+                                 "remark": "配布"}], db_path=db)
+    assert store.count_master_usage("project", pid, db_path=db) == 5
+
+
+def test_count_master_usage_zero_for_unused(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    pid = store.add_project("使っていない案件", db_path=db)
+    did = store.add_distributor("使っていない人", db_path=db)
+    cid = store.add_expense_category("使っていない費目", db_path=db)
+    assert store.count_master_usage("project", pid, db_path=db) == 0
+    assert store.count_master_usage("distributor", did, db_path=db) == 0
+    assert store.count_master_usage("expense_category", cid, db_path=db) == 0
+
+
+def test_count_master_usage_distributor_counts_invoices_and_petty(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", db_path=db)
+    pid = store.add_project("案件", db_path=db)
+    store.add_contract_invoice(did, "2026-07-17", "2026-07-01", "2026-07-15",
+                               [{"project_id": pid, "report_qty": 1, "unit_price": 100,
+                                 "remark": "配布"}], db_path=db)
+    store.add_petty_cash("2026-07-17", None, 1500, distributor_id=did, db_path=db)
+    assert store.count_master_usage("distributor", did, db_path=db) == 2
+
+
+def test_count_master_usage_category_and_client(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    cid = store.add_expense_category("駐車場代", db_path=db)
+    clid = store.add_receivables_client("株式会社アド・バリュー", db_path=db)
+    vid = store.add_payables_vendor("関西電力株式会社", db_path=db)
+    store.add_petty_cash("2026-07-17", cid, 1500, db_path=db)
+    store.add_receivable("2026-07", clid, 90000, db_path=db)
+    store.add_payable("2026-07", vid, 8000, db_path=db)
+    assert store.count_master_usage("expense_category", cid, db_path=db) == 1
+    assert store.count_master_usage("receivables_client", clid, db_path=db) == 1
+    assert store.count_master_usage("payables_vendor", vid, db_path=db) == 1
+
+
+def test_count_master_usage_rejects_unknown_master(tmp_path):
+    import pytest
+    db = os.path.join(tmp_path, "t.db")
+    with pytest.raises(ValueError):
+        store.count_master_usage("知らないマスタ", 1, db_path=db)

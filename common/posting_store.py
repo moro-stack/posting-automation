@@ -359,6 +359,36 @@ _PRESET_CLIENTS = ["株式会社関西ぱど　北大阪営業部", "株式会�
                    "株式会社アド・バリュー", "株式会社リビングプロシード"]
 
 
+# マスタごとに「どのテーブルのどの列で使われているか」。停止中方式の判定に使う。
+_MASTER_USAGE = {
+    "project": [("petty_cash", "project_id"), ("payables", "project_id"),
+                ("receivables", "project_id"), ("contract_invoice_lines", "project_id"),
+                ("issue_manual_costs", "project_id")],
+    "expense_category": [("petty_cash", "category_id")],
+    "payables_vendor": [("payables", "vendor_id")],
+    "receivables_client": [("receivables", "client_id")],
+    "distributor": [("contract_invoices", "distributor_id"),
+                    ("petty_cash", "distributor_id")],
+}
+
+
+def count_master_usage(master, row_id, *, db_path=None) -> int:
+    """マスタの行が実データで何件使われているかを数える。
+    0件なら消してよい(物理削除)、1件以上なら消すと過去データの表示が欠けるので停止中にする。"""
+    if master not in _MASTER_USAGE:
+        raise ValueError(f"unknown master: {master}")
+    conn = _connect(db_path)
+    try:
+        total = 0
+        for table, col in _MASTER_USAGE[master]:
+            row = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE {col}=?",
+                               (int(row_id),)).fetchone()
+            total += int(row[0])
+        return total
+    finally:
+        conn.close()
+
+
 def seed_masters(*, db_path=None) -> None:
     if not list_projects(db_path=db_path):
         for n in _PRESET_PROJECTS:
