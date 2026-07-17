@@ -62,6 +62,8 @@ payables = posting_logic.filter_rows_by_period(
 receivables = posting_logic.filter_rows_by_period(
     store.list_receivables(project_id=pid), "month", lo, hi)
 
+_dist_names = {d["id"]: d["name"] for d in store.list_distributors()}  # 停止中も含めて引く
+
 contract_lines = []
 for inv in store.list_contract_invoices():
     if not posting_logic.in_period(inv.get("issue_date"), lo, hi):
@@ -70,6 +72,8 @@ for inv in store.list_contract_invoices():
     for ln in detail["lines"]:
         ln = dict(ln)
         ln["issue_date"] = inv.get("issue_date")   # その他の案件内訳で発行日を出すため
+        ln["distributor_name"] = _dist_names.get(inv.get("distributor_id"), "")
+        ln["pay_type"] = inv.get("pay_type")       # 登録時点の支払形態(マスタの現在値は使わない)
         contract_lines.append(ln)
 
 # 直接入力(配布員代): work_date で期間絞り込み。日付なしは常に計上。
@@ -127,8 +131,10 @@ def _with_label(row, other_label):
 
 # ===== 配布員代（詳細は折りたたみ） =====
 issue_contract = [l for l in contract_lines if l.get("project_id") == pid]
-_con_disp = [_with_label({"種別": l.get("remark") or "",
-                          "数量": posting_logic.qty_label(l.get("report_qty"), l.get("remark")),
+_con_disp = [_with_label({"配布員": l.get("distributor_name") or "",
+                          "種別": l.get("remark") or "",
+                          "数量": posting_logic.qty_label(l.get("report_qty"), l.get("remark"),
+                                                        l.get("pay_type")),
                           "単価": _yen(l.get("unit_price")), "合計": _yen(l.get("amount"))},
                          l.get("other_label"))
              for l in issue_contract]
@@ -200,13 +206,15 @@ for r in petty:
     if r.get("memo"):
         item = f'{item}（{r["memo"]}）' if item else r["memo"]
     _misc.append(_with_label(
-        {"項目": item or "小口", "金額": _yen(r.get("amount")),
+        {"配布員": _dist_names.get(r.get("distributor_id"), ""),
+         "項目": item or "小口", "金額": _yen(r.get("amount")),
          "支払方法": posting_logic.payment_method("petty", r),
          "日付": r.get("date") or ""}, r.get("other_label")))
 for r in payables:
     item = r.get("vendor_name") or _vends.get(r.get("vendor_id"), "")
+    # 買掛は配布員を持たない(オーナー判断で小口のみ)ため、この列は空欄になる。
     _misc.append(_with_label(
-        {"項目": item or "買掛", "金額": _yen(r.get("amount")),
+        {"配布員": "", "項目": item or "買掛", "金額": _yen(r.get("amount")),
          "支払方法": posting_logic.payment_method("payable", r),
          "日付": r.get("date") or r.get("month") or ""}, r.get("other_label")))
 
@@ -220,13 +228,13 @@ with st.expander(f":material/receipt_long: 雑費の内訳（小口＋買掛）�
 _buf = io.BytesIO()
 with pd.ExcelWriter(_buf, engine="openpyxl") as writer:
     (pd.DataFrame(_con_disp) if _con_disp
-     else pd.DataFrame(columns=["種別", "数量", "単価", "合計"])).to_excel(
+     else pd.DataFrame(columns=["配布員", "種別", "数量", "単価", "合計"])).to_excel(
         writer, index=False, sheet_name="業務委託")
     (pd.DataFrame(_man_disp) if _man_disp
      else pd.DataFrame(columns=["日付", "曜日", "作業", "金額"])).to_excel(
         writer, index=False, sheet_name="直接入力")
     (pd.DataFrame(_misc) if _misc
-     else pd.DataFrame(columns=["項目", "金額", "支払方法", "日付"])).to_excel(
+     else pd.DataFrame(columns=["配布員", "項目", "金額", "支払方法", "日付"])).to_excel(
         writer, index=False, sheet_name="雑費")
     pd.DataFrame([{"項目": "配布員代", "金額": groups["labor"]},
                   {"項目": "雑費", "金額": groups["misc"]},

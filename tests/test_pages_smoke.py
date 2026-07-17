@@ -782,3 +782,174 @@ def test_contract_delete_announces_in_the_list_tab(db):
     assert not at.exception
     assert [s.value for s in at.tabs[1].success] == ["削除しました"]
     assert [s.value for s in at.tabs[0].success] == []
+
+
+# ============================================================ Task 14: 号別明細
+_ISSUE_PAGE = "03_号別明細.py"
+
+
+def _issue_page(db, project="案件A"):
+    """号(案件)を選んだ状態の号別明細ページ。既定の pills はプリセットの先頭案件を
+    選ぶため、テストで作った案件を見るには session_state で選択を差し込む必要がある。"""
+    at = AppTest.from_file(os.path.join(ROOT, "pages", _ISSUE_PAGE), default_timeout=30)
+    at.session_state["proj_pills"] = project
+    at.run()
+    return at
+
+
+def test_issue_page_renders(db):
+    at = _run(_ISSUE_PAGE)
+    assert not at.exception
+
+
+def test_issue_page_shows_distributor_in_contract_breakdown(db):
+    """業務委託の内訳に、誰の分の費用かが分かるよう配布員名が出ること。"""
+    _seed_invoice(db, pay_type="歩合")
+    at = _issue_page(db)
+    assert not at.exception
+    assert "山田太郎" in _rendered_text(at)
+
+
+def test_issue_page_shows_distributor_for_petty(db):
+    """雑費の内訳(小口行)に配布員名が出ること。"""
+    did = store.add_distributor("佐藤花子", db_path=db)
+    pid = store.add_project("案件A", db_path=db)
+    store.add_petty_cash("2026-07-17", None, 1500, project_id=pid,
+                         distributor_id=did, db_path=db)
+    at = _issue_page(db)
+    assert not at.exception
+    assert "佐藤花子" in _rendered_text(at)
+
+
+def test_issue_page_shows_name_of_deactivated_distributor(db):
+    """🔴 停止中方式の要。停止中にした配布員でも、過去の号別明細では名前が出続けること。
+    登録の選択肢は only_active=True で引く一方、過去データの名前は停止中も含めて引く、
+    という非対称性が守られているかを検証する。ここが壊れると過去データから名前が消える。"""
+    did, pid, iid = _seed_invoice(db, pay_type="歩合")
+    store.update_distributor(did, active=0, db_path=db)   # 停止中にする
+    at = _issue_page(db)
+    assert not at.exception
+    assert "山田太郎" in _rendered_text(at)
+
+
+def test_issue_page_shows_name_of_deactivated_distributor_for_petty(db):
+    """🔴 停止中方式の要(雑費側)。小口の配布員名も停止中で消えないこと。
+    _dist_names は業務委託と雑費で共有だが、片方だけ only_active を付ける改変も
+    ここで捕まえる。"""
+    did = store.add_distributor("辞めた花子", active=0, db_path=db)
+    pid = store.add_project("案件A", db_path=db)
+    store.add_petty_cash("2026-07-17", None, 1500, project_id=pid,
+                         distributor_id=did, db_path=db)
+    at = _issue_page(db)
+    assert not at.exception
+    assert "辞めた花子" in _rendered_text(at)
+
+
+def test_issue_page_payable_row_has_empty_distributor_cell(db):
+    """買掛は配布員を持たない(オーナー判断で小口のみ)ため、雑費の内訳の配布員列は
+    空欄になる。列自体は存在すること(小口行と列がずれないため)。"""
+    pid = store.add_project("案件A", db_path=db)
+    store.add_payable(None, None, 3000, date="2026-07-17", vendor_name="ABC商事",
+                      project_id=pid, db_path=db)
+    at = _issue_page(db)
+    assert not at.exception
+    misc = [t.value for t in at.table if "支払方法" in list(t.value.columns)]
+    assert len(misc) == 1
+    df = misc[0]
+    assert list(df.columns) == ["配布員", "項目", "金額", "支払方法", "日付"]
+    assert list(df["配布員"]) == [""]
+
+
+def test_issue_page_contract_breakdown_column_order(db):
+    """配布員は種別の左に置くこと(オーナー要望の並び)。"""
+    _seed_invoice(db, pay_type="歩合")
+    at = _issue_page(db)
+    con = [t.value for t in at.table if "種別" in list(t.value.columns)]
+    assert len(con) == 1
+    assert list(con[0].columns) == ["配布員", "種別", "数量", "単価", "合計"]
+
+
+def test_issue_page_nichito_qty_uses_saved_pay_type(db):
+    """🔴 号別明細の数量も、請求に保存した支払形態で出すこと。
+    マスタの現在値を使うと、配布員が日当→歩合に変わった瞬間に過去の号別明細の
+    「3 日」が「3 枚」に化ける。"""
+    did, _, _ = _seed_invoice(db, pay_type="日当", copies=3713)
+    store.update_distributor(did, pay_type="歩合", db_path=db)   # マスタを後から変更
+    at = _issue_page(db)
+    text = _rendered_text(at)
+    assert "3 日" in text
+    assert "3 枚" not in text
+
+
+def _spy_xlsx(monkeypatch):
+    """出力されたExcelのバイト列を集めるスパイ。download_button の proto はバイト列を
+    持たず(メディアURLだけ)、AppTest はrun後にランタイムを畳んでしまうため、
+    出力の直前に必ず通る freeze_xlsx_bytes を覗いてバイト列を得る。
+    ページは実行のたびに import し直されるので、run前に元モジュールを差し替えれば効く。"""
+    from common import excel_io
+
+    seen = []
+    real = excel_io.freeze_xlsx_bytes
+
+    def spy(data):
+        out = real(data)
+        seen.append(out)
+        return out
+
+    monkeypatch.setattr(excel_io, "freeze_xlsx_bytes", spy)
+    return seen
+
+
+def _genka_xlsx(seen):
+    """集めたExcelのうち、号原価まとめ(業務委託シートを持つもの)を返す。
+    freeze_xlsx_bytes を通さない実装に変わるとここで見つからず落ちる
+    (＝内容が同じでもバイト列が変わりDL URLが404になる既知の地雷を守る)。"""
+    import io
+
+    import pandas as pd
+
+    hits = [b for b in seen if "業務委託" in pd.ExcelFile(io.BytesIO(b)).sheet_names]
+    assert len(hits) == 1
+    return pd.ExcelFile(io.BytesIO(hits[0]))
+
+
+def test_issue_page_genka_xlsx_has_distributor_column(db, monkeypatch):
+    """号原価まとめExcelも画面と同じ列構成で、配布員名が中身に入っていること。"""
+    import pandas as pd
+
+    did, pid, _ = _seed_invoice(db, pay_type="歩合")
+    store.add_petty_cash("2026-07-17", None, 1500, project_id=pid,
+                         distributor_id=did, db_path=db)
+    seen = _spy_xlsx(monkeypatch)
+    at = _issue_page(db)
+    assert not at.exception
+    xls = _genka_xlsx(seen)
+    con = pd.read_excel(xls, "業務委託")
+    misc = pd.read_excel(xls, "雑費")
+    assert list(con.columns) == ["配布員", "種別", "数量", "単価", "合計"]
+    assert list(con["配布員"]) == ["山田太郎"]
+    assert list(misc.columns) == ["配布員", "項目", "金額", "支払方法", "日付"]
+    assert list(misc["配布員"]) == ["山田太郎"]
+
+
+def test_issue_page_genka_xlsx_columns_when_empty(db, monkeypatch):
+    """データが1件も無い号でも、Excelの列見出しは新しい構成のままであること
+    (空のときだけ通る分岐なので、ここを直し忘れると経理側の取り込みで列がずれる)。"""
+    import pandas as pd
+
+    store.add_project("案件A", db_path=db)
+    seen = _spy_xlsx(monkeypatch)
+    at = _issue_page(db)
+    assert not at.exception
+    xls = _genka_xlsx(seen)
+    assert list(pd.read_excel(xls, "業務委託").columns) == ["配布員", "種別", "数量", "単価", "合計"]
+    assert list(pd.read_excel(xls, "雑費").columns) == ["配布員", "項目", "金額", "支払方法", "日付"]
+
+
+def test_issue_page_houbai_still_shows_mai(db):
+    """🔴 後方互換。pay_type が NULL の既存請求は今まで通り「枚」のまま。"""
+    _seed_invoice(db, pay_type=None)
+    at = _issue_page(db)
+    text = _rendered_text(at)
+    assert "3 枚" in text
+    assert "3 日" not in text
