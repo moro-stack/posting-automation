@@ -137,9 +137,20 @@ def resolve_original_status(vendor_name, vendors):
 
 
 def master_delete_action(usage_count) -> str:
-    """マスタの行を消すときの動き。使用実績が無ければ物理削除、あれば停止中にする。
-    使用中のマスタを消すと過去データの表示から名前が欠けるため(配布員の入れ替わり対策)。"""
-    return "delete" if int(usage_count or 0) == 0 else "deactivate"
+    """マスタの行を消すときの動き。
+    使用実績が「非負整数として明確に0」であるときだけ物理削除("delete")。
+    それ以外(None・型不正・負値を含む)はすべて停止中("deactivate"、＝安全側)にする。
+
+    なぜ安全側に倒すか: 配布員は入れ替わりが激しく、使用中のマスタを物理削除すると
+    過去の号別明細・報告書からその配布員の名前が消えてしまう(それを防ぐのが停止中方式の
+    目的そのもの)。使用件数が不明(None)の値を安易に0とみなして「削除可」と判定するのは、
+    この目的の裏を突く挙動になるため避ける。判定できない入力に対しても例外は投げず、
+    消えない側(deactivate)を返すことで、画面が落ちるより実害を小さくする。"""
+    if isinstance(usage_count, bool):
+        return "deactivate"
+    if isinstance(usage_count, int) and usage_count == 0:
+        return "delete"
+    return "deactivate"
 
 
 def cost_groups(agg) -> dict:

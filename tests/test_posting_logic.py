@@ -196,3 +196,18 @@ def test_master_delete_action_deactivates_when_used():
     assert L.master_delete_action(12) == "deactivate"
 
 
+def test_master_delete_action_deactivates_when_usage_count_is_none():
+    """使用件数が不明(None)なときに安易に0とみなして削除可にしてはいけない(安全側)。"""
+    assert L.master_delete_action(None) == "deactivate"
+
+
+def test_master_delete_action_deactivates_on_invalid_type():
+    """型不正の値も安全側(消さない)に倒す。"""
+    assert L.master_delete_action("abc") == "deactivate"
+
+
+def test_master_delete_action_deactivates_on_negative_value():
+    """ありえない負値も安全側(消さない)に倒す。"""
+    assert L.master_delete_action(-1) == "deactivate"
+
+
