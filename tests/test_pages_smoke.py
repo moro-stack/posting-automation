@@ -32,6 +32,8 @@ def _rendered_text(at):
     parts = []
     for el in at.table:
         parts.append(el.value.to_string())
+    for el in at.dataframe:      # st.dataframe / st.data_editor の中身
+        parts.append(str(el.value))
     for el in at.markdown:
         parts.append(str(el.value))
     for el in at.caption:
@@ -533,5 +535,165 @@ def test_receivable_list_deletes_the_right_row_and_announces(db):
 
     assert not at.exception
     assert [r["id"] for r in store.list_receivables(db_path=db)] == [a]
+    assert [s.value for s in at.tabs[1].success] == ["削除しました"]
+    assert [s.value for s in at.tabs[0].success] == []
+
+
+# ============================================================ 業務委託登録
+_CONTRACT_PAGE = "02_業務委託登録.py"
+
+
+def _seed_invoice(db, pay_type="歩合", copies=None, name="山田太郎"):
+    did = store.add_distributor(name, pay_type=pay_type, db_path=db)
+    pid = store.add_project("案件A", db_path=db)
+    iid = store.add_contract_invoice(
+        did, "2026-07-17", "2026-07-01", "2026-07-15",
+        [{"project_id": pid, "report_qty": 3, "unit_price": 8000, "remark": "配布",
+          "copies": copies}],
+        pay_type=pay_type, db_path=db)
+    return did, pid, iid
+
+
+def test_contract_page_renders(db):
+    store.add_distributor("山田太郎", pay_type="歩合", db_path=db)
+    at = _run(_CONTRACT_PAGE)
+    assert not at.exception
+
+
+def test_contract_page_warns_with_new_master_tab_name(db):
+    """配布員が居ないときの案内は、新しいタブ名『業務委託』を指すこと。"""
+    at = _run(_CONTRACT_PAGE)
+    msgs = [w.value for w in at.warning]
+    assert msgs == ["先に『マスタ管理』の「業務委託」タブで配布員を登録してください。"]
+
+
+def test_contract_page_shows_pay_type_of_selected_distributor(db):
+    store.add_distributor("山田太郎", pay_type="日当", db_path=db)
+    at = _run(_CONTRACT_PAGE)
+    assert "日当" in _rendered_text(at)
+
+
+def test_contract_list_shows_nichito_qty_in_days(db):
+    """日当で登録した請求は、一覧で数量が「日」で出る(枚ではない)。"""
+    _seed_invoice(db, pay_type="日当", copies=3713)
+    at = _run(_CONTRACT_PAGE)
+    assert "山田太郎" in _rendered_text(at)
+
+
+def test_contract_list_nichito_shows_days_not_mai(db):
+    """🔴 このタスクの主眼。日当の請求の数量が「3 日」で出て、「枚」が出ないこと。"""
+    _seed_invoice(db, pay_type="日当", copies=3713)
+    at = _run(_CONTRACT_PAGE)
+    text = _rendered_text(at)
+    assert "3 日" in text
+    assert "3 枚" not in text
+
+
+def test_contract_list_houbai_still_shows_mai(db):
+    """🔴 後方互換。歩合(と pay_type なしの既存請求)は今まで通り「枚」のまま。"""
+    _seed_invoice(db, pay_type=None)      # pay_type NULL = 既存データと同じ状態
+    at = _run(_CONTRACT_PAGE)
+    text = _rendered_text(at)
+    assert "3 枚" in text
+    assert "3 日" not in text
+
+
+def test_contract_list_uses_saved_pay_type_not_current_master(db):
+    """🔴 請求ヘッダに焼き付けた pay_type を使うこと。
+    配布員の支払形態を後から歩合に変えても、日当で登録した過去の請求は「3 日」のまま。"""
+    did, _, _ = _seed_invoice(db, pay_type="日当", copies=3713)
+    store.update_distributor(did, pay_type="歩合", db_path=db)
+    at = _run(_CONTRACT_PAGE)
+    text = _rendered_text(at)
+    assert "3 日" in text
+    assert "3 枚" not in text
+
+
+def _contract_page_with_lines(db, pay_type, edits):
+    """明細エディタに入力がある状態のページ。AppTest は data_editor を操作できないので、
+    ウィジェットの状態(edited_rows)を直接セットして入力を再現する。"""
+    at = AppTest.from_file(os.path.join(ROOT, "pages", _CONTRACT_PAGE), default_timeout=30)
+    at.session_state[f"line_editor_{pay_type}"] = {
+        "edited_rows": {0: edits}, "added_rows": [], "deleted_rows": []}
+    at.run()
+    return at
+
+
+def _click(at, label):
+    [b for b in at.button if b.label == label][0].click().run()
+
+
+def test_contract_registration_bakes_in_pay_type(db):
+    """🔴 登録時の支払形態を請求ヘッダに焼き付けること(後でマスタが変わっても化けない)。"""
+    did = store.add_distributor("山田太郎", pay_type="日当", db_path=db)
+    store.add_project("案件A", db_path=db)
+    at = _contract_page_with_lines(db, "日当", {"案件": "案件A", "数量": 3.0, "部数": 3713})
+    _click(at, "この請求を登録")
+
+    assert not at.exception
+    invs = store.list_contract_invoices(db_path=db)
+    assert len(invs) == 1
+    assert invs[0]["distributor_id"] == did
+    assert invs[0]["pay_type"] == "日当"
+
+
+def test_contract_registration_nichito_fills_unit_price_from_master(db):
+    """日当は、業務名を選ぶとマスタの日当額が単価に入る(単価は手入力で上書きできる)。"""
+    did = store.add_distributor("山田太郎", pay_type="日当", db_path=db)
+    store.replace_daily_rates(did, [{"work_name": "ポスティング", "amount": 12000}],
+                              db_path=db)
+    store.add_project("案件A", db_path=db)
+    at = _contract_page_with_lines(
+        db, "日当", {"案件": "案件A", "業務": "ポスティング", "数量": 3.0, "部数": 3713})
+    _click(at, "この請求を登録")
+
+    assert not at.exception
+    detail = store.get_contract_invoice(
+        store.list_contract_invoices(db_path=db)[0]["id"], db_path=db)
+    assert detail["lines"][0]["unit_price"] == 12000
+    assert detail["lines"][0]["amount"] == 36000
+    assert detail["lines"][0]["copies"] == 3713
+
+
+def test_contract_registration_houbai_does_not_send_copies(db):
+    """歩合は部数の列を出さない(数量がそのまま部数)。copies は NULL のまま。"""
+    store.add_distributor("山田太郎", pay_type="歩合", db_path=db)
+    store.add_project("案件A", db_path=db)
+    at = _contract_page_with_lines(db, "歩合", {"案件": "案件A", "数量": 3713.0, "単価": 3.5})
+    _click(at, "この請求を登録")
+
+    assert not at.exception
+    detail = store.get_contract_invoice(
+        store.list_contract_invoices(db_path=db)[0]["id"], db_path=db)
+    assert detail["lines"][0]["copies"] is None
+    assert detail["lines"][0]["amount"] == 3713 * 3.5
+
+
+def test_contract_list_deletes_the_right_row(db):
+    _, pid, a = _seed_invoice(db, pay_type="歩合", name="A太郎")
+    did_b = store.add_distributor("B太郎", pay_type="歩合", db_path=db)
+    b = store.add_contract_invoice(did_b, "2026-07-16", "2026-07-01", "2026-07-15",
+                                   [{"project_id": pid, "report_qty": 1, "unit_price": 100,
+                                     "remark": "配布"}], db_path=db)
+    at = _run(_CONTRACT_PAGE)
+    keys = {btn.key for btn in at.button}
+    assert f"del_inv_{a}_btn" in keys
+    assert f"del_inv_{b}_btn" in keys
+
+    at.button(key=f"del_inv_{b}_btn").click().run()
+    at.button(key=f"del_inv_{b}_ok").click().run()
+
+    assert not at.exception
+    assert [i["id"] for i in store.list_contract_invoices(db_path=db)] == [a]
+
+
+def test_contract_delete_announces_in_the_list_tab(db):
+    """削除のアナウンスは一覧タブに出て、先に描画される登録タブに奪われないこと。"""
+    _, _, iid = _seed_invoice(db, pay_type="歩合")
+    at = _run(_CONTRACT_PAGE)
+    at.button(key=f"del_inv_{iid}_btn").click().run()
+    at.button(key=f"del_inv_{iid}_ok").click().run()
+
+    assert not at.exception
     assert [s.value for s in at.tabs[1].success] == ["削除しました"]
     assert [s.value for s in at.tabs[0].success] == []

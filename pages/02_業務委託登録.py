@@ -9,17 +9,18 @@ from common import invoice_excel
 from common import posting_logic
 from common import posting_store as store
 from common.ui import (apply_app_style, section_export, nice_table, period_picker,
-                       flash, show_flash)
+                       flash, show_flash, confirm_delete)
 from common.excel_io import freeze_xlsx_bytes
 
 apply_app_style()
 st.title("業務委託登録")
 
-dists = {d["name"]: d["id"] for d in store.list_distributors(only_active=True)}
+dist_rows = {d["name"]: d for d in store.list_distributors(only_active=True)}
+dists = {name: d["id"] for name, d in dist_rows.items()}
 projs = {p["name"]: p["id"] for p in store.list_projects(only_active=True)}
 
 if not dists:
-    st.warning("先に『マスタ管理』で配布委託先(配布員)を登録してください。")
+    st.warning("先に『マスタ管理』の「業務委託」タブで配布員を登録してください。")
     st.stop()
 
 tab_reg, tab_list = st.tabs(["✒️ 登録", "📋 登録済み一覧"])
@@ -34,23 +35,60 @@ with tab_reg:
     pfrom = c2.date_input("配布業務期間(開始)")
     pto = c3.date_input("配布業務期間(終了)")
 
-    st.markdown("**明細**（案件・種別・数量・単価）｜数量と単価は小数点も入力できます")
+    _dist = dist_rows[dist_name]
+    pay_type = _dist.get("pay_type") or "歩合"
+    st.caption(f"支払形態: **{pay_type}**　"
+               f"{'（数量は日数を入れてください）' if pay_type == '日当' else ''}"
+               f"{'（数量は時間を入れてください）' if pay_type == '時給' else ''}"
+               f"{'（数量は1固定・月額をそのまま請求します）' if pay_type == '月給' else ''}"
+               f"{'（数量は部数を入れてください）' if pay_type == '歩合' else ''}")
+
+    # 支払形態ごとの単価の既定値。歩合だけは号ごとに違うのでマスタに持たず 0 のまま。
+    _rates = {r["work_name"]: int(r["amount"]) for r in store.list_daily_rates(_dist["id"])} \
+        if pay_type == "日当" else {}
+    _default_price = 0.0
+    if pay_type == "時給":
+        _default_price = float(_dist.get("hourly_rate") or 0)
+    elif pay_type == "月給":
+        _default_price = float(_dist.get("monthly_rate") or 0)
+
+    _qty_label = {"日当": "数量(日)", "時給": "数量(時間)", "月給": "数量(1固定)"}.get(
+        pay_type, "数量(枚)")
+    _needs_copies = pay_type != "歩合"
+
+    _base = {"案件": "", "種別": "配布", "単価": _default_price,
+             "数量": 1.0 if pay_type == "月給" else 0.0, "その他の案件名": ""}
+    _cols = ["案件", "種別", "単価", "数量", "その他の案件名"]
+    _conf = {
+        "案件": st.column_config.SelectboxColumn(options=list(projs.keys())),
+        "種別": st.column_config.SelectboxColumn(
+            options=["配布", "挟み込み", "交通費", "手当", "その他"]),
+        "単価": st.column_config.NumberColumn(min_value=0.0, step=0.5, format="%g"),
+        "数量": st.column_config.NumberColumn(_qty_label, min_value=0.0, step=0.5,
+                                             format="%g"),
+        "その他の案件名": st.column_config.TextColumn(help="案件を『その他』にしたとき、何の案件か"),
+    }
+    if pay_type == "日当":
+        _base = {"案件": "", "種別": "配布", "業務": "", "単価": 0.0, "数量": 0.0,
+                 "部数": 0, "その他の案件名": ""}
+        _cols = ["案件", "種別", "業務", "単価", "数量", "部数", "その他の案件名"]
+        _conf["業務"] = st.column_config.SelectboxColumn(
+            options=list(_rates.keys()),
+            help="マスタに登録した業務名。選ぶと単価に日当額が入ります。")
+    if _needs_copies and "部数" not in _cols:
+        _cols.insert(_cols.index("数量") + 1, "部数")
+        _base["部数"] = 0
+    if _needs_copies:
+        _conf["部数"] = st.column_config.NumberColumn(
+            "部数", min_value=0, step=1, format="localized",
+            help="報告書の報告数に使います。報酬の計算には使いません。")
+
+    st.markdown(f"**明細**（案件・種別・単価・{_qty_label}）｜数量と単価は小数点も入力できます")
     st.caption("案件を「その他」にした行は、右の『その他の案件名』に何の案件か入力してください"
                "（号別明細の『その他』で確認できます）。")
     editor = st.data_editor(
-        pd.DataFrame([{"案件": "", "種別": "配布", "数量": 0.0, "単価": 0.0, "その他の案件名": ""}]),
-        num_rows="dynamic",
-        column_config={
-            "案件": st.column_config.SelectboxColumn(options=list(projs.keys())),
-            "種別": st.column_config.SelectboxColumn(
-                options=["配布", "挟み込み", "交通費", "手当", "その他"]),
-            "数量": st.column_config.NumberColumn(min_value=0.0, step=0.5, format="%g"),
-            "単価": st.column_config.NumberColumn(min_value=0.0, step=0.5, format="%g"),
-            "その他の案件名": st.column_config.TextColumn(
-                help="案件を『その他』にしたとき、何の案件か"),
-        },
-        column_order=["案件", "種別", "数量", "単価", "その他の案件名"],
-        use_container_width=True, key="line_editor")
+        pd.DataFrame([_base]), num_rows="dynamic", column_config=_conf,
+        column_order=_cols, use_container_width=True, key=f"line_editor_{pay_type}")
 
     lines = []
     for _, row in editor.iterrows():
@@ -58,19 +96,28 @@ with tab_reg:
             continue
         qty = posting_logic._num(row["数量"]) if pd.notna(row["数量"]) else 0
         price = posting_logic._num(row["単価"]) if pd.notna(row["単価"]) else 0
+        # 日当: 業務を選んで単価が空(0)なら、マスタの日当額を入れる。
+        # 単価が手で入っていればそちらを優先する(その回だけ違う金額にできる)。
+        if pay_type == "日当" and not price:
+            work = row.get("業務") if "業務" in row else None
+            if pd.notna(work):
+                price = _rates.get(str(work), 0)
         remark = row["種別"] if pd.notna(row["種別"]) else "配布"
         olabel = row.get("その他の案件名") if "その他の案件名" in row else None
         olabel = (str(olabel).strip() or None) if (pd.notna(olabel) and row["案件"] == "その他") else None
+        copies = None
+        if _needs_copies and "部数" in row and pd.notna(row["部数"]):
+            copies = int(row["部数"] or 0)
         lines.append({"project_id": projs.get(row["案件"]), "project_name": row["案件"],
                       "report_qty": qty, "unit_price": price, "amount": qty * price,
-                      "remark": remark, "other_label": olabel})
+                      "remark": remark, "other_label": olabel, "copies": copies})
 
     if lines:
         st.markdown("**明細（確認）**")
         preview = [{
             "案件": l["project_name"],
             "種別": l["remark"],
-            "数量": posting_logic.qty_label(l["report_qty"], l["remark"]),
+            "数量": posting_logic.qty_label(l["report_qty"], l["remark"], pay_type),
             "単価": f'¥{posting_logic.fmt_num(l["unit_price"])}',
             "合計": f'¥{posting_logic.fmt_num(l["amount"])}',
         } for l in lines]
@@ -79,7 +126,7 @@ with tab_reg:
         m1, m2 = st.columns(2)
         m1.metric("ご請求金額(税込)", f"¥{posting_logic.fmt_num(posting_logic.invoice_total(lines))}")
         m2.metric("配布部数(配布+挟み込み)",
-                  f"{posting_logic.fmt_num(posting_logic.delivered_copies(lines))} 部")
+                  f"{posting_logic.fmt_num(posting_logic.delivered_copies(lines, pay_type))} 部")
 
     col_save, col_dl = st.columns(2)
     if col_save.button("この請求を登録", type="primary", disabled=not lines):
@@ -87,9 +134,11 @@ with tab_reg:
             dists[dist_name], str(issue), str(pfrom), str(pto),
             [{"project_id": l["project_id"], "report_qty": l["report_qty"],
               "unit_price": l["unit_price"], "remark": l["remark"],
-              "other_label": l.get("other_label")} for l in lines])
+              "other_label": l.get("other_label"), "copies": l.get("copies")}
+             for l in lines],
+            pay_type=pay_type)
         # 明細エディタを空に戻して次の登録をしやすく（登録しましたは再実行後に表示）
-        st.session_state.pop("line_editor", None)
+        st.session_state.pop(f"line_editor_{pay_type}", None)
         flash("登録しました")
         st.rerun()
 
@@ -112,7 +161,8 @@ def _invoice_out_lines(detail, id2proj):
     """保存済み請求の明細を報告書生成用の行に整える。"""
     return [{"project_name": id2proj.get(l.get("project_id"), ""),
              "report_qty": l.get("report_qty"), "unit_price": l.get("unit_price"),
-             "amount": l.get("amount"), "remark": l.get("remark")}
+             "amount": l.get("amount"), "remark": l.get("remark"),
+             "copies": l.get("copies")}
             for l in detail["lines"]]
 
 
@@ -127,6 +177,7 @@ def _export_status(inv, today):
 
 
 with tab_list:
+    show_flash("invoice_list")
     invoices = store.list_contract_invoices()
     if not invoices:
         st.caption("登録済みの請求はまだありません。")
@@ -162,13 +213,19 @@ with tab_list:
     detail_by_id = {inv["id"]: store.get_contract_invoice(inv["id"]) for inv in invoices}
     disp_rows = []
     for inv in invoices:
-        total = posting_logic.invoice_total(detail_by_id[inv["id"]]["lines"])
+        _lines = detail_by_id[inv["id"]]["lines"]
+        total = posting_logic.invoice_total(_lines)
+        # 数量の単位は「登録時に焼き付けた支払形態」で決める。
+        # マスタの現在値を使うと、配布員が日当→歩合に変わった瞬間に過去の「3 日」が
+        # 「3 枚」に化けてしまう。
         disp_rows.append({
             "選択": False,
             "No.": inv["id"],
             "配布員": id2name.get(inv["distributor_id"], "?"),
             "発行日": inv.get("issue_date") or "",
             "配布業務期間": f'{inv.get("period_from")}〜{inv.get("period_to")}',
+            "数量": "／".join(posting_logic.qty_label(l.get("report_qty"), l.get("remark"),
+                                                    inv.get("pay_type")) for l in _lines),
             "請求額": f"¥{posting_logic.fmt_num(total)}",
             "出力状況": _export_status(inv, today),
         })
@@ -177,7 +234,7 @@ with tab_list:
     edited = st.data_editor(
         pd.DataFrame(disp_rows), hide_index=True, use_container_width=True,
         column_config={"選択": st.column_config.CheckboxColumn("選択", default=False)},
-        disabled=["No.", "配布員", "発行日", "配布業務期間", "請求額", "出力状況"],
+        disabled=["No.", "配布員", "発行日", "配布業務期間", "数量", "請求額", "出力状況"],
         key="contract_list_editor")
     selected_ids = [int(r["No."]) for _, r in edited.iterrows() if r["選択"]]
 
@@ -228,6 +285,21 @@ with tab_list:
             file_name=f"業務委託_選択一覧_{len(selected_ids)}件.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             icon=":material/download:", key="dl_sel_list")
+
+    # --- 請求を削除 ---
+    st.divider()
+    st.markdown("**請求を削除**")
+    for inv in invoices:
+        total = posting_logic.invoice_total(detail_by_id[inv["id"]]["lines"])
+        name = id2name.get(inv["distributor_id"], "?")
+        detail_txt = (f'No.{inv["id"]} ／ {name} ／ {inv.get("issue_date")}'
+                      f' ／ ¥{posting_logic.fmt_num(total)}')
+        c1, c2 = st.columns([5, 1])
+        c1.caption(detail_txt)
+        # 確認UIは列の外＝全幅に出し、ボタンだけを c2 に置く
+        confirm_delete(key=f"del_inv_{inv['id']}", detail=detail_txt,
+                       on_confirm=lambda i=inv["id"]: store.delete_contract_invoice(i),
+                       section="invoice_list", button_container=c2)
 
     # --- 配布員別 報酬合計（表示期間内） ---
     st.divider()
