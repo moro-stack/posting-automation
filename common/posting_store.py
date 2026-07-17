@@ -104,6 +104,12 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         cols = {r[1] for r in conn.execute(f"PRAGMA table_info({tbl})")}
         if "other_label" not in cols:
             conn.execute(f"ALTER TABLE {tbl} ADD COLUMN other_label TEXT")
+    # 業務委託(配布員)に 振込先・支払形態・時給額・月額 を持たせる。旧DBは自動でカラム追加。
+    dist_cols = {r[1] for r in conn.execute("PRAGMA table_info(distributors)")}
+    for col, typ in (("bank_info", "TEXT"), ("pay_type", "TEXT"),
+                     ("hourly_rate", "INTEGER"), ("monthly_rate", "INTEGER")):
+        if col not in dist_cols:
+            conn.execute(f"ALTER TABLE distributors ADD COLUMN {col} {typ}")
     conn.commit()
 
 
@@ -233,16 +239,26 @@ def delete_receivables_client(row_id, *, db_path=None):
 
 
 # --- distributors ---
-def add_distributor(name, *, kind="業務委託", active=1, db_path=None):
-    return _add("distributors", ["name", "kind", "active"], [name, kind, int(active)], db_path)
+def add_distributor(name, *, kind="業務委託", bank_info=None, pay_type=None,
+                    hourly_rate=None, monthly_rate=None, active=1, db_path=None):
+    return _add("distributors",
+                ["name", "kind", "bank_info", "pay_type", "hourly_rate",
+                 "monthly_rate", "active"],
+                [name, kind, bank_info, pay_type, _int_or_none(hourly_rate),
+                 _int_or_none(monthly_rate), int(active)], db_path)
 
 
 def list_distributors(*, only_active=False, db_path=None):
     return _list("distributors", only_active, db_path)
 
 
-def update_distributor(row_id, *, name=_UNSET, kind=_UNSET, active=_UNSET, db_path=None):
-    _update("distributors", row_id, {"name": name, "kind": kind, "active": active}, db_path)
+def update_distributor(row_id, *, name=_UNSET, kind=_UNSET, bank_info=_UNSET,
+                       pay_type=_UNSET, hourly_rate=_UNSET, monthly_rate=_UNSET,
+                       active=_UNSET, db_path=None):
+    _update("distributors", row_id,
+            {"name": name, "kind": kind, "bank_info": bank_info, "pay_type": pay_type,
+             "hourly_rate": hourly_rate, "monthly_rate": monthly_rate,
+             "active": active}, db_path)
 
 
 def delete_distributor(row_id, *, db_path=None):

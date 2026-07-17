@@ -294,3 +294,50 @@ def test_contract_invoice_migrates_old_db_without_last_exported(tmp_path):
     store.mark_contract_invoice_exported(rows[0]["id"], db_path=db, now="2026-07-16T10:00:00")
     rows = store.list_contract_invoices(db_path=db)
     assert rows[0]["last_exported_at"] == "2026-07-16T10:00:00"
+
+
+def test_distributor_stores_bank_and_pay_type(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor(
+        "山田太郎", kind="業務委託",
+        bank_info="三井住友銀行 梅田支店 普通 1234567 ヤマダ タロウ",
+        pay_type="日当", db_path=db)
+    row = next(r for r in store.list_distributors(db_path=db) if r["id"] == did)
+    assert row["bank_info"] == "三井住友銀行 梅田支店 普通 1234567 ヤマダ タロウ"
+    assert row["pay_type"] == "日当"
+    assert row["kind"] == "業務委託"
+
+
+def test_distributor_hourly_and_monthly_rate(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    h = store.add_distributor("時給の人", pay_type="時給", hourly_rate=1200, db_path=db)
+    m = store.add_distributor("月給の人", pay_type="月給", monthly_rate=250000, db_path=db)
+    rows = {r["id"]: r for r in store.list_distributors(db_path=db)}
+    assert rows[h]["hourly_rate"] == 1200
+    assert rows[m]["monthly_rate"] == 250000
+
+
+def test_update_distributor_changes_pay_type_and_bank(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", pay_type="日当", db_path=db)
+    store.update_distributor(did, pay_type="歩合", bank_info="ゆうちょ 12345", db_path=db)
+    row = next(r for r in store.list_distributors(db_path=db) if r["id"] == did)
+    assert row["pay_type"] == "歩合"
+    assert row["bank_info"] == "ゆうちょ 12345"
+
+
+def test_old_distributors_table_gets_new_columns(tmp_path):
+    """第2弾までの列しかない旧DBを開いても壊れず、新しい列が足されること。"""
+    import sqlite3
+    db = os.path.join(tmp_path, "old.db")
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE distributors (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                 " name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT '業務委託',"
+                 " active INTEGER NOT NULL DEFAULT 1)")
+    conn.execute("INSERT INTO distributors (name) VALUES ('既存の人')")
+    conn.commit()
+    conn.close()
+    rows = store.list_distributors(db_path=db)
+    assert rows[0]["name"] == "既存の人"
+    assert rows[0]["pay_type"] is None
+    assert rows[0]["bank_info"] is None
