@@ -25,6 +25,82 @@ def _run(page):
     return at
 
 
+def test_master_page_renders(db):
+    at = _run("05_マスタ管理.py")
+    assert not at.exception
+
+
+def test_master_page_tab_is_renamed_to_gyomu_itaku(db):
+    at = _run("05_マスタ管理.py")
+    labels = [t.label for t in at.tabs]
+    assert "業務委託" in labels
+    assert "配布委託先" not in labels
+
+
+def test_master_page_hides_inactive_from_main_list(db):
+    """停止中のマスタは通常の一覧に出さない。"""
+    alive = store.add_distributor("現役の人", db_path=db)
+    gone = store.add_distributor("辞めた人", active=0, db_path=db)
+    at = _run("05_マスタ管理.py")
+
+    # 有効な人は一覧に出て、削除(or 停止中)ボタンが並ぶ
+    body = " ".join(m.value for m in at.markdown)
+    assert "現役の人" in body
+    # 停止中の人は一覧の削除ボタンを持たず、「有効に戻す」だけを持つ
+    keys = {b.key for b in at.button}
+    assert f"del_distributor_{alive}_btn" in keys
+    assert f"del_distributor_{gone}_btn" not in keys
+    assert f"off_distributor_{gone}_btn" not in keys
+    assert f"on_distributor_{gone}" in keys
+
+
+def test_master_page_reactivates_from_expander(db):
+    """停止中の折りたたみから「有効に戻す」で復帰できる。"""
+    gone = store.add_distributor("戻る人", active=0, db_path=db)
+    at = _run("05_マスタ管理.py")
+    at.button(key=f"on_distributor_{gone}").click().run()
+
+    assert not at.exception
+    rows = {r["id"]: r for r in store.list_distributors(db_path=db)}
+    assert rows[gone]["active"]
+
+
+def test_master_page_delete_distributor_also_clears_daily_rates(db):
+    """使用実績0の配布員を物理削除するとき、日当金額も一緒に消す
+    (count_master_usage は distributor_daily_rates を数えないため、
+     消さないと孤立行が残る)。"""
+    did = store.add_distributor("日当の人", pay_type="日当", db_path=db)
+    store.replace_daily_rates(did, [{"work_name": "ポスティング", "amount": 8000}],
+                              db_path=db)
+    assert store.list_daily_rates(did, db_path=db)
+
+    at = _run("05_マスタ管理.py")
+    at.button(key=f"del_distributor_{did}_btn").click().run()
+    at.button(key=f"del_distributor_{did}_ok").click().run()
+
+    assert not at.exception
+    assert all(r["name"] != "日当の人" for r in store.list_distributors(db_path=db))
+    assert store.list_daily_rates(did, db_path=db) == []
+
+
+def test_master_page_deactivates_distributor_in_use(db):
+    """使用実績がある配布員は物理削除せず停止中にする(過去データを守るため)。"""
+    did = store.add_distributor("使用中の人", db_path=db)
+    store.add_contract_invoice(
+        did, "2026-07-17", "2026-07-01", "2026-07-31",
+        [{"report_qty": 10, "unit_price": 100}], db_path=db)
+    assert store.count_master_usage("distributor", did, db_path=db) > 0
+
+    at = _run("05_マスタ管理.py")
+    at.button(key=f"off_distributor_{did}_btn").click().run()
+    at.button(key=f"off_distributor_{did}_ok").click().run()
+
+    assert not at.exception
+    rows = {r["name"]: r for r in store.list_distributors(db_path=db)}
+    assert "使用中の人" in rows  # 過去データのために残っている
+    assert not rows["使用中の人"]["active"]
+
+
 def test_confirm_delete_shows_confirmation_before_running(db):
     """confirm_delete は押しただけでは実行せず、確認を出す。"""
 
