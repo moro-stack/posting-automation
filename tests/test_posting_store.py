@@ -6,6 +6,7 @@ TABLES = {
     "receivables_clients", "distributors",
     "petty_cash", "payables", "receivables",
     "contract_invoices", "contract_invoice_lines", "issue_manual_costs",
+    "distributor_daily_rates",
 }
 
 
@@ -363,3 +364,41 @@ def test_update_distributor_leaves_rate_unchanged_when_not_passed(tmp_path):
     row = next(r for r in store.list_distributors(db_path=db) if r["id"] == did)
     assert row["name"] == "別名"
     assert row["hourly_rate"] == 1200
+
+
+def test_daily_rates_replace_and_list(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", pay_type="日当", db_path=db)
+    store.replace_daily_rates(did, [{"work_name": "丁合・配布", "amount": 8000},
+                                    {"work_name": "ポスティング", "amount": 7500}], db_path=db)
+    rows = store.list_daily_rates(did, db_path=db)
+    assert [(r["work_name"], r["amount"]) for r in rows] == [
+        ("丁合・配布", 8000), ("ポスティング", 7500)]
+
+
+def test_daily_rates_replace_overwrites_previous(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", pay_type="日当", db_path=db)
+    store.replace_daily_rates(did, [{"work_name": "丁合・配布", "amount": 8000}], db_path=db)
+    store.replace_daily_rates(did, [{"work_name": "丁合・配布", "amount": 9000}], db_path=db)
+    rows = store.list_daily_rates(did, db_path=db)
+    assert len(rows) == 1
+    assert rows[0]["amount"] == 9000
+
+
+def test_daily_rates_are_per_distributor(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    a = store.add_distributor("Aさん", pay_type="日当", db_path=db)
+    b = store.add_distributor("Bさん", pay_type="日当", db_path=db)
+    store.replace_daily_rates(a, [{"work_name": "配布", "amount": 8000}], db_path=db)
+    store.replace_daily_rates(b, [{"work_name": "配布", "amount": 6000}], db_path=db)
+    assert store.list_daily_rates(a, db_path=db)[0]["amount"] == 8000
+    assert store.list_daily_rates(b, db_path=db)[0]["amount"] == 6000
+
+
+def test_replace_daily_rates_with_empty_clears(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", pay_type="日当", db_path=db)
+    store.replace_daily_rates(did, [{"work_name": "配布", "amount": 8000}], db_path=db)
+    store.replace_daily_rates(did, [], db_path=db)
+    assert store.list_daily_rates(did, db_path=db) == []

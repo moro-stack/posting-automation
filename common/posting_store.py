@@ -82,6 +82,11 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             project_id INTEGER, content TEXT, amount INTEGER NOT NULL,
             created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS distributor_daily_rates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            distributor_id INTEGER NOT NULL,
+            work_name TEXT NOT NULL,
+            amount INTEGER NOT NULL DEFAULT 0);
         """
     )
     # 買掛に請求書の日付(YYYY-MM-DD)を持たせる(#12)。旧DBは自動でカラム追加。
@@ -264,6 +269,39 @@ def update_distributor(row_id, *, name=_UNSET, kind=_UNSET, bank_info=_UNSET,
 
 def delete_distributor(row_id, *, db_path=None):
     _delete("distributors", row_id, db_path)
+
+
+def list_daily_rates(distributor_id, *, db_path=None):
+    """支払形態=日当の配布員の、業務名ごとの日当金額。"""
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM distributor_daily_rates WHERE distributor_id=? ORDER BY id",
+            (int(distributor_id),)).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def replace_daily_rates(distributor_id, rates, *, db_path=None):
+    """その配布員の日当金額を丸ごと入れ替える(全消し→入れ直し)。
+    画面の data_editor が「編集後の全行」を返すので、差分を取るより入れ替えが素直。"""
+    conn = _connect(db_path)
+    try:
+        conn.execute("DELETE FROM distributor_daily_rates WHERE distributor_id=?",
+                     (int(distributor_id),))
+        for r in rates:
+            name = str(r.get("work_name") or "").strip()
+            if not name:
+                continue
+            conn.execute(
+                "INSERT INTO distributor_daily_rates (distributor_id, work_name, amount)"
+                " VALUES (?,?,?)",
+                (int(distributor_id), name, int(r.get("amount") or 0)))
+        conn.commit()
+    finally:
+        conn.close()
+    _push_remote(db_path)
 
 
 _PRESET_PROJECTS = ["関西ぱど：京阪北版", "関西ぱど：京阪南版", "アドバリュー",
