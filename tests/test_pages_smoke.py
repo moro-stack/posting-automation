@@ -347,6 +347,36 @@ def test_master_page_edit_vendor_can_clear_original_status(db):
     assert row["default_original_status"] is None
 
 
+def test_master_page_edit_strips_whitespace_from_name(db):
+    """名前の前後の空白は保存時に取り除かれること(_name_fields / _distributor_fields の
+    .strip()が退行して外れても、DBに空白付きの名前が入ってしまうことに気付けるように)。"""
+    pid = store.add_project("案件A", db_path=db)
+    at = _run(_MASTER_PAGE)
+    at.button(key=f"edit_project_{pid}").click().run()
+    _edit_widget(at.text_input, "edit_name_project").set_value("  新しい名前  ")
+    _submit_edit(at)
+
+    assert not at.exception
+    row = {r["id"]: r for r in store.list_projects(db_path=db)}[pid]
+    assert row["name"] == "新しい名前"
+
+
+def test_master_page_edit_vendor_can_clear_default_category(db):
+    """既定の費目を空にすると、空文字でなく None(NULL) で保存されること。
+    edit_vendor_can_clear_original_status と同じ考え方(原本区分だけでなく費目にも
+    同じ保険が要る。(c.strip() or None) が退行して素の c.strip() に戻ると、
+    空文字が既定の費目としてDBに残ってしまう)。"""
+    vid = store.add_payables_vendor("ABC商事", default_category="家賃", db_path=db)
+    at = _run(_MASTER_PAGE)
+    at.button(key=f"edit_payables_vendor_{vid}").click().run()
+    _edit_widget(at.text_input, "edit_cat_payables_vendor").set_value("   ")
+    _submit_edit(at)
+
+    assert not at.exception
+    row = {r["id"]: r for r in store.list_payables_vendors(db_path=db)}[vid]
+    assert row["default_category"] is None
+
+
 def test_master_page_edit_ignores_empty_name(db):
     """名前を空にして「更新」を押しても、名前無しのマスタは作らない(登録フォームと同じ)。
     空名を通すと、一覧・報告書に名前の無い行ができる。"""
