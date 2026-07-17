@@ -124,6 +124,24 @@ def payment_method(kind, row) -> str:
     return "買掛"
 
 
+def resolve_original_status(vendor_name, vendors):
+    """取引先名(自由入力)が買掛先マスタと一致したら、その既定の原本区分を返す。
+    一致しない・マスタに既定が無い場合は None(＝画面は既定値のまま)。"""
+    key = str(vendor_name or "").strip()
+    if not key:
+        return None
+    for v in vendors or []:
+        if str(v.get("name") or "").strip() == key:
+            return v.get("default_original_status") or None
+    return None
+
+
+def master_delete_action(usage_count) -> str:
+    """マスタの行を消すときの動き。使用実績が無ければ物理削除、あれば停止中にする。
+    使用中のマスタを消すと過去データの表示から名前が欠けるため(配布員の入れ替わり対策)。"""
+    return "delete" if int(usage_count or 0) == 0 else "deactivate"
+
+
 def cost_groups(agg) -> dict:
     """aggregate_issue の結果を新レイアウトへ再編。
     配布員代=業務委託+直接入力(manual)、雑費=小口+買掛、配布原価=両者の和(=total)。"""

@@ -159,3 +159,40 @@ def test_days_since_today_and_past_and_none():
     assert L.days_since("こわれた日付", today="2026-07-16") is None
 
 
+# ---- 買掛の原本区分オートセット ----
+_VENDORS = [
+    {"name": "関西電力株式会社", "default_original_status": "振込用紙"},
+    {"name": "株式会社スペースリーダー", "default_original_status": "クレジット"},
+    {"name": "既定なしの会社", "default_original_status": None},
+]
+
+
+def test_resolve_original_status_matches_by_name():
+    assert L.resolve_original_status("関西電力株式会社", _VENDORS) == "振込用紙"
+    assert L.resolve_original_status("株式会社スペースリーダー", _VENDORS) == "クレジット"
+
+
+def test_resolve_original_status_trims_whitespace():
+    assert L.resolve_original_status("  関西電力株式会社 ", _VENDORS) == "振込用紙"
+
+
+def test_resolve_original_status_returns_none_when_no_match():
+    assert L.resolve_original_status("知らない会社", _VENDORS) is None
+    assert L.resolve_original_status("", _VENDORS) is None
+    assert L.resolve_original_status(None, _VENDORS) is None
+
+
+def test_resolve_original_status_returns_none_when_master_has_no_default():
+    assert L.resolve_original_status("既定なしの会社", _VENDORS) is None
+
+
+# ---- マスタ削除 or 停止中 ----
+def test_master_delete_action_deletes_when_unused():
+    assert L.master_delete_action(0) == "delete"
+
+
+def test_master_delete_action_deactivates_when_used():
+    assert L.master_delete_action(1) == "deactivate"
+    assert L.master_delete_action(12) == "deactivate"
+
+
