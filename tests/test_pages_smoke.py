@@ -510,6 +510,41 @@ def test_payable_original_status_defaults_when_vendor_unknown(db):
     assert _sel(at, "原本区分").value == "原本あり"
 
 
+def test_original_statuses_come_from_common(db):
+    """🟡 原本区分の選択肢は common(posting_logic.ORIGINAL_STATUSES)に一本化する。
+    pages/01 と pages/05 に同じリストを二重定義すると、区分を1つ足したときに片方だけ
+    増え、もう片方では「選べない値が既定になる」＝黙って先頭(原本あり)に落ちる。
+    両ページが common の定数をそのまま使っていることを固定し、ハードコードへの
+    退行(＝common に足しても追随しないページ)をここで捕まえる。"""
+    from common import posting_logic
+
+    at = _payable_page(db)
+    assert _sel(at, "原本区分").options == posting_logic.ORIGINAL_STATUSES
+
+    at5 = _run("05_マスタ管理.py")
+    opts = [s.options for s in at5.selectbox if s.label == "既定の原本区分"]
+    assert opts and opts[0] == ["(なし)"] + posting_logic.ORIGINAL_STATUSES
+
+
+def test_payable_no_caption_when_master_default_is_not_selectable(db):
+    """🟡 caption と選択値を食い違わせないこと。
+    マスタの既定が選択肢(ORIGINAL_STATUSES)に無い値のとき、selectbox は先頭
+    「原本あり」に落ちる。caption の条件を `if _auto:` にすると、実際は「原本あり」が
+    選ばれているのに「既定『謎の区分』を反映しました」と嘘の案内を出す。
+    区分を1つ足したときに黙って壊れる型なので、caption 側も index と同じ条件で守る。"""
+    store.add_payables_vendor("謎商事", default_original_status="謎の区分", db_path=db)
+    at = AppTest.from_file(os.path.join(ROOT, "pages", _EXPENSE_PAGE), default_timeout=30)
+    at.session_state["pay_draft"] = {"vendor": "謎商事", "amount": 5000,
+                                     "date": "2026-07-17", "note": None}
+    at.run()
+    at.radio[0].set_value("買掛").run()
+
+    assert not at.exception
+    # 選択肢に無いので先頭に落ちる。そのときは「反映しました」と言ってはいけない。
+    assert _sel(at, "原本区分").value == "原本あり"
+    assert not any("反映しました" in c.value for c in at.caption)
+
+
 def test_payable_list_deletes_the_right_row_and_announces(db):
     a = store.add_payable(None, None, 1000, date="2026-07-10", vendor_name="A社", db_path=db)
     b = store.add_payable(None, None, 2000, date="2026-07-11", vendor_name="B社", db_path=db)
@@ -607,6 +642,29 @@ def test_contract_list_uses_saved_pay_type_not_current_master(db):
     text = _rendered_text(at)
     assert "3 日" in text
     assert "3 枚" not in text
+
+
+def test_contract_list_shows_name_of_deactivated_distributor(db):
+    """🔴 停止中方式の要(業務委託の一覧・ZIP出力)。停止中にした配布員でも、過去の請求の
+    一覧には名前が出続けること。一覧の名前引き(id2name)は only_active を付けない。
+
+    ここが only_active=True に退行すると、一覧の配布員が「?」になるだけでなく、
+    ZIP出力のExcelの distributor_name が空文字になり、ファイル名も
+    「業務完了報告書兼請求書__2026-07-17.xlsx」に化ける＝配布員名の無い報告書が本人に渡る。
+    「配布員は移り変わりが激しい」が停止中方式の動機なので、辞めた配布員の過去請求は
+    必ず通る経路。"""
+    did, _, _ = _seed_invoice(db, pay_type="歩合", name="辞めた太郎")
+    # 登録タブが「配布員が居ません」で st.stop しないよう、有効な配布員を1人残す
+    store.add_distributor("現役の人", pay_type="歩合", db_path=db)
+    store.update_distributor(did, active=0, db_path=db)   # 停止中にする
+
+    at = _run(_CONTRACT_PAGE)
+    assert not at.exception
+    text = _rendered_text(at)
+    assert "辞めた太郎" in text
+    # 一覧の配布員列そのものが名前になっていること(「?」に落ちていない)
+    listed = [df.value for df in at.dataframe if "配布員" in list(df.value.columns)]
+    assert listed and list(listed[0]["配布員"]) == ["辞めた太郎"]
 
 
 def _contract_page_with_lines(db, pay_type, edits):
@@ -953,3 +1011,40 @@ def test_issue_page_houbai_still_shows_mai(db):
     text = _rendered_text(at)
     assert "3 枚" in text
     assert "3 日" not in text
+
+
+def test_issue_page_keeps_deactivated_project(db):
+    """🔴 案件を停止中にしても、号別明細から号が消えないこと。
+    マスタ画面は「過去データを残すため、削除ではなく停止中にします（登録の選択肢から
+    消えるだけで、一覧・報告書の表示は変わりません）」と案内している。号別明細は
+    「登録の選択肢」ではなく「過去データの表示」なので、停止中も含めて引くのが正しい側。
+    ここを only_active=True に戻すと、オーナーが古い号を整理した瞬間にページごと号が消える。"""
+    _, pid, _ = _seed_invoice(db, pay_type="歩合")
+    store.update_project(pid, active=0, db_path=db)   # 停止中にする
+    at = _issue_page(db)
+    assert not at.exception
+    assert "案件A" in _rendered_text(at)
+
+
+# ============================================================ ホーム
+def _home_page():
+    at = AppTest.from_file(os.path.join(ROOT, "home.py"), default_timeout=30)
+    at.run()
+    return at
+
+
+def test_home_renders(db):
+    at = _home_page()
+    assert not at.exception
+
+
+def test_home_keeps_deactivated_project(db):
+    """🔴 ホームの号一覧も「過去データの表示」。停止中にした案件も出し続けること。
+    only_active=True に戻すと、停止中にした瞬間にホームから号が消え、その号の
+    コスト・売上・収支が誰からも見えなくなる。"""
+    _, pid, _ = _seed_invoice(db, pay_type="歩合")
+    store.update_project(pid, active=0, db_path=db)   # 停止中にする
+    at = _home_page()
+    assert not at.exception
+    names = list(at.dataframe[0].value["案件"])
+    assert "案件A" in names

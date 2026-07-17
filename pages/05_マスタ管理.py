@@ -8,7 +8,7 @@ from common.ui import apply_app_style, nice_table, flash, show_flash, confirm_de
 apply_app_style()
 st.title("マスタ管理")
 
-_ORIGINAL_STATUSES = ["原本あり", "本社", "クレジット", "振込用紙", "なし"]
+_ORIGINAL_STATUSES = posting_logic.ORIGINAL_STATUSES
 _PAY_TYPES = ["歩合", "日当", "時給", "月給"]
 
 

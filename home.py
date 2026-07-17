@@ -7,7 +7,9 @@ from common.ui import apply_app_style
 apply_app_style()
 st.title("📮 配布コスト管理")
 
-projs = store.list_projects(only_active=True)
+# 停止中も含めて引く。ここは「登録の選択肢」ではなく「過去データの表示」なので、
+# 案件を停止中にしてもホームの一覧からは消さない(マスタ画面の案内文どおりの挙動)。
+projs = store.list_projects()
 contract_lines = []
 for inv in store.list_contract_invoices():
     contract_lines.extend(store.get_contract_invoice(inv["id"])["lines"])

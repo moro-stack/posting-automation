@@ -17,7 +17,7 @@ mode = st.radio("入力の種類", ["小口", "買掛", "売掛"], horizontal=Tr
 _UPLOAD_TYPES = ["pdf", "jpg", "jpeg", "png"]
 _REG_TAB = "✒️ 登録"
 _LIST_TAB = "📋 登録済み一覧"
-_ORIGINAL_STATUSES = ["原本あり", "本社", "クレジット", "振込用紙", "なし"]
+_ORIGINAL_STATUSES = posting_logic.ORIGINAL_STATUSES
 
 
 def _project_options():
@@ -309,7 +309,10 @@ elif mode == "買掛":
             original = st.selectbox(
                 "原本区分", _ORIGINAL_STATUSES,
                 index=(_ORIGINAL_STATUSES.index(_auto) if _auto in _ORIGINAL_STATUSES else 0))
-            if _auto:
+            # caption の条件は selectbox の index と必ず揃えること。`if _auto:` だけにすると
+            # 選択肢に無い値のとき、実際は先頭(原本あり)が選ばれているのに
+            # 「既定『◯◯』を反映しました」と嘘の案内が出る。
+            if _auto in _ORIGINAL_STATUSES:
                 st.caption(f"✔️ 買掛先マスタの既定「{_auto}」を反映しました（変更できます）。")
             pay_projs = _project_options()
             pay_proj = st.selectbox("案件(任意)", ["(なし)"] + list(pay_projs.keys()))

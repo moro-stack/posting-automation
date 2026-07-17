@@ -33,7 +33,9 @@ def _parse_int(s):
     return int(digits) if digits else 0
 
 
-projs = store.list_projects(only_active=True)
+# 停止中も含めて引く。号別明細は「登録の選択肢」ではなく「過去データの表示」なので、
+# 案件を停止中にしても号は出し続ける(配布員の名前引きと同じ扱い)。
+projs = store.list_projects()
 if not projs:
     st.warning("案件マスタが空です。『マスタ管理』で登録してください。")
     st.stop()

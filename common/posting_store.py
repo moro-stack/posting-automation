@@ -246,21 +246,6 @@ def delete_payables_vendor(row_id, *, db_path=None):
     _delete("payables_vendors", row_id, db_path)
 
 
-def find_vendor_by_name(name, *, db_path=None):
-    """取引先名(自由入力)が買掛先マスタと完全一致すればその行を返す。無ければ None。
-    買掛登録で原本区分を自動セットするために使う。"""
-    key = str(name or "").strip()
-    if not key:
-        return None
-    conn = _connect(db_path)
-    try:
-        row = conn.execute("SELECT * FROM payables_vendors WHERE TRIM(name)=?",
-                           (key,)).fetchone()
-        return dict(row) if row else None
-    finally:
-        conn.close()
-
-
 # --- receivables_clients ---
 def add_receivables_client(name, *, active=1, db_path=None):
     return _add("receivables_clients", ["name", "active"], [name, int(active)], db_path)

@@ -76,8 +76,11 @@ CREATE TABLE IF NOT EXISTS distributor_daily_rates (
 - `add_petty_cash` に `distributor_id` 引数を追加
 - `add_payables_vendor` / `update_payables_vendor` に `default_original_status` を追加
 - `add_distributor` / `update_distributor` に `bank_info` / `pay_type` / `hourly_rate` / `monthly_rate` を追加
-- `list_daily_rates(distributor_id)` / `replace_daily_rates(distributor_id, rates)` / `delete_daily_rates_for(distributor_id)`
-- `find_vendor_by_name(name)` — 買掛の原本区分オートセット用（名前の完全一致）
+- `list_daily_rates(distributor_id)` / `replace_daily_rates(distributor_id, rates)`
+  - 当初は `delete_daily_rates_for(distributor_id)` も置く予定だったが、`replace_daily_rates(row_id, [])`
+    で等価に掃除できるため新設しなかった（配布員の物理削除時の孤立行の掃除は `pages/05` がこれで行う）
+- 買掛の原本区分オートセットは `posting_logic.resolve_original_status(vendor_name, vendors)` の純関数と
+  `list_payables_vendors()` で行う（当初案の `find_vendor_by_name(name)` は不採用・未使用のため置かない）
 - `count_master_usage(master, row_id)` — マスタの使用件数を数える（停止中方式の判定用）
 - `deactivate_*` は既存の `update_*(active=0)` を使うため新設しない
 
