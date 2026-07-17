@@ -1236,13 +1236,22 @@ def test_master_page_tab_is_renamed_to_gyomu_itaku(db):
 
 
 def test_master_page_hides_inactive_from_main_list(db):
-    """停止中のマスタは通常の一覧に出さない。"""
+    """停止中のマスタは通常の一覧に出さない(停止中は expander の中)。"""
     store.add_distributor("現役の人", db_path=db)
     store.add_distributor("辞めた人", active=0, db_path=db)
     at = _run("05_マスタ管理.py")
-    body = str(at)
-    assert "現役の人" in body
+    # 有効な人は一覧に出る。停止中の人は一覧の削除ボタン(key に行idを含む)が無い、で見る。
+    assert "現役の人" in _rendered_text(at)
 ```
+
+🔴 **`str(at)` を絶対に使わないこと。** `AppTest.__repr__` はスクリプトのパスとブロック構造しか返さず、
+**描画された要素の中身を含まない**。`assert "現役の人" in str(at)` は**何を書いても常に通る無意味なアサート**で、
+このタスクの主眼（停止中が一覧に出ないこと）を1ミリも検証しない。
+描画された要素の値を集める `_rendered_text(at)` ヘルパ（Task 11 の節に定義）を使うこと。
+
+**このタスクの主眼は「停止中が一覧に出ないこと」なので、それを直接検証するテストを必ず置くこと**
+（有効な人だけが一覧に出る／停止中の人は expander の中にいる／「有効に戻す」で復帰できる／
+使用実績があれば物理削除されず停止中になる／使用実績0なら物理削除される）。
 
 - [ ] **Step 2: Run test to verify it fails**
 
