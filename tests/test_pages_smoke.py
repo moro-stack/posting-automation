@@ -714,6 +714,32 @@ def test_contract_zip_export_uses_saved_pay_type(db, monkeypatch):
     assert seen == ["日当"]
 
 
+def test_contract_registration_download_uses_selected_pay_type(db, monkeypatch):
+    """🔴 登録タブ。build_invoice_xlsx(..., pay_type=pay_type) の配線を守る。
+    ZIP出力側(test_contract_zip_export_uses_saved_pay_type)と同型のスパイで、
+    ダウンロード用の報告書生成に選択中の配布員の支払形態が渡っていることを確認する。
+    ここは保存前のプレビューなので pay_type=None にすり替えられても他の172件は誰も気づかない
+    (coverage gap)。ZIP側にはスパイがあるのに登録タブ側には無かった穴を塞ぐテスト。"""
+    from common import invoice_excel
+
+    seen = []
+    real = invoice_excel.build_invoice_xlsx
+
+    def spy(**kw):
+        seen.append(kw.get("pay_type"))
+        return real(**kw)
+
+    monkeypatch.setattr(invoice_excel, "build_invoice_xlsx", spy)
+
+    store.add_distributor("山田太郎", pay_type="日当", db_path=db)
+    store.add_project("案件A", db_path=db)
+    at = _contract_page_with_lines(
+        db, "日当", {"案件": "案件A", "数量": 3.0, "部数": 3713})
+
+    assert not at.exception
+    assert seen == ["日当"]
+
+
 def test_contract_registration_houbai_does_not_send_copies(db):
     """歩合は部数の列を出さない(数量がそのまま部数)。copies は NULL のまま。"""
     store.add_distributor("山田太郎", pay_type="歩合", db_path=db)
