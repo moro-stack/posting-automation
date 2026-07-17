@@ -64,6 +64,36 @@ def test_seed_masters_is_idempotent(tmp_path):
     assert len(store.list_receivables_clients(db_path=db)) == len(set(clients))
 
 
+def test_payables_vendor_default_original_status(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    vid = store.add_payables_vendor("関西電力株式会社", default_category="電気",
+                                    default_original_status="振込用紙", db_path=db)
+    row = next(r for r in store.list_payables_vendors(db_path=db) if r["id"] == vid)
+    assert row["default_original_status"] == "振込用紙"
+
+
+def test_find_vendor_by_name(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    store.add_payables_vendor("関西電力株式会社", default_original_status="振込用紙", db_path=db)
+    found = store.find_vendor_by_name("関西電力株式会社", db_path=db)
+    assert found is not None
+    assert found["default_original_status"] == "振込用紙"
+
+
+def test_find_vendor_by_name_trims_whitespace(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    store.add_payables_vendor("関西電力株式会社", default_original_status="振込用紙", db_path=db)
+    assert store.find_vendor_by_name("  関西電力株式会社  ", db_path=db) is not None
+
+
+def test_find_vendor_by_name_returns_none_when_absent(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    store.add_payables_vendor("関西電力株式会社", db_path=db)
+    assert store.find_vendor_by_name("知らない会社", db_path=db) is None
+    assert store.find_vendor_by_name("", db_path=db) is None
+    assert store.find_vendor_by_name(None, db_path=db) is None
+
+
 def test_petty_cash_roundtrip_and_filter(tmp_path):
     db = os.path.join(tmp_path, "t.db")
     a = store.add_petty_cash("2026-06-19", 1, 1200, project_id=3, memo="駐車場", db_path=db, now="T")

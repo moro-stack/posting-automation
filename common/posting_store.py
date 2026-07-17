@@ -119,6 +119,10 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     petty_cols = {r[1] for r in conn.execute("PRAGMA table_info(petty_cash)")}
     if "distributor_id" not in petty_cols:
         conn.execute("ALTER TABLE petty_cash ADD COLUMN distributor_id INTEGER")
+    # 買掛先マスタに「既定の原本区分」を持たせる(買掛登録で自動セットするため)。
+    ven_cols = {r[1] for r in conn.execute("PRAGMA table_info(payables_vendors)")}
+    if "default_original_status" not in ven_cols:
+        conn.execute("ALTER TABLE payables_vendors ADD COLUMN default_original_status TEXT")
     conn.commit()
 
 
@@ -212,22 +216,41 @@ def delete_expense_category(row_id, *, db_path=None):
 
 
 # --- payables_vendors ---
-def add_payables_vendor(name, *, default_category=None, active=1, db_path=None):
-    return _add("payables_vendors", ["name", "default_category", "active"],
-                [name, default_category, int(active)], db_path)
+def add_payables_vendor(name, *, default_category=None, default_original_status=None,
+                        active=1, db_path=None):
+    return _add("payables_vendors",
+                ["name", "default_category", "default_original_status", "active"],
+                [name, default_category, default_original_status, int(active)], db_path)
 
 
 def list_payables_vendors(*, only_active=False, db_path=None):
     return _list("payables_vendors", only_active, db_path)
 
 
-def update_payables_vendor(row_id, *, name=_UNSET, default_category=_UNSET, active=_UNSET, db_path=None):
+def update_payables_vendor(row_id, *, name=_UNSET, default_category=_UNSET,
+                           default_original_status=_UNSET, active=_UNSET, db_path=None):
     _update("payables_vendors", row_id,
-            {"name": name, "default_category": default_category, "active": active}, db_path)
+            {"name": name, "default_category": default_category,
+             "default_original_status": default_original_status, "active": active}, db_path)
 
 
 def delete_payables_vendor(row_id, *, db_path=None):
     _delete("payables_vendors", row_id, db_path)
+
+
+def find_vendor_by_name(name, *, db_path=None):
+    """取引先名(自由入力)が買掛先マスタと完全一致すればその行を返す。無ければ None。
+    買掛登録で原本区分を自動セットするために使う。"""
+    key = str(name or "").strip()
+    if not key:
+        return None
+    conn = _connect(db_path)
+    try:
+        row = conn.execute("SELECT * FROM payables_vendors WHERE TRIM(name)=?",
+                           (key,)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
 
 
 # --- receivables_clients ---
