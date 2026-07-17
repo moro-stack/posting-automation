@@ -102,6 +102,86 @@ def test_qty_label_isshiki_ignores_quantity():
     assert L.qty_label(0, "手当") == "一式"
 
 
+# ---- 支払形態に応じた単位 ----
+def test_unit_for_without_pay_type_keeps_current_behavior():
+    """既存の呼び出し(pay_type なし)は今までと同じ。"""
+    assert L.unit_for("配布") == "枚"
+    assert L.unit_for("挟み込み") == "枚"
+    assert L.unit_for("交通費") == "一式"
+    assert L.unit_for("手当") == "一式"
+    assert L.unit_for("その他") == "一式"
+
+
+def test_unit_for_by_pay_type_on_delivery_rows():
+    assert L.unit_for("配布", "日当") == "日"
+    assert L.unit_for("配布", "時給") == "時間"
+    assert L.unit_for("配布", "月給") == "一式"
+    assert L.unit_for("配布", "歩合") == "枚"
+    assert L.unit_for("挟み込み", "日当") == "日"
+
+
+def test_unit_for_non_delivery_rows_ignore_pay_type():
+    """日当の人でも交通費・手当の行は「一式」。支払形態で一律に上書きしない。"""
+    for pt in ("日当", "時給", "月給", "歩合", None):
+        assert L.unit_for("交通費", pt) == "一式"
+        assert L.unit_for("手当", pt) == "一式"
+        assert L.unit_for("その他", pt) == "一式"
+
+
+def test_qty_label_with_pay_type():
+    assert L.qty_label(3, "配布", "日当") == "3 日"
+    assert L.qty_label(6.5, "配布", "時給") == "6.5 時間"
+    assert L.qty_label(1, "配布", "月給") == "一式"
+    assert L.qty_label(3713, "配布", "歩合") == "3,713 枚"
+
+
+def test_qty_label_without_pay_type_keeps_current_behavior():
+    assert L.qty_label(3713, "配布") == "3,713 枚"
+    assert L.qty_label(1, "交通費") == "一式"
+
+
+# ---- 配布部数 ----
+def test_line_copies_uses_qty_for_houbai_and_none():
+    line = {"report_qty": 3713, "copies": 999, "remark": "配布"}
+    assert L.line_copies(line, "歩合") == 3713
+    assert L.line_copies(line, None) == 3713
+
+
+def test_line_copies_uses_copies_column_for_other_pay_types():
+    line = {"report_qty": 3, "copies": 3713, "remark": "配布"}
+    assert L.line_copies(line, "日当") == 3713
+    assert L.line_copies(line, "時給") == 3713
+    assert L.line_copies(line, "月給") == 3713
+
+
+def test_line_copies_is_zero_when_copies_missing():
+    assert L.line_copies({"report_qty": 3, "remark": "配布"}, "日当") == 0
+    assert L.line_copies({"report_qty": 3, "copies": None, "remark": "配布"}, "日当") == 0
+
+
+def test_line_copies_is_zero_for_non_delivery_rows():
+    assert L.line_copies({"report_qty": 1, "copies": 500, "remark": "交通費"}, "日当") == 0
+    assert L.line_copies({"report_qty": 1, "remark": "手当"}, "歩合") == 0
+
+
+def test_delivered_copies_without_pay_type_keeps_current_behavior():
+    lines = [
+        {"report_qty": 3713, "remark": "配布"},
+        {"report_qty": 500, "remark": "挟み込み"},
+        {"report_qty": 1, "remark": "交通費"},
+    ]
+    assert L.delivered_copies(lines) == 3713 + 500
+
+
+def test_delivered_copies_for_nichito_uses_copies_column():
+    lines = [
+        {"report_qty": 3, "copies": 3713, "remark": "配布"},
+        {"report_qty": 1, "copies": 500, "remark": "挟み込み"},
+        {"report_qty": 1, "copies": 99, "remark": "交通費"},
+    ]
+    assert L.delivered_copies(lines, "日当") == 3713 + 500
+
+
 def test_invoice_total_handles_decimals():
     assert L.invoice_total([{"amount": 3.5}, {"amount": 2.25}]) == 5.75
 

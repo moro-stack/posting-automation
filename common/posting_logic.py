@@ -17,17 +17,27 @@ def is_delivery(remark) -> bool:
     return remark in _DELIVERY_REMARKS
 
 
-def unit_for(remark) -> str:
-    """種別に応じた数量の単位。配布・挟み込みは『枚』、それ以外は『一式』。"""
-    return "枚" if is_delivery(remark) else "一式"
+# 支払形態ごとの、配布・挟み込み行の数量の単位。
+# 歩合(と未設定)は数量がそのまま部数なので「枚」＝これまでの動き。
+# 月給は数量を数えない(月額×1)ので「一式」。
+_PAY_TYPE_UNITS = {"日当": "日", "時給": "時間", "月給": "一式", "歩合": "枚"}
 
 
-def qty_label(qty, remark) -> str:
-    """明細の数量表示。配布・挟み込みは『3,713 枚』。
-    交通費・手当・その他は数を数えないので『一式』だけを出す(「1 一式」とは出さない)。"""
-    if is_delivery(remark):
-        return f"{fmt_num(qty)} {unit_for(remark)}"
-    return unit_for(remark)
+def unit_for(remark, pay_type=None) -> str:
+    """数量の単位。交通費・手当・その他は数を数えないので『一式』(支払形態によらない)。
+    配布・挟み込みのときだけ支払形態で単位が変わる(日当=日 / 時給=時間 / 月給=一式 / 歩合=枚)。"""
+    if not is_delivery(remark):
+        return "一式"
+    return _PAY_TYPE_UNITS.get(pay_type, "枚")
+
+
+def qty_label(qty, remark, pay_type=None) -> str:
+    """明細の数量表示。歩合の配布なら『3,713 枚』、日当なら『3 日』。
+    単位が『一式』のものは数を数えないので『一式』だけを出す(「1 一式」とは出さない)。"""
+    unit = unit_for(remark, pay_type)
+    if unit == "一式":
+        return unit
+    return f"{fmt_num(qty)} {unit}"
 
 
 def fmt_num(value) -> str:
@@ -85,9 +95,19 @@ def filter_rows_by_period(rows, key, lo, hi):
     return [r for r in rows if in_period(r.get(key), lo, hi)]
 
 
-def delivered_copies(lines):
-    return sum(_num(l.get("report_qty"))
-               for l in lines if l.get("remark") in _DELIVERY_REMARKS)
+def line_copies(line, pay_type=None):
+    """その明細行の配布部数。歩合(と未設定)は数量がそのまま部数＝これまでの動き。
+    日当・時給・月給は数量が日数/時間なので、別列の copies を使う。
+    配布・挟み込み以外の行は部数を数えない。"""
+    if not is_delivery((line or {}).get("remark")):
+        return 0
+    if pay_type in (None, "歩合"):
+        return _num((line or {}).get("report_qty"))
+    return _num((line or {}).get("copies"))
+
+
+def delivered_copies(lines, pay_type=None):
+    return sum(line_copies(l, pay_type) for l in lines)
 
 
 def invoice_total(lines):
