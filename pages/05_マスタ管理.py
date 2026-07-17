@@ -108,7 +108,8 @@ with tab2:
                    store.add_expense_category, store.update_expense_category)
 
 with tab3:
-    show_flash("payables_vendor")
+    master = "payables_vendor"
+    show_flash(master)
     active, inactive = _split_active(store.list_payables_vendors())
     disp = [{"取引先": r["name"], "既定の費目": r.get("default_category") or "",
              "既定の原本区分": r.get("default_original_status") or ""} for r in active]
@@ -117,9 +118,9 @@ with tab3:
     for r in active:
         c1, c2 = st.columns([4, 1])
         c1.write(r["name"])
-        _remove_ui("payables_vendor", r, label_name="買掛先",
+        _remove_ui(master, r, label_name="買掛先",
                    update_fn=store.update_payables_vendor, button_container=c2)
-    _inactive_ui("payables_vendor", inactive, update_fn=store.update_payables_vendor)
+    _inactive_ui(master, inactive, update_fn=store.update_payables_vendor)
     with st.form("add_vendor", clear_on_submit=True):
         n = st.text_input("取引先名")
         c = st.text_input("既定の費目（家賃・電気 など）")
@@ -128,7 +129,7 @@ with tab3:
             store.add_payables_vendor(
                 n.strip(), default_category=(c.strip() or None),
                 default_original_status=(None if o == "(なし)" else o))
-            flash("買掛先を追加しました", "payables_vendor")
+            flash("買掛先を追加しました", master)
             st.rerun()
 
 with tab4:
@@ -136,7 +137,8 @@ with tab4:
                    store.add_receivables_client, store.update_receivables_client)
 
 with tab5:
-    show_flash("distributor")
+    master = "distributor"
+    show_flash(master)
     active, inactive = _split_active(store.list_distributors())
     disp = [{"配布員 氏名": r["name"], "区分": r.get("kind") or "",
              "支払形態": r.get("pay_type") or "",
@@ -146,9 +148,9 @@ with tab5:
     for r in active:
         c1, c2 = st.columns([4, 1])
         c1.write(r["name"])
-        _remove_ui("distributor", r, label_name="業務委託",
+        _remove_ui(master, r, label_name="業務委託",
                    update_fn=store.update_distributor, button_container=c2)
-    _inactive_ui("distributor", inactive, update_fn=store.update_distributor)
+    _inactive_ui(master, inactive, update_fn=store.update_distributor)
 
     with st.form("add_dist", clear_on_submit=True):
         n = st.text_input("配布員 氏名")
@@ -165,7 +167,7 @@ with tab5:
                                   bank_info=(bank.strip() or None),
                                   hourly_rate=(int(hourly) or None),
                                   monthly_rate=(int(monthly) or None))
-            flash("業務委託を追加しました", "distributor")
+            flash("業務委託を追加しました", master)
             st.rerun()
 
     # --- 日当金額の設定（支払形態=日当の人だけ）---
@@ -194,5 +196,5 @@ with tab5:
             store.replace_daily_rates(did, [
                 {"work_name": str(r["業務名"]), "amount": int(r["金額"] or 0)}
                 for _, r in edited.iterrows() if str(r["業務名"] or "").strip()])
-            flash("日当金額を保存しました", "distributor")
+            flash("日当金額を保存しました", master)
             st.rerun()

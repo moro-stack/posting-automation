@@ -271,6 +271,36 @@ def test_master_page_announces_in_the_tab_that_was_operated(db):
     assert [s.value for s in proj.success] == []
 
 
+def test_master_page_delete_announces_in_the_tab_that_was_operated(db):
+    """confirm_delete 経由の「削除しました」も操作したタブに出ること。
+    section を落とすと案件タブ(最初に描画されるタブ)に横取りされるため、
+    このテストが flash(success, section) の section 伝播を守る。"""
+    did = store.add_distributor("消す人", db_path=db)
+    at = _run("05_マスタ管理.py")
+    at.button(key=f"del_distributor_{did}_btn").click().run()
+    at.button(key=f"del_distributor_{did}_ok").click().run()
+    assert not at.exception
+    labels = [t.label for t in at.tabs]
+    assert [s.value for s in at.tabs[labels.index("業務委託")].success] == ["削除しました"]
+    assert [s.value for s in at.tabs[labels.index("案件")].success] == []
+
+
+def test_master_page_deactivate_announces_in_the_tab_that_was_operated(db):
+    """使用実績のある配布員を「停止中にする」経路でも、アナウンスは操作したタブに出て
+    他タブに漏れないこと(delete側と同じ confirm_delete の section を通る)。"""
+    did = store.add_distributor("使用中の人2", db_path=db)
+    store.add_contract_invoice(
+        did, "2026-07-17", "2026-07-01", "2026-07-31",
+        [{"report_qty": 10, "unit_price": 100}], db_path=db)
+    at = _run("05_マスタ管理.py")
+    at.button(key=f"off_distributor_{did}_btn").click().run()
+    at.button(key=f"off_distributor_{did}_ok").click().run()
+    assert not at.exception
+    labels = [t.label for t in at.tabs]
+    assert [s.value for s in at.tabs[labels.index("業務委託")].success] == ["停止中にしました"]
+    assert [s.value for s in at.tabs[labels.index("案件")].success] == []
+
+
 def test_master_page_flash_sections_do_not_leak_between_tabs(db):
     """別セクション宛のflashは、そのセクションのshow_flashだけが消費すること。"""
 
