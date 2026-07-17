@@ -655,6 +655,65 @@ def test_contract_registration_nichito_fills_unit_price_from_master(db):
     assert detail["lines"][0]["copies"] == 3713
 
 
+def test_contract_registration_jikyu_fills_unit_price_from_master(db):
+    """🔴 時給は、マスタの時給額が単価に自動で入る(数量=時間 × 時給額)。"""
+    store.add_distributor("時給の人", pay_type="時給", hourly_rate=1200, db_path=db)
+    store.add_project("案件A", db_path=db)
+    at = _contract_page_with_lines(db, "時給", {"案件": "案件A", "数量": 8.0, "部数": 1200})
+    _click(at, "この請求を登録")
+
+    assert not at.exception
+    detail = store.get_contract_invoice(
+        store.list_contract_invoices(db_path=db)[0]["id"], db_path=db)
+    assert detail["lines"][0]["unit_price"] == 1200
+    assert detail["lines"][0]["report_qty"] == 8
+    assert detail["lines"][0]["amount"] == 9600
+    assert detail["lines"][0]["copies"] == 1200
+
+
+def test_contract_registration_getkyu_fills_monthly_rate_and_qty_one(db):
+    """🔴 月給は、マスタの月額が単価に自動で入り、数量は1固定(月額をそのまま請求)。"""
+    store.add_distributor("月給の人", pay_type="月給", monthly_rate=300000, db_path=db)
+    store.add_project("案件A", db_path=db)
+    # 数量は既定の1固定のまま。案件と部数だけ入れる。
+    at = _contract_page_with_lines(db, "月給", {"案件": "案件A", "部数": 5000})
+    _click(at, "この請求を登録")
+
+    assert not at.exception
+    detail = store.get_contract_invoice(
+        store.list_contract_invoices(db_path=db)[0]["id"], db_path=db)
+    assert detail["lines"][0]["unit_price"] == 300000
+    assert detail["lines"][0]["report_qty"] == 1
+    assert detail["lines"][0]["amount"] == 300000
+    assert detail["lines"][0]["copies"] == 5000
+
+
+def test_contract_zip_export_uses_saved_pay_type(db, monkeypatch):
+    """🔴 ZIP出力は、マスタの現在値ではなく請求に焼き付けた支払形態で報告書を作ること。
+    現在値を使うと、支払形態を変えた瞬間に過去の報告書の単位が化ける。"""
+    from common import invoice_excel
+
+    seen = []
+    real = invoice_excel.build_invoice_xlsx
+
+    def spy(**kw):
+        seen.append(kw.get("pay_type"))
+        return real(**kw)
+
+    monkeypatch.setattr(invoice_excel, "build_invoice_xlsx", spy)
+
+    did, _, iid = _seed_invoice(db, pay_type="日当", copies=3713)
+    store.update_distributor(did, pay_type="歩合", db_path=db)   # マスタを後から変更
+
+    at = AppTest.from_file(os.path.join(ROOT, "pages", _CONTRACT_PAGE), default_timeout=30)
+    at.session_state["contract_list_editor"] = {
+        "edited_rows": {0: {"選択": True}}, "added_rows": [], "deleted_rows": []}
+    at.run()
+
+    assert not at.exception
+    assert seen == ["日当"]
+
+
 def test_contract_registration_houbai_does_not_send_copies(db):
     """歩合は部数の列を出さない(数量がそのまま部数)。copies は NULL のまま。"""
     store.add_distributor("山田太郎", pay_type="歩合", db_path=db)

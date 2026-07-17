@@ -148,7 +148,8 @@ with tab_reg:
         else:
             xlsx = invoice_excel.build_invoice_xlsx(
                 distributor_name=dist_name,
-                issue_date=str(issue), period_from=str(pfrom), period_to=str(pto), lines=lines)
+                issue_date=str(issue), period_from=str(pfrom), period_to=str(pto), lines=lines,
+                pay_type=pay_type)
             col_dl.download_button(
                 "報告書兼請求書をExcelでダウンロード", data=xlsx,
                 file_name=f"業務完了報告書兼請求書_{dist_name}.xlsx",
@@ -256,7 +257,10 @@ with tab_list:
                 xlsx = invoice_excel.build_invoice_xlsx(
                     distributor_name=name, issue_date=head["issue_date"],
                     period_from=head["period_from"], period_to=head["period_to"],
-                    lines=out_lines)
+                    lines=out_lines,
+                    # マスタの現在値ではなく請求に焼き付けた支払形態を使う。現在値を使うと
+                    # 支払形態を変えた瞬間に過去の報告書の単位が化ける。
+                    pay_type=head.get("pay_type"))
                 zf.writestr(f'業務完了報告書兼請求書_{name}_{head["issue_date"]}.xlsx', xlsx)
     exported_ids = [i for i in selected_ids if i not in skipped]
     if skipped:

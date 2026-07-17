@@ -22,7 +22,8 @@ def _set(ws, coord, value):
     ws[coord] = value
 
 
-def build_invoice_xlsx(*, distributor_name, issue_date, period_from, period_to, lines) -> bytes:
+def build_invoice_xlsx(*, distributor_name, issue_date, period_from, period_to, lines,
+                       pay_type=None) -> bytes:
     if len(lines) > _MAX_LINE_ROWS:
         raise ValueError(f"明細は最大{_MAX_LINE_ROWS}行までです（{len(lines)}行が指定されました）。案件ごとに集約してください。")
 
@@ -38,18 +39,23 @@ def build_invoice_xlsx(*, distributor_name, issue_date, period_from, period_to, 
     for i, ln in enumerate(lines[:_MAX_LINE_ROWS]):
         r = _FIRST_LINE_ROW + i
         _set(ws, f"B{r}", ln.get("project_name"))
-        # 数量: 配布・挟み込みは部数を数えるので数値。交通費・手当・その他は『一式』と書く。
-        _set(ws, f"D{r}", posting_logic._num(ln.get("report_qty"))
-             if posting_logic.is_delivery(ln.get("remark"))
-             else posting_logic.unit_for(ln.get("remark")))
+        # 数量: 数を数える種別は数値。数えないもの(交通費・手当・その他、月給の行)は『一式』と書く。
+        unit = posting_logic.unit_for(ln.get("remark"), pay_type)
+        _set(ws, f"D{r}", "一式" if unit == "一式"
+             else posting_logic._num(ln.get("report_qty")))
         _set(ws, f"E{r}", posting_logic._num(ln.get("unit_price")))
         _set(ws, f"F{r}", posting_logic._num(ln.get("amount")))
-        # 備考(G列)には種別(配布/挟み込み/交通費/手当/その他)を入れる
-        _set(ws, f"G{r}", ln.get("remark"))
+        # 備考(G列)には種別(配布/挟み込み/交通費/手当/その他)を入れる。歩合以外は数量セルの
+        # 数字が部数でない(日数・時間)ため、何の数なのかが分かるよう単位を併記する。
+        # 例: 配布（3 日）
+        remark = ln.get("remark")
+        if unit not in ("一式", "枚"):
+            remark = f"{remark}（{posting_logic.qty_label(ln.get('report_qty'), remark, pay_type)}）"
+        _set(ws, f"G{r}", remark)
 
     # 配布部数(F20)= 配布/挟み込みの報告数合計。ラベルE20は「報告数」に寄せる
     _set(ws, "E20", "報告数")
-    _set(ws, "F20", f"{posting_logic.fmt_num(posting_logic.delivered_copies(lines))}部")
+    _set(ws, "F20", f"{posting_logic.fmt_num(posting_logic.delivered_copies(lines, pay_type))}部")
 
     # 作成日時を固定(更新日時は openpyxl が save 内で「今」に上書きするため freeze 側で潰す)
     wb.properties.created = _FIXED_DT
