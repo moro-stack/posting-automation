@@ -25,6 +25,20 @@ def _run(page):
     return at
 
 
+def _rendered_text(at):
+    """描画された要素の中身を文字列で集める。表示内容のassertにはこれを使う。
+    ⚠️ str(at) は AppTest.__repr__ が _script_path / default_timeout / session_state しか
+    返さないため、何をassertしても通ってしまう。表示の検証には絶対に使わないこと。"""
+    parts = []
+    for el in at.table:
+        parts.append(el.value.to_string())
+    for el in at.markdown:
+        parts.append(str(el.value))
+    for el in at.caption:
+        parts.append(str(el.value))
+    return "\n".join(parts)
+
+
 def test_master_page_renders(db):
     at = _run("05_マスタ管理.py")
     assert not at.exception
@@ -328,3 +342,166 @@ def test_confirm_delete_button_container_keeps_confirmation_full_width(db):
     assert not at.columns[1].caption
     assert not any(b.key == "row1_ok" for b in at.columns[1].button)
     assert any(b.key == "row1_ok" for b in at.button)
+
+
+# ===== Task 11: 経費・買掛・売掛ページ =====
+
+_EXPENSE_PAGE = "01_経費・買掛・売掛.py"
+
+
+def _sel(at, label):
+    """ラベルで selectbox を1つ引く。無ければ None。"""
+    for s in at.selectbox:
+        if s.label == label:
+            return s
+    return None
+
+
+def test_expense_page_renders(db):
+    at = _run(_EXPENSE_PAGE)
+    assert not at.exception
+
+
+def test_petty_form_has_distributor_select(db):
+    store.add_distributor("山田太郎", db_path=db)
+    at = _run(_EXPENSE_PAGE)
+    labels = [s.label for s in at.selectbox]
+    assert "配布員(任意)" in labels
+
+
+def test_petty_form_distributor_select_offers_active_masters_only(db):
+    """登録の選択肢は有効な配布員だけ(停止中は選ばせない)。"""
+    store.add_distributor("現役の人", db_path=db)
+    store.add_distributor("辞めた人", active=0, db_path=db)
+    at = _run(_EXPENSE_PAGE)
+    opts = _sel(at, "配布員(任意)").options
+    assert "現役の人" in opts
+    assert "辞めた人" not in opts
+
+
+def test_petty_list_shows_distributor_name(db):
+    did = store.add_distributor("山田太郎", db_path=db)
+    store.add_petty_cash("2026-07-17", None, 1500, distributor_id=did, db_path=db)
+    at = _run(_EXPENSE_PAGE)
+    assert "山田太郎" in _rendered_text(at)
+
+
+def test_petty_list_shows_distributor_name_even_if_deactivated(db):
+    """停止中になった配布員でも、過去の小口には名前が出ること
+    (一覧の名前引きは only_active を付けない = 停止中方式の肝)。"""
+    did = store.add_distributor("辞めた人", active=0, db_path=db)
+    store.add_petty_cash("2026-07-17", None, 1500, distributor_id=did, db_path=db)
+    at = _run(_EXPENSE_PAGE)
+    assert "辞めた人" in _rendered_text(at)
+
+
+def test_petty_registration_saves_distributor(db):
+    did = store.add_distributor("山田太郎", db_path=db)
+    at = _run(_EXPENSE_PAGE)
+    _sel(at, "配布員(任意)").set_value("山田太郎")
+    at.number_input[0].set_value(1500)
+    at.button[0].click().run()
+
+    assert not at.exception
+    rows = store.list_petty_cash(db_path=db)
+    assert len(rows) == 1
+    assert rows[0]["distributor_id"] == did
+
+
+def test_petty_list_has_delete_button_and_deletes_the_right_row(db):
+    a = store.add_petty_cash("2026-07-10", None, 1000, memo="A", db_path=db)
+    b = store.add_petty_cash("2026-07-11", None, 2000, memo="B", db_path=db)
+    at = _run(_EXPENSE_PAGE)
+    keys = {btn.key for btn in at.button}
+    assert f"del_petty_{a}_btn" in keys
+    assert f"del_petty_{b}_btn" in keys
+
+    at.button(key=f"del_petty_{b}_btn").click().run()
+    at.button(key=f"del_petty_{b}_ok").click().run()
+
+    assert not at.exception
+    ids = [r["id"] for r in store.list_petty_cash(db_path=db)]
+    assert ids == [a]
+
+
+def test_petty_delete_announces_in_the_list_tab(db):
+    """削除のアナウンスは一覧タブに出て、登録タブに奪われないこと。
+    (タブは1回の実行で全部描画されるため、section を付けないと先に描かれる
+     登録タブの show_flash() がメッセージを消費してしまう)"""
+    rid = store.add_petty_cash("2026-07-10", None, 1000, db_path=db)
+    at = _run(_EXPENSE_PAGE)
+    at.button(key=f"del_petty_{rid}_btn").click().run()
+    at.button(key=f"del_petty_{rid}_ok").click().run()
+
+    assert not at.exception
+    assert [s.value for s in at.tabs[1].success] == ["削除しました"]
+    assert [s.value for s in at.tabs[0].success] == []
+
+
+def _payable_page(db):
+    at = AppTest.from_file(os.path.join(ROOT, "pages", _EXPENSE_PAGE), default_timeout=30)
+    at.run()
+    at.radio[0].set_value("買掛").run()
+    return at
+
+
+def test_payable_original_status_autoset_from_vendor_master(db):
+    """取引先名がマスタと一致したら、原本区分に既定が入っていること。"""
+    store.add_payables_vendor("ABC商事", default_original_status="本社", db_path=db)
+    at = AppTest.from_file(os.path.join(ROOT, "pages", _EXPENSE_PAGE), default_timeout=30)
+    at.session_state["pay_draft"] = {"vendor": "ABC商事", "amount": 5000,
+                                     "date": "2026-07-17", "note": None}
+    at.run()
+    at.radio[0].set_value("買掛").run()
+
+    assert not at.exception
+    assert _sel(at, "原本区分").value == "本社"
+
+
+def test_payable_original_status_autoset_works_for_inactive_vendor(db):
+    """停止中の買掛先でも、名前が一致すれば既定を返す(意図的に active を見ない)。"""
+    store.add_payables_vendor("旧商事", default_original_status="クレジット",
+                              active=0, db_path=db)
+    at = AppTest.from_file(os.path.join(ROOT, "pages", _EXPENSE_PAGE), default_timeout=30)
+    at.session_state["pay_draft"] = {"vendor": "旧商事", "amount": 5000,
+                                     "date": "2026-07-17", "note": None}
+    at.run()
+    at.radio[0].set_value("買掛").run()
+
+    assert not at.exception
+    assert _sel(at, "原本区分").value == "クレジット"
+
+
+def test_payable_original_status_defaults_when_vendor_unknown(db):
+    """マスタに無い取引先なら既定値(先頭)のまま。"""
+    at = _payable_page(db)
+    assert _sel(at, "原本区分").value == "原本あり"
+
+
+def test_payable_list_deletes_the_right_row_and_announces(db):
+    a = store.add_payable(None, None, 1000, date="2026-07-10", vendor_name="A社", db_path=db)
+    b = store.add_payable(None, None, 2000, date="2026-07-11", vendor_name="B社", db_path=db)
+    at = _payable_page(db)
+    at.button(key=f"del_pay_{b}_btn").click().run()
+    at.button(key=f"del_pay_{b}_ok").click().run()
+
+    assert not at.exception
+    assert [r["id"] for r in store.list_payables(db_path=db)] == [a]
+    assert [s.value for s in at.tabs[1].success] == ["削除しました"]
+    assert [s.value for s in at.tabs[0].success] == []
+
+
+def test_receivable_list_deletes_the_right_row_and_announces(db):
+    cid = store.add_receivables_client("得意先", db_path=db)
+    a = store.add_receivable("2026-07", cid, 1000, db_path=db)
+    b = store.add_receivable("2026-07", cid, 2000, db_path=db)
+    at = AppTest.from_file(os.path.join(ROOT, "pages", _EXPENSE_PAGE), default_timeout=30)
+    at.run()
+    at.radio[0].set_value("売掛").run()
+    at.button(key=f"del_recv_{b}_btn").click().run()
+    at.button(key=f"del_recv_{b}_ok").click().run()
+
+    assert not at.exception
+    assert [r["id"] for r in store.list_receivables(db_path=db)] == [a]
+    assert [s.value for s in at.tabs[1].success] == ["削除しました"]
+    assert [s.value for s in at.tabs[0].success] == []
