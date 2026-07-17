@@ -115,6 +115,10 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
                      ("hourly_rate", "INTEGER"), ("monthly_rate", "INTEGER")):
         if col not in dist_cols:
             conn.execute(f"ALTER TABLE distributors ADD COLUMN {col} {typ}")
+    # 小口に配布員を持たせる(誰の分の費用か号別明細で追えるように)。旧DBは自動でカラム追加。
+    petty_cols = {r[1] for r in conn.execute("PRAGMA table_info(petty_cash)")}
+    if "distributor_id" not in petty_cols:
+        conn.execute("ALTER TABLE petty_cash ADD COLUMN distributor_id INTEGER")
     conn.commit()
 
 
@@ -341,12 +345,13 @@ def seed_masters(*, db_path=None) -> None:
 
 # --- petty_cash ---
 def add_petty_cash(date, category_id, amount, *, project_id=None, memo=None,
-                   source="manual", other_label=None, db_path=None, now=None):
+                   source="manual", other_label=None, distributor_id=None,
+                   db_path=None, now=None):
     return _add("petty_cash",
                 ["date", "category_id", "amount", "project_id", "memo", "source",
-                 "other_label", "created_at"],
+                 "other_label", "distributor_id", "created_at"],
                 [date, _int_or_none(category_id), int(amount), _int_or_none(project_id),
-                 memo, source, other_label, _now(now)], db_path)
+                 memo, source, other_label, _int_or_none(distributor_id), _now(now)], db_path)
 
 
 def list_petty_cash(*, project_id=None, date_from=None, date_to=None, db_path=None):

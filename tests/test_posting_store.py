@@ -241,6 +241,21 @@ def test_petty_cash_stores_other_label(tmp_path):
     assert rows[0]["other_label"] == "A社折込チラシ"
 
 
+def test_petty_cash_stores_distributor(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", db_path=db)
+    rid = store.add_petty_cash("2026-07-17", None, 1500, distributor_id=did, db_path=db)
+    row = next(r for r in store.list_petty_cash(db_path=db) if r["id"] == rid)
+    assert row["distributor_id"] == did
+
+
+def test_petty_cash_distributor_is_optional(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    rid = store.add_petty_cash("2026-07-17", None, 1500, db_path=db)
+    row = next(r for r in store.list_petty_cash(db_path=db) if r["id"] == rid)
+    assert row["distributor_id"] is None
+
+
 def test_payable_and_receivable_store_other_label(tmp_path):
     db = os.path.join(tmp_path, "t.db")
     store.add_payable(None, None, 12000, date="2026-07-08", vendor_name="配夢",
