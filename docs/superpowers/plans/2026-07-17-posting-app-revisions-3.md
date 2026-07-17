@@ -105,6 +105,28 @@ def test_old_distributors_table_gets_new_columns(tmp_path):
     assert rows[0]["name"] == "既存の人"
     assert rows[0]["pay_type"] is None
     assert rows[0]["bank_info"] is None
+    assert rows[0]["hourly_rate"] is None
+    assert rows[0]["monthly_rate"] is None
+
+
+def test_update_distributor_normalizes_hourly_and_monthly_rate(tmp_path):
+    """add_distributor 同様、update_distributor でも文字列の数値を int に正規化すること。"""
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", pay_type="時給", hourly_rate=1000, db_path=db)
+    store.update_distributor(did, hourly_rate="1500", db_path=db)
+    row = next(r for r in store.list_distributors(db_path=db) if r["id"] == did)
+    assert row["hourly_rate"] == 1500
+    assert isinstance(row["hourly_rate"], int)
+
+
+def test_update_distributor_leaves_rate_unchanged_when_not_passed(tmp_path):
+    """_UNSET の番兵が効いていること。他のフィールドだけ更新しても hourly_rate は変わらない。"""
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", pay_type="時給", hourly_rate=1200, db_path=db)
+    store.update_distributor(did, name="別名", db_path=db)
+    row = next(r for r in store.list_distributors(db_path=db) if r["id"] == did)
+    assert row["name"] == "別名"
+    assert row["hourly_rate"] == 1200
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -142,14 +164,20 @@ def update_distributor(row_id, *, name=_UNSET, kind=_UNSET, bank_info=_UNSET,
                        active=_UNSET, db_path=None):
     _update("distributors", row_id,
             {"name": name, "kind": kind, "bank_info": bank_info, "pay_type": pay_type,
-             "hourly_rate": hourly_rate, "monthly_rate": monthly_rate,
+             "hourly_rate": (_int_or_none(hourly_rate) if hourly_rate is not _UNSET else _UNSET),
+             "monthly_rate": (_int_or_none(monthly_rate) if monthly_rate is not _UNSET else _UNSET),
              "active": active}, db_path)
 ```
+
+`_UNSET` は「更新しない」の番兵。`hourly_rate`/`monthly_rate` が `_UNSET`（未指定）のときは
+`_int_or_none()` に通さず `_UNSET` のまま渡すこと（`_int_or_none(_UNSET)` を呼ぶと
+`int(_UNSET)` で例外になるほか、番兵が壊れて全マスタの部分更新が壊れる）。
+`update_issue_manual_cost` の `amount` 正規化と同じパターン。
 
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/ -v`
-Expected: 既存73件＋新規4件が **すべて PASS**
+Expected: 既存73件＋新規6件が **すべて PASS**
 
 - [ ] **Step 5: Commit**
 

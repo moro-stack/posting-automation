@@ -341,3 +341,25 @@ def test_old_distributors_table_gets_new_columns(tmp_path):
     assert rows[0]["name"] == "既存の人"
     assert rows[0]["pay_type"] is None
     assert rows[0]["bank_info"] is None
+    assert rows[0]["hourly_rate"] is None
+    assert rows[0]["monthly_rate"] is None
+
+
+def test_update_distributor_normalizes_hourly_and_monthly_rate(tmp_path):
+    """add_distributor 同様、update_distributor でも文字列の数値を int に正規化すること。"""
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", pay_type="時給", hourly_rate=1000, db_path=db)
+    store.update_distributor(did, hourly_rate="1500", db_path=db)
+    row = next(r for r in store.list_distributors(db_path=db) if r["id"] == did)
+    assert row["hourly_rate"] == 1500
+    assert isinstance(row["hourly_rate"], int)
+
+
+def test_update_distributor_leaves_rate_unchanged_when_not_passed(tmp_path):
+    """_UNSET の番兵が効いていること。他のフィールドだけ更新しても hourly_rate は変わらない。"""
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", pay_type="時給", hourly_rate=1200, db_path=db)
+    store.update_distributor(did, name="別名", db_path=db)
+    row = next(r for r in store.list_distributors(db_path=db) if r["id"] == did)
+    assert row["name"] == "別名"
+    assert row["hourly_rate"] == 1200

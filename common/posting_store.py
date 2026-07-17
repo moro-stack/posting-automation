@@ -257,7 +257,8 @@ def update_distributor(row_id, *, name=_UNSET, kind=_UNSET, bank_info=_UNSET,
                        active=_UNSET, db_path=None):
     _update("distributors", row_id,
             {"name": name, "kind": kind, "bank_info": bank_info, "pay_type": pay_type,
-             "hourly_rate": hourly_rate, "monthly_rate": monthly_rate,
+             "hourly_rate": (_int_or_none(hourly_rate) if hourly_rate is not _UNSET else _UNSET),
+             "monthly_rate": (_int_or_none(monthly_rate) if monthly_rate is not _UNSET else _UNSET),
              "active": active}, db_path)
 
 
