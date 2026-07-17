@@ -351,22 +351,35 @@ def period_picker(*, key: str):
     return lo, hi, ("全期間" if lo is None else f"{lo} 〜 {hi}")
 
 
-def flash(message: str):
+def _flash_slot(section: str | None) -> str:
+    """flash の保存先キー。section 省略時は従来どおり "_flash"(後方互換)。"""
+    return "_flash" if section is None else f"_flash_{section}"
+
+
+def flash(message: str, section: str | None = None):
     """登録直後の再実行(rerun)をまたいで1度だけ出す成功メッセージをセットする。
-    rerun 直前に st.success を出しても新しい実行で消えてしまうため、session_state に退避する。"""
-    st.session_state["_flash"] = message
+    rerun 直前に st.success を出しても新しい実行で消えてしまうため、session_state に退避する。
+
+    section: メッセージを出したい場所の識別子(タブ名など)。
+      Streamlit のタブは1回の実行で全タブの本体を描画するため、section を付けないと
+      最初に呼ばれた show_flash() がメッセージを奪い、操作したタブに出ない。
+      section を付けると、同じ section の show_flash() だけが受け取る。
+      省略時は従来と同じ共有の1枠を使う(既存ページはそのまま動く)。
+    """
+    st.session_state[_flash_slot(section)] = message
 
 
-def show_flash():
+def show_flash(section: str | None = None):
     """flash() でセットされたメッセージがあれば success で表示して消す(1回だけ)。
-    登録フォームの先頭で呼ぶ。"""
-    msg = st.session_state.pop("_flash", None)
+    登録フォームの先頭で呼ぶ。section を渡すと自分宛のメッセージだけを消費する。"""
+    msg = st.session_state.pop(_flash_slot(section), None)
     if msg:
         st.success(msg)
 
 
 def confirm_delete(*, key: str, detail: str, on_confirm, label: str = "削除",
-                   warning: str | None = None, success: str = "削除しました"):
+                   warning: str | None = None, success: str = "削除しました",
+                   section: str | None = None, button_container=None):
     """削除→確認→実行を全画面で同じ挙動にする共通部品。
     ボタンを押した時点では消さず、session_state に確認待ちを立てて確認UIを出す。
     「はい」で on_confirm() を実行し、flash で結果を知らせる。
@@ -377,6 +390,10 @@ def confirm_delete(*, key: str, detail: str, on_confirm, label: str = "削除",
     label    : ボタンの文言(マスタでは「停止中にする」を渡す)
     warning  : 確認の見出し(省略時は「削除しますか？」)
     success  : 実行後に出すメッセージ
+    section  : flash(success) の宛先(タブ毎に分けたいとき。show_flash(section) と対で使う)
+    button_container: 削除ボタンだけを描画する場所(st.columns の列など)。
+      渡すと、確認UI(警告文・詳細・はい/やめる)は呼び出した場所にそのまま出るので、
+      行の右端の狭い列にボタンを置きつつ確認は全幅で出せる。省略時は全部その場に描画。
     """
     pending = f"_del_pending_{key}"
     if st.session_state.get(pending):
@@ -387,13 +404,14 @@ def confirm_delete(*, key: str, detail: str, on_confirm, label: str = "削除",
         if c1.button("はい、削除する", type="primary", key=f"{key}_ok"):
             on_confirm()
             st.session_state.pop(pending, None)
-            flash(success)
+            flash(success, section)
             st.rerun()
         if c2.button("やめる", key=f"{key}_no"):
             st.session_state.pop(pending, None)
             st.rerun()
         return
-    if st.button(label, key=f"{key}_btn"):
+    target = button_container if button_container is not None else st
+    if target.button(label, key=f"{key}_btn"):
         st.session_state[pending] = True
         st.rerun()
 

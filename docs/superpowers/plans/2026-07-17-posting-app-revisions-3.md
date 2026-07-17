@@ -31,7 +31,7 @@
 |---|---|---|
 | `common/posting_store.py` | SQLite の永続化・マイグレ | 列追加、`distributor_daily_rates` テーブル、CRUD拡張、`find_vendor_by_name`、`count_master_usage` |
 | `common/posting_logic.py` | DB非依存の純関数 | `unit_for`/`qty_label` の pay_type 拡張、`line_copies`、`delivered_copies` 拡張、`resolve_original_status`、`master_delete_action` |
-| `common/ui.py` | 画面共通部品 | `confirm_delete()` を新設 |
+| `common/ui.py` | 画面共通部品 | `confirm_delete()` を新設（`section` / `button_container` 付き）、`flash`/`show_flash` に `section` を追加（タブ毎にアナウンスを出し分ける。省略時は従来どおり） |
 | `pages/01_経費・買掛・売掛.py` | 小口/買掛/売掛の登録・一覧 | 小口に配布員欄、買掛の原本区分オートセット、各一覧に削除 |
 | `pages/02_業務委託登録.py` | 業務委託の請求登録・一覧 | 支払形態に応じた明細・自動計算・部数列、一覧に削除 |
 | `pages/03_号別明細.py` | 号ごとの原価集計 | 業務委託内訳と雑費内訳に配布員列、Excel出力も追随 |
@@ -1057,8 +1057,13 @@ pay_type 未指定は歩合と同じ＝現行動作のまま(後方互換)。"
 - Test: `tests/test_pages_smoke.py`（**新規作成**）
 
 **Interfaces:**
-- Produces: `confirm_delete(*, key, detail, on_confirm, label="削除", warning=None, success="削除しました") -> None`
-  - 押下 → session_state に確認待ちを立てて rerun → 確認UI → 「はい、削除する」で `on_confirm()` 実行 → `flash(success)` → rerun
+- Produces: `confirm_delete(*, key, detail, on_confirm, label="削除", warning=None, success="削除しました", section=None, button_container=None) -> None`
+  - 押下 → session_state に確認待ちを立てて rerun → 確認UI → 「はい、削除する」で `on_confirm()` 実行 → `flash(success, section)` → rerun
+  - `section`: `flash` の宛先。タブ毎に分けたいとき `show_flash(section)` と対で使う（省略可）
+  - `button_container`: 削除ボタンだけを描画する場所（`st.columns` の列など）。渡すと確認UIは呼び出した場所＝全幅に出るので、行の右端の狭い列にボタンを置きつつ確認文を読める幅で出せる（省略時は全部その場に描画）
+- Produces: `flash(message, section=None)` / `show_flash(section=None)`
+  - Streamlitのタブは1回の実行で全タブの本体を描画するため、`section` 無しの共有1枠だと最初に呼ばれた `show_flash()` がメッセージを奪い、操作したタブに出ない。`section` を付けると同じ `section` の `show_flash` だけが消費する
+  - `section` 省略時は従来どおり `"_flash"` の1枠（既存ページの `flash("登録しました")` / `show_flash()` はそのまま動く）
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1149,8 +1154,12 @@ def test_confirm_delete_cancel_does_not_run(db):
 
 1. **複数行の相互干渉テスト**: `confirm_delete` を1画面に3つ（`key=f"del_{rid}"`, rid=1,2,3）並べ、2行目だけ操作したとき、2行目の確認UIだけが出て1行目・3行目は元の削除ボタンのままであること、2行目を確定したら消えたのが2行目だけ（`deleted == [2]`）であることを検証する。`pending = f"_del_pending_{key}"` を固定値 `"_del_pending"` に変えるとこのテストが落ちる（2026-07-14に実際に起きた固定key由来のCriticalバグと同型のリグレッションを守る）。
 2. **`flash(success)` の検証**: 確定後に `at.session_state["_flash"]` が既定の `"削除しました"` になること、および `success` にカスタム文言（例: `"停止中にしました"`。Task 10のマスタで使用）を渡した場合はそれがflashされることを検証する。`flash(success)` の行を消すとこのテストが落ちる。
+3. **flash のセクション分離**（Task 10のレビューで追加）: `flash(msg, "sec_a")` / `flash(msg, "sec_b")` を出してから2つのタブでそれぞれ `show_flash("sec_a")` / `show_flash("sec_b")` を呼び、各タブに自分宛だけが出ること。`_flash_slot` が常に `"_flash"` を返すように戻すとこのテストが落ちる。あわせて `section` 省略時の後方互換（`flash("登録しました")` → `show_flash()` で出る）も検証する。
+4. **`button_container` の検証**（Task 10のレビューで追加）: `c1, c2 = st.columns([4, 1])` の**外**で `confirm_delete(..., button_container=c2)` を呼び、削除ボタンは `at.columns[1].button` に出るが、確認UI（`at.warning` / caption / `_ok`ボタン）は `at.columns[1]` には出ず全幅に出ることを検証する。`target = button_container ...` を `target = st` に戻すとこのテストが落ちる。
 
 （テストコードは `tests/test_pages_smoke.py` の実物を参照。`_page()` 内でimportし、記録は `st.session_state` 経由にするという既存のパターンを踏襲している。）
+
+**テストの注意**: `str(at)` は `_script_path` / `default_timeout` / `session_state` しか返さず描画内容を含まないので使わないこと。`at.success` / `at.warning` / `at.caption` などの**要素の値**を見る。タブ内の要素は `at.tabs[i].success` のように見る。また `st.warning("⚠️ …")` の先頭の絵文字は Streamlit がアイコンとして切り出すため、`at.warning[0].value` には**含まれない**。
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1159,11 +1168,38 @@ Expected: FAIL（`module 'common.ui' has no attribute 'confirm_delete'`）
 
 - [ ] **Step 3: Write minimal implementation**
 
-`common/ui.py` の `show_flash` の後に追記:
+`common/ui.py` の `flash` / `show_flash` を section 対応にし、その後に `confirm_delete` を追記:
 
 ```python
+def _flash_slot(section: str | None) -> str:
+    """flash の保存先キー。section 省略時は従来どおり "_flash"(後方互換)。"""
+    return "_flash" if section is None else f"_flash_{section}"
+
+
+def flash(message: str, section: str | None = None):
+    """登録直後の再実行(rerun)をまたいで1度だけ出す成功メッセージをセットする。
+    rerun 直前に st.success を出しても新しい実行で消えてしまうため、session_state に退避する。
+
+    section: メッセージを出したい場所の識別子(タブ名など)。
+      Streamlit のタブは1回の実行で全タブの本体を描画するため、section を付けないと
+      最初に呼ばれた show_flash() がメッセージを奪い、操作したタブに出ない。
+      section を付けると、同じ section の show_flash() だけが受け取る。
+      省略時は従来と同じ共有の1枠を使う(既存ページはそのまま動く)。
+    """
+    st.session_state[_flash_slot(section)] = message
+
+
+def show_flash(section: str | None = None):
+    """flash() でセットされたメッセージがあれば success で表示して消す(1回だけ)。
+    登録フォームの先頭で呼ぶ。section を渡すと自分宛のメッセージだけを消費する。"""
+    msg = st.session_state.pop(_flash_slot(section), None)
+    if msg:
+        st.success(msg)
+
+
 def confirm_delete(*, key: str, detail: str, on_confirm, label: str = "削除",
-                   warning: str | None = None, success: str = "削除しました"):
+                   warning: str | None = None, success: str = "削除しました",
+                   section: str | None = None, button_container=None):
     """削除→確認→実行を全画面で同じ挙動にする共通部品。
     ボタンを押した時点では消さず、session_state に確認待ちを立てて確認UIを出す。
     「はい」で on_confirm() を実行し、flash で結果を知らせる。
@@ -1174,6 +1210,10 @@ def confirm_delete(*, key: str, detail: str, on_confirm, label: str = "削除",
     label    : ボタンの文言(マスタでは「停止中にする」を渡す)
     warning  : 確認の見出し(省略時は「削除しますか？」)
     success  : 実行後に出すメッセージ
+    section  : flash(success) の宛先(タブ毎に分けたいとき。show_flash(section) と対で使う)
+    button_container: 削除ボタンだけを描画する場所(st.columns の列など)。
+      渡すと、確認UI(警告文・詳細・はい/やめる)は呼び出した場所にそのまま出るので、
+      行の右端の狭い列にボタンを置きつつ確認は全幅で出せる。省略時は全部その場に描画。
     """
     pending = f"_del_pending_{key}"
     if st.session_state.get(pending):
@@ -1184,16 +1224,19 @@ def confirm_delete(*, key: str, detail: str, on_confirm, label: str = "削除",
         if c1.button("はい、削除する", type="primary", key=f"{key}_ok"):
             on_confirm()
             st.session_state.pop(pending, None)
-            flash(success)
+            flash(success, section)
             st.rerun()
         if c2.button("やめる", key=f"{key}_no"):
             st.session_state.pop(pending, None)
             st.rerun()
         return
-    if st.button(label, key=f"{key}_btn"):
+    target = button_container if button_container is not None else st
+    if target.button(label, key=f"{key}_btn"):
         st.session_state[pending] = True
         st.rerun()
 ```
+
+**`button_container` の使い方**（Task 10・11・12 共通）: 行を `c1, c2 = st.columns([4, 1])` で描くとき、`with c2:` の中で `confirm_delete` を呼んではいけない。確認待ちのとき警告文・詳細・はい/やめるが幅20%の列（実効で画面幅の約3%）に押し込まれて読めなくなる。**列の外で呼び、`button_container=c2` を渡す**こと。
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -1283,15 +1326,17 @@ def _split_active(rows):
             [r for r in rows if not r.get("active", 1)])
 
 
-def _remove_ui(master, row, *, label_name, update_fn):
-    """削除ボタン。使用実績があれば物理削除でなく停止中にする(過去データを守るため)。"""
+def _remove_ui(master, row, *, label_name, update_fn, button_container=None):
+    """削除ボタン。使用実績があれば物理削除でなく停止中にする(過去データを守るため)。
+    button_container を渡すと、ボタンだけをそこ(行の右端の狭い列)に置き、
+    確認UIは呼び出した場所＝全幅に出す。section は master 名＝タブごとに分ける。"""
     n = store.count_master_usage(master, row["id"])
     if posting_logic.master_delete_action(n) == "delete":
         confirm_delete(
             key=f"del_{master}_{row['id']}", label="削除",
             detail=f"{label_name}「{row['name']}」を削除します。使用実績はありません。",
             on_confirm=lambda: _delete_master(master, row["id"]),
-            success="削除しました")
+            success="削除しました", section=master, button_container=button_container)
     else:
         confirm_delete(
             key=f"off_{master}_{row['id']}", label="停止中にする",
@@ -1299,7 +1344,7 @@ def _remove_ui(master, row, *, label_name, update_fn):
             detail="過去データを残すため、削除ではなく停止中にします"
                    "（登録の選択肢から消えるだけで、一覧・報告書の表示は変わりません）。",
             on_confirm=lambda: update_fn(row["id"], active=0),
-            success="停止中にしました")
+            success="停止中にしました", section=master, button_container=button_container)
 
 
 _DELETE_FNS = {
@@ -1312,6 +1357,11 @@ _DELETE_FNS = {
 
 
 def _delete_master(master, row_id):
+    if master == "distributor":
+        # count_master_usage は日当金額(distributor_daily_rates)を「使用実績」として
+        # 数えない(配布員の付随設定という位置づけのため)。そのため日当金額だけを持つ
+        # 配布員も物理削除の対象になり、掃除しないと孤立行が残る。一緒に消しておく。
+        store.replace_daily_rates(row_id, [])
     _DELETE_FNS[master](row_id)
 
 
@@ -1325,24 +1375,25 @@ def _inactive_ui(master, inactive, *, update_fn):
             c1.write(r["name"])
             if c2.button("有効に戻す", key=f"on_{master}_{r['id']}"):
                 update_fn(r["id"], active=1)
-                flash("有効に戻しました")
+                flash("有効に戻しました", master)
                 st.rerun()
 
 
 def _rows_ui(master, rows, *, update_fn, label_name):
-    """有効な行を1行ずつ出し、右端に削除(or 停止中)ボタンを置く。"""
+    """有効な行を1行ずつ出し、右端に削除(or 停止中)ボタンを置く。
+    確認UIは列の外＝全幅に出す(狭い列に押し込むと確認文が読めないため)。"""
     if not rows:
         st.caption(f"{label_name}はまだ登録されていません。")
         return
     for r in rows:
         c1, c2 = st.columns([4, 1])
         c1.write(r["name"])
-        with c2:
-            _remove_ui(master, r, label_name=label_name, update_fn=update_fn)
+        _remove_ui(master, r, label_name=label_name, update_fn=update_fn,
+                   button_container=c2)
 
 
 def _simple_master(label, master, list_fn, add_fn, update_fn):
-    show_flash()
+    show_flash(master)
     active, inactive = _split_active(list_fn())
     _rows_ui(master, active, update_fn=update_fn, label_name=label)
     _inactive_ui(master, inactive, update_fn=update_fn)
@@ -1350,7 +1401,7 @@ def _simple_master(label, master, list_fn, add_fn, update_fn):
         name = st.text_input(f"{label}名を追加")
         if st.form_submit_button("追加") and name.strip():
             add_fn(name.strip())
-            flash(f"{label}を追加しました")
+            flash(f"{label}を追加しました", master)
             st.rerun()
 
 
@@ -1365,7 +1416,7 @@ with tab2:
                    store.add_expense_category, store.update_expense_category)
 
 with tab3:
-    show_flash()
+    show_flash("payables_vendor")
     active, inactive = _split_active(store.list_payables_vendors())
     disp = [{"取引先": r["name"], "既定の費目": r.get("default_category") or "",
              "既定の原本区分": r.get("default_original_status") or ""} for r in active]
@@ -1374,9 +1425,8 @@ with tab3:
     for r in active:
         c1, c2 = st.columns([4, 1])
         c1.write(r["name"])
-        with c2:
-            _remove_ui("payables_vendor", r, label_name="買掛先",
-                       update_fn=store.update_payables_vendor)
+        _remove_ui("payables_vendor", r, label_name="買掛先",
+                   update_fn=store.update_payables_vendor, button_container=c2)
     _inactive_ui("payables_vendor", inactive, update_fn=store.update_payables_vendor)
     with st.form("add_vendor", clear_on_submit=True):
         n = st.text_input("取引先名")
@@ -1386,7 +1436,7 @@ with tab3:
             store.add_payables_vendor(
                 n.strip(), default_category=(c.strip() or None),
                 default_original_status=(None if o == "(なし)" else o))
-            flash("買掛先を追加しました")
+            flash("買掛先を追加しました", "payables_vendor")
             st.rerun()
 
 with tab4:
@@ -1394,7 +1444,7 @@ with tab4:
                    store.add_receivables_client, store.update_receivables_client)
 
 with tab5:
-    show_flash()
+    show_flash("distributor")
     active, inactive = _split_active(store.list_distributors())
     disp = [{"配布員 氏名": r["name"], "区分": r.get("kind") or "",
              "支払形態": r.get("pay_type") or "",
@@ -1404,9 +1454,8 @@ with tab5:
     for r in active:
         c1, c2 = st.columns([4, 1])
         c1.write(r["name"])
-        with c2:
-            _remove_ui("distributor", r, label_name="業務委託",
-                       update_fn=store.update_distributor)
+        _remove_ui("distributor", r, label_name="業務委託",
+                   update_fn=store.update_distributor, button_container=c2)
     _inactive_ui("distributor", inactive, update_fn=store.update_distributor)
 
     with st.form("add_dist", clear_on_submit=True):
@@ -1424,7 +1473,7 @@ with tab5:
                                   bank_info=(bank.strip() or None),
                                   hourly_rate=(int(hourly) or None),
                                   monthly_rate=(int(monthly) or None))
-            flash("業務委託を追加しました")
+            flash("業務委託を追加しました", "distributor")
             st.rerun()
 
     # --- 日当金額の設定（支払形態=日当の人だけ）---
@@ -1453,7 +1502,7 @@ with tab5:
             store.replace_daily_rates(did, [
                 {"work_name": str(r["業務名"]), "amount": int(r["金額"] or 0)}
                 for _, r in edited.iterrows() if str(r["業務名"] or "").strip()])
-            flash("日当金額を保存しました")
+            flash("日当金額を保存しました", "distributor")
             st.rerun()
 ```
 
@@ -1553,18 +1602,24 @@ def _distributor_options():
     return {d["name"]: d["id"] for d in store.list_distributors(only_active=True)}
 
 
-def _delete_rows_ui(rows, disp, key_prefix, delete_fn, detail_fn):
-    """一覧の各行に削除ボタンを出す。行idを key に含めて取り違えを防ぐ。"""
+def _delete_rows_ui(rows, disp, key_prefix, delete_fn, detail_fn, section=None):
+    """一覧の各行に削除ボタンを出す。行idを key に含めて取り違えを防ぐ。
+    確認UIは列の外＝全幅に出す(狭い列に押し込むと確認文が読めないため)。
+    section はタブごとに分けること(タブは1回の実行で全部描画されるため、
+    section を付けないと最初のタブの show_flash がメッセージを奪う)。"""
     if not rows:
         return
     st.markdown("**行を削除**")
     for r, d in zip(rows, disp):
         c1, c2 = st.columns([5, 1])
         c1.caption(detail_fn(r, d))
-        with c2:
-            confirm_delete(key=f"{key_prefix}_{r['id']}", detail=detail_fn(r, d),
-                           on_confirm=lambda rid=r["id"]: delete_fn(rid))
+        confirm_delete(key=f"{key_prefix}_{r['id']}", detail=detail_fn(r, d),
+                       on_confirm=lambda rid=r["id"]: delete_fn(rid),
+                       section=section, button_container=c2)
 ```
+
+⚠️ `confirm_delete` は **`with c2:` の中で呼ばないこと**。確認UIが幅20%の列に潰れて読めなくなる。
+列の外で呼び、`button_container=c2` を渡す（Task 9 参照）。
 
 **(c)** 小口の登録フォーム（`with st.form("petty", ...)`）の `proj` の直後に配布員欄を足す:
 
@@ -1582,7 +1637,7 @@ def _delete_rows_ui(rows, disp, key_prefix, delete_fn, detail_fn):
 
 ```python
     with tab_list:
-        show_flash()
+        show_flash("petty")
         st.markdown("**登録済みの小口一覧**")
         _cats, _projs = _names(store.list_expense_categories), _names(store.list_projects)
         _dists = _names(store.list_distributors)
@@ -1595,7 +1650,8 @@ def _delete_rows_ui(rows, disp, key_prefix, delete_fn, detail_fn):
         nice_table(_disp, "小口の登録はまだありません。")
         section_export(_disp, "小口一覧", key="petty")
         _delete_rows_ui(_rows, _disp, "del_petty", store.delete_petty_cash,
-                        lambda r, d: f'{d["日付"] or "日付なし"} ／ {d["費目"]} ／ {d["金額"]}')
+                        lambda r, d: f'{d["日付"] or "日付なし"} ／ {d["費目"]} ／ {d["金額"]}',
+                        section="petty")
 ```
 
 **(e)** 買掛の登録フォームの `original` を差し替え（オートセット）:
@@ -1620,19 +1676,26 @@ _ORIGINAL_STATUSES = ["原本あり", "本社", "クレジット", "振込用紙
 **オートセットが効くのは「AI読み取りで vendor が入った状態で再実行された後」または「一度登録して戻ってきた後」**になる。
 手入力の途中では反映されない（Streamlit の form の仕様）。caption でそれと分かるようにしてある。
 
-**(f)** 買掛の一覧タブと売掛の一覧タブにも `show_flash()` と `_delete_rows_ui` を足す:
+**(f)** 買掛の一覧タブと売掛の一覧タブにも `show_flash(section)` と `_delete_rows_ui` を足す:
 
 ```python
         # 買掛の一覧タブの末尾
         _delete_rows_ui(_rows, _disp, "del_pay", store.delete_payable,
-                        lambda r, d: f'{d["請求書の日付"] or d["請求月度"]} ／ {d["取引先"]} ／ {d["金額"]}')
+                        lambda r, d: f'{d["請求書の日付"] or d["請求月度"]} ／ {d["取引先"]} ／ {d["金額"]}',
+                        section="payable")
 
         # 売掛の一覧タブの末尾
         _delete_rows_ui(_rows, _disp, "del_recv", store.delete_receivable,
-                        lambda r, d: f'{d["月度"]} ／ {d["売掛先"]} ／ {d["金額"]}')
+                        lambda r, d: f'{d["月度"]} ／ {d["売掛先"]} ／ {d["金額"]}',
+                        section="receivable")
 ```
 
-両タブの先頭にも `show_flash()` を足すこと（削除後のメッセージを出すため）。
+両タブの先頭にも `show_flash("payable")` / `show_flash("receivable")` を足すこと（削除後のメッセージを出すため）。
+**section はタブごとに変えること**。同じ（または省略した）section だと、最初に描画されるタブの
+`show_flash()` がメッセージを奪い、操作したタブに何も出ない（Task 10のレビューで実測された不具合）。
+
+なお、このページの**登録フォーム側**の既存の `flash("登録しました")` / `show_flash()`（section 省略）は
+そのままで動く。登録タブと一覧タブは別タブなので、一覧の削除メッセージだけ section を付ければ混ざらない。
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -1862,7 +1925,7 @@ def _invoice_out_lines(detail, id2proj):
             for l in detail["lines"]]
 ```
 
-一覧タブの先頭に `show_flash()` を足し、末尾（配布員別 報酬合計の前）に追記:
+一覧タブの先頭に `show_flash("invoice_list")` を足し、末尾（配布員別 報酬合計の前）に追記:
 
 ```python
     st.markdown("**請求を削除**")
@@ -1872,10 +1935,16 @@ def _invoice_out_lines(detail, id2proj):
         detail_txt = f'No.{inv["id"]} ／ {name} ／ {inv.get("issue_date")} ／ ¥{posting_logic.fmt_num(total)}'
         c1, c2 = st.columns([5, 1])
         c1.caption(detail_txt)
-        with c2:
-            confirm_delete(key=f"del_inv_{inv['id']}", detail=detail_txt,
-                           on_confirm=lambda i=inv["id"]: store.delete_contract_invoice(i))
+        # 確認UIは列の外＝全幅に出し、ボタンだけを c2 に置く（Task 9 参照）
+        confirm_delete(key=f"del_inv_{inv['id']}", detail=detail_txt,
+                       on_confirm=lambda i=inv["id"]: store.delete_contract_invoice(i),
+                       section="invoice_list", button_container=c2)
 ```
+
+⚠️ 削除の flash に `section="invoice_list"` を付け、一覧タブで `show_flash("invoice_list")` を呼ぶのが**必須**。
+登録タブ（先に描画される）の `show_flash()` が section 無しのメッセージを先に消費してしまうため、
+section を付けないと一覧タブで削除しても「削除しました」がどこにも出ない。
+登録タブ側の `flash("登録しました")` / `show_flash()` は section 省略のままでよい（別枠なので混ざらない）。
 
 `st.warning("先に『マスタ管理』で配布委託先(配布員)を登録してください。")` の文言を
 `"先に『マスタ管理』の「業務委託」タブで配布員を登録してください。"` に直す。

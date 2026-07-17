@@ -235,3 +235,96 @@ def test_confirm_delete_flashes_custom_success_message(db):
     at.button(key="t5_btn").click().run()
     at.button(key="t5_ok").click().run()
     assert at.session_state["_flash"] == "停止中にしました"
+
+
+def test_master_page_announces_in_the_tab_that_was_operated(db):
+    """業務委託タブで操作したアナウンスは業務委託タブに出て、案件タブに漏れないこと。
+
+    Streamlitのタブは1回の実行で全タブの本体を描画するため、flash/show_flash が
+    共有の1枠だと最初に呼ばれる案件タブの show_flash() がメッセージを奪ってしまい、
+    操作した業務委託タブには何も出ない(＝押せたのか分からない)。
+    """
+    gone = store.add_distributor("戻る人", active=0, db_path=db)
+    at = _run("05_マスタ管理.py")
+    at.button(key=f"on_distributor_{gone}").click().run()
+    assert not at.exception
+
+    labels = [t.label for t in at.tabs]
+    dist = at.tabs[labels.index("業務委託")]
+    proj = at.tabs[labels.index("案件")]
+
+    assert [s.value for s in dist.success] == ["有効に戻しました"]
+    assert [s.value for s in proj.success] == []
+
+
+def test_master_page_flash_sections_do_not_leak_between_tabs(db):
+    """別セクション宛のflashは、そのセクションのshow_flashだけが消費すること。"""
+
+    def _page():
+        import streamlit as st  # noqa: F401
+        from common import ui
+
+        ui.flash("Aしました", "sec_a")
+        ui.flash("Bしました", "sec_b")
+        t1, t2 = st.tabs(["A", "B"])
+        with t1:
+            ui.show_flash("sec_a")
+        with t2:
+            ui.show_flash("sec_b")
+
+    at = AppTest.from_function(_page, default_timeout=30)
+    at.run()
+    assert [s.value for s in at.tabs[0].success] == ["Aしました"]
+    assert [s.value for s in at.tabs[1].success] == ["Bしました"]
+
+
+def test_flash_without_section_keeps_old_behaviour(db):
+    """section を省略した既存の呼び出し(01/02/03ページ)は今まで通り動くこと。"""
+
+    def _page():
+        import streamlit as st  # noqa: F401
+        from common import ui
+
+        ui.flash("登録しました")
+        ui.show_flash()
+
+    at = AppTest.from_function(_page, default_timeout=30)
+    at.run()
+    assert [s.value for s in at.success] == ["登録しました"]
+    assert "_flash" not in at.session_state
+
+
+def test_confirm_delete_button_container_keeps_confirmation_full_width(db):
+    """button_container を渡すと、削除ボタンだけがその狭い列に入り、
+    確認UI(警告文・詳細・はい/やめる)は列の外＝全幅に出ること。
+
+    以前は行を c1, c2 = st.columns([4, 1]) で描き、c2(幅20%)の中で confirm_delete を
+    呼んでいたため、確認文が画面幅の約3%に潰れて読めなかった。
+    """
+
+    def _page():
+        import streamlit as st  # noqa: F401
+        from common import ui
+
+        c1, c2 = st.columns([4, 1])
+        c1.write("使用中の人")
+        ui.confirm_delete(key="row1", label="停止中にする",
+                          warning="⚠️ 「使用中の人」は 3件のデータで使用中です。",
+                          detail="過去データを残すため、削除ではなく停止中にします。",
+                          on_confirm=lambda: None, button_container=c2)
+
+    at = AppTest.from_function(_page, default_timeout=30)
+    at.run()
+    # 削除ボタンは狭い列(c2)の中にある
+    assert [b.label for b in at.columns[1].button] == ["停止中にする"]
+    assert [b.label for b in at.columns[0].button] == []
+
+    at.button(key="row1_btn").click().run()
+
+    # 確認UIは列の中ではなく全幅に出ている
+    # (先頭の⚠️は Streamlit がアイコンとして切り出すため value には入らない)
+    assert [w.value for w in at.warning] == ["「使用中の人」は 3件のデータで使用中です。"]
+    assert not at.columns[1].warning
+    assert not at.columns[1].caption
+    assert not any(b.key == "row1_ok" for b in at.columns[1].button)
+    assert any(b.key == "row1_ok" for b in at.button)
