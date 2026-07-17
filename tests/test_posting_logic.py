@@ -182,6 +182,34 @@ def test_delivered_copies_for_nichito_uses_copies_column():
     assert L.delivered_copies(lines, "日当") == 3713 + 500
 
 
+# ---- unit_for と line_copies で未知の pay_type の解釈を揃える(レビュー指摘の回帰防止) ----
+def test_line_copies_treats_unknown_pay_type_as_houbai():
+    """空文字・未知の文字列は歩合扱い(=report_qty をそのまま部数にする)。
+    unit_for 側も同じ未知の値で「枚」に倒れるので、ここが逆(copies列)に倒れると
+    画面表示(枚数)と報告部数が食い違う。"""
+    line = {"report_qty": 3713, "copies": 999, "remark": "配布"}
+    assert L.line_copies(line, "") == 3713
+    assert L.line_copies(line, "未知の形態") == 3713
+
+
+def test_unit_for_agrees_with_line_copies_on_unknown_pay_type():
+    """unit_for と line_copies が同じ pay_type に対して逆の解釈をしないことの確認。"""
+    line = {"report_qty": 3713, "copies": 999, "remark": "配布"}
+    for pay_type in ("", "未知の形態"):
+        assert L.unit_for("配布", pay_type) == "枚"
+        assert L.line_copies(line, pay_type) == 3713
+
+
+def test_delivered_copies_empty_string_pay_type_keeps_current_behavior():
+    """画面から来がちな空文字の pay_type でも delivered_copies は歩合(現行動作)のまま。"""
+    lines = [
+        {"report_qty": 3713, "copies": 999, "remark": "配布"},
+        {"report_qty": 500, "copies": 1, "remark": "挟み込み"},
+        {"report_qty": 1, "copies": 500, "remark": "交通費"},
+    ]
+    assert L.delivered_copies(lines, "") == 3713 + 500
+
+
 def test_invoice_total_handles_decimals():
     assert L.invoice_total([{"amount": 3.5}, {"amount": 2.25}]) == 5.75
 

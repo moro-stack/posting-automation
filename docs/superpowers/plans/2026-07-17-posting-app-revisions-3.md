@@ -953,6 +953,32 @@ def test_delivered_copies_for_nichito_uses_copies_column():
         {"report_qty": 1, "copies": 99, "remark": "交通費"},
     ]
     assert L.delivered_copies(lines, "日当") == 3713 + 500
+
+
+# ---- unit_for と line_copies で未知の pay_type の解釈を揃える ----
+# レビュー指摘: 未知の pay_type(特に画面から来る空文字)で unit_for が「枚」、
+# line_copies が copies列(=0) に倒れると、画面は「3,713 枚」と表示するのに
+# 報告部数は「0部」になる。例外も出ずに静かに矛盾するので、両者は必ず同じ側(歩合)に倒す。
+def test_line_copies_treats_unknown_pay_type_as_houbai():
+    line = {"report_qty": 3713, "copies": 999, "remark": "配布"}
+    assert L.line_copies(line, "") == 3713
+    assert L.line_copies(line, "未知の形態") == 3713
+
+
+def test_unit_for_agrees_with_line_copies_on_unknown_pay_type():
+    line = {"report_qty": 3713, "copies": 999, "remark": "配布"}
+    for pay_type in ("", "未知の形態"):
+        assert L.unit_for("配布", pay_type) == "枚"
+        assert L.line_copies(line, pay_type) == 3713
+
+
+def test_delivered_copies_empty_string_pay_type_keeps_current_behavior():
+    lines = [
+        {"report_qty": 3713, "copies": 999, "remark": "配布"},
+        {"report_qty": 500, "copies": 1, "remark": "挟み込み"},
+        {"report_qty": 1, "copies": 500, "remark": "交通費"},
+    ]
+    assert L.delivered_copies(lines, "") == 3713 + 500
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -989,12 +1015,15 @@ def qty_label(qty, remark, pay_type=None) -> str:
 
 
 def line_copies(line, pay_type=None):
-    """その明細行の配布部数。歩合(と未設定)は数量がそのまま部数＝これまでの動き。
+    """その明細行の配布部数。歩合(と未設定・未知の値)は数量がそのまま部数＝これまでの動き。
     日当・時給・月給は数量が日数/時間なので、別列の copies を使う。
-    配布・挟み込み以外の行は部数を数えない。"""
+    配布・挟み込み以外の行は部数を数えない。
+
+    未知の pay_type を歩合に倒すのは unit_for と解釈を揃えるため。片方だけ非歩合に倒れると
+    「3,713 枚と表示しているのに報告数は0部」という静かな食い違いが起きる。"""
     if not is_delivery((line or {}).get("remark")):
         return 0
-    if pay_type in (None, "歩合"):
+    if pay_type not in ("日当", "時給", "月給"):
         return _num((line or {}).get("report_qty"))
     return _num((line or {}).get("copies"))
 
