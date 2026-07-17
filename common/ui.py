@@ -366,7 +366,7 @@ def show_flash():
 
 
 def confirm_delete(*, key: str, detail: str, on_confirm, label: str = "削除",
-                   warning: str = None, success: str = "削除しました"):
+                   warning: str | None = None, success: str = "削除しました"):
     """削除→確認→実行を全画面で同じ挙動にする共通部品。
     ボタンを押した時点では消さず、session_state に確認待ちを立てて確認UIを出す。
     「はい」で on_confirm() を実行し、flash で結果を知らせる。

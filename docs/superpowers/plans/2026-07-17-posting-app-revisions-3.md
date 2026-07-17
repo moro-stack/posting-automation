@@ -1143,6 +1143,15 @@ def test_confirm_delete_cancel_does_not_run(db):
     assert len(at.warning) == 0
 ```
 
+**（レビューで追加。レビュアーがミューテーションテストで実証した2つの穴を埋める）**
+
+上記に加えて、以下の2種類のテストも書く。実装者の落ち度ではなく、当初のテスト設計がこの2点を守っていなかったため（詳細は `.superpowers/sdd/task-9-report.md` のレビュー追記を参照）。
+
+1. **複数行の相互干渉テスト**: `confirm_delete` を1画面に3つ（`key=f"del_{rid}"`, rid=1,2,3）並べ、2行目だけ操作したとき、2行目の確認UIだけが出て1行目・3行目は元の削除ボタンのままであること、2行目を確定したら消えたのが2行目だけ（`deleted == [2]`）であることを検証する。`pending = f"_del_pending_{key}"` を固定値 `"_del_pending"` に変えるとこのテストが落ちる（2026-07-14に実際に起きた固定key由来のCriticalバグと同型のリグレッションを守る）。
+2. **`flash(success)` の検証**: 確定後に `at.session_state["_flash"]` が既定の `"削除しました"` になること、および `success` にカスタム文言（例: `"停止中にしました"`。Task 10のマスタで使用）を渡した場合はそれがflashされることを検証する。`flash(success)` の行を消すとこのテストが落ちる。
+
+（テストコードは `tests/test_pages_smoke.py` の実物を参照。`_page()` 内でimportし、記録は `st.session_state` 経由にするという既存のパターンを踏襲している。）
+
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_pages_smoke.py -v`
@@ -1154,7 +1163,7 @@ Expected: FAIL（`module 'common.ui' has no attribute 'confirm_delete'`）
 
 ```python
 def confirm_delete(*, key: str, detail: str, on_confirm, label: str = "削除",
-                   warning: str = None, success: str = "削除しました"):
+                   warning: str | None = None, success: str = "削除しました"):
     """削除→確認→実行を全画面で同じ挙動にする共通部品。
     ボタンを押した時点では消さず、session_state に確認待ちを立てて確認UIを出す。
     「はい」で on_confirm() を実行し、flash で結果を知らせる。
