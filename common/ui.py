@@ -365,6 +365,39 @@ def show_flash():
         st.success(msg)
 
 
+def confirm_delete(*, key: str, detail: str, on_confirm, label: str = "削除",
+                   warning: str = None, success: str = "削除しました"):
+    """削除→確認→実行を全画面で同じ挙動にする共通部品。
+    ボタンを押した時点では消さず、session_state に確認待ちを立てて確認UIを出す。
+    「はい」で on_confirm() を実行し、flash で結果を知らせる。
+
+    key      : 画面内で一意な文字列(行idを含めること。固定keyだと別の行を消しかねない)
+    detail   : 確認画面に出す対象の内容(日付・金額など)
+    on_confirm: 実際に消す処理(引数なしの呼び出し可能オブジェクト)
+    label    : ボタンの文言(マスタでは「停止中にする」を渡す)
+    warning  : 確認の見出し(省略時は「削除しますか？」)
+    success  : 実行後に出すメッセージ
+    """
+    pending = f"_del_pending_{key}"
+    if st.session_state.get(pending):
+        st.warning(warning or "⚠️ 削除しますか？")
+        if detail:
+            st.caption(detail)
+        c1, c2, _ = st.columns([1, 1, 4])
+        if c1.button("はい、削除する", type="primary", key=f"{key}_ok"):
+            on_confirm()
+            st.session_state.pop(pending, None)
+            flash(success)
+            st.rerun()
+        if c2.button("やめる", key=f"{key}_no"):
+            st.session_state.pop(pending, None)
+            st.rerun()
+        return
+    if st.button(label, key=f"{key}_btn"):
+        st.session_state[pending] = True
+        st.rerun()
+
+
 def page_header(title: str, subtitle: str = "", icon: str = ""):
     """統一感のあるページ見出し(任意)。"""
     prefix = f"{icon} " if icon else ""
