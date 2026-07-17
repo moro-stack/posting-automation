@@ -1493,8 +1493,35 @@ def test_petty_list_shows_distributor_name(db):
     did = store.add_distributor("山田太郎", db_path=db)
     store.add_petty_cash("2026-07-17", None, 1500, distributor_id=did, db_path=db)
     at = _run("01_経費・買掛・売掛.py")
-    assert "山田太郎" in str(at)
+    assert "山田太郎" in _rendered_text(at)
 ```
+
+🔴 **`str(at)` を絶対に使わないこと。** `AppTest.__repr__` はスクリプトのパスとブロック構造しか返さず、
+**描画された要素の中身を含まない**。つまり `assert "山田太郎" in str(at)` は**何を書いても常に通る無意味なアサート**で、
+このテストが守るべき当の機能（配布員名が出ること）を1ミリも検証しない。
+
+代わりに `_rendered_text(at)` ヘルパを `tests/test_pages_smoke.py` に用意し、**描画された要素の値**を集めて検証すること:
+
+```python
+def _rendered_text(at):
+    """描画された要素の中身を文字列で集める。表示内容のassertにはこれを使う。
+    ⚠️ str(at) は AppTest.__repr__ でスクリプトのパスとブロック構造しか返さないため、
+    何をassertしても通ってしまう。表示の検証には絶対に使わないこと。"""
+    parts = []
+    for el in at.table:
+        parts.append(el.value.to_string())
+    for el in at.markdown:
+        parts.append(str(el.value))
+    for el in at.caption:
+        parts.append(str(el.value))
+    return "\n".join(parts)
+```
+
+（`at.table` / `at.markdown` / `at.caption` で拾えない要素に値がある場合は、その要素の accessor を足すこと。
+`nice_table` は `st.table` で描画しているので `at.table` に入る。）
+
+**このテストは必ずミューテーションで実効性を確かめること**: `_disp` の `"配布員"` 列を一時的に消す
+→ **このテストが落ちる**ことを確認 → 戻す。落ちなければテストが骨抜きなので書き直す。
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1644,16 +1671,41 @@ def test_contract_page_renders(db):
 def test_contract_page_shows_pay_type_of_selected_distributor(db):
     store.add_distributor("山田太郎", pay_type="日当", db_path=db)
     at = _run("02_業務委託登録.py")
-    assert "日当" in str(at)
+    assert "日当" in _rendered_text(at)
 
 
 def test_contract_list_shows_nichito_qty_in_days(db):
     """日当で登録した請求は、一覧で数量が「日」で出る(枚ではない)。"""
     _seed_invoice(db, pay_type="日当", copies=3713)
     at = _run("02_業務委託登録.py")
-    body = str(at)
-    assert "山田太郎" in body
+    assert "山田太郎" in _rendered_text(at)
 ```
+
+🔴 **`str(at)` を絶対に使わないこと**（Task 11 の該当節に理由と `_rendered_text` ヘルパの定義がある）。
+`AppTest.__repr__` は描画内容を含まないので、`assert ... in str(at)` は**何を書いても常に通る無意味なアサート**。
+
+**このタスクで最も検証したいのは「日当の請求が『枚』でなく『日』で出ること」**なので、
+上の2本だけでは不十分。**次の2本を必ず足すこと**:
+
+```python
+def test_contract_list_nichito_shows_days_not_mai(db):
+    """🔴 このタスクの主眼。日当の請求の数量が「3 日」で出て、「枚」が出ないこと。"""
+    _seed_invoice(db, pay_type="日当", copies=3713)
+    at = _run("02_業務委託登録.py")
+    text = _rendered_text(at)
+    assert "3 日" in text
+    assert "3 枚" not in text
+
+
+def test_contract_list_houbai_still_shows_mai(db):
+    """🔴 後方互換。歩合(と pay_type なしの既存請求)は今まで通り「枚」のまま。"""
+    _seed_invoice(db, pay_type=None)      # pay_type NULL = 既存データと同じ状態
+    at = _run("02_業務委託登録.py")
+    assert "枚" in _rendered_text(at)
+```
+
+**ミューテーションで実効性を確かめること**: `qty_label(...)` の呼び出しから `pay_type` 引数を一時的に外す
+→ **`test_contract_list_nichito_shows_days_not_mai` が落ちる**ことを確認 → 戻す。
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1991,7 +2043,7 @@ def test_issue_page_renders(db):
 def test_issue_page_shows_distributor_in_contract_breakdown(db):
     did, pid, iid = _seed_invoice(db, pay_type="歩合")
     at = _run("03_号別明細.py")
-    assert "山田太郎" in str(at)
+    assert "山田太郎" in _rendered_text(at)
 
 
 def test_issue_page_shows_distributor_for_petty(db):
@@ -2000,8 +2052,24 @@ def test_issue_page_shows_distributor_for_petty(db):
     store.add_petty_cash("2026-07-17", None, 1500, project_id=pid,
                          distributor_id=did, db_path=db)
     at = _run("03_号別明細.py")
-    assert "佐藤花子" in str(at)
+    assert "佐藤花子" in _rendered_text(at)
+
+
+def test_issue_page_shows_name_of_deactivated_distributor(db):
+    """🔴 停止中方式の要。停止中にした配布員でも、過去の号別明細では名前が出続けること。
+    登録の選択肢は only_active=True で引く一方、過去データの名前は停止中も含めて引く、
+    という非対称性が守られているかを検証する。ここが壊れると過去データから名前が消える。"""
+    did, pid, iid = _seed_invoice(db, pay_type="歩合")
+    store.update_distributor(did, active=0, db_path=db)   # 停止中にする
+    at = _run("03_号別明細.py")
+    assert "山田太郎" in _rendered_text(at)
 ```
+
+🔴 **`str(at)` を絶対に使わないこと**（Task 11 の該当節に理由と `_rendered_text` ヘルパの定義がある）。
+`AppTest.__repr__` は描画内容を含まないので、`assert ... in str(at)` は**何を書いても常に通る無意味なアサート**。
+
+**ミューテーションで実効性を確かめること**: `_con_disp` から `"配布員"` 列を一時的に消す
+→ **該当テストが落ちる**ことを確認 → 戻す。落ちなければ骨抜きなので書き直す。
 
 - [ ] **Step 2: Run test to verify it fails**
 
