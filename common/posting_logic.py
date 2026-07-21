@@ -202,3 +202,13 @@ def days_since(iso_str, *, today=None):
     return (_today(today) - d).days
 
 
+def master_row_subtitle(master, row) -> str:
+    """一覧の各行で名前の右に薄字で出す補助情報。中身が空なら空文字。
+    業務委託=「区分・支払形態」、買掛先=「既定費目 / 原本区分」、他マスタは無し。"""
+    if master == "distributor":
+        parts = [p for p in [row.get("kind"), row.get("pay_type")] if p]
+        return "・".join(parts)
+    if master == "payables_vendor":
+        parts = [p for p in [row.get("default_category"), row.get("default_original_status")] if p]
+        return " / ".join(parts)
+    return ""

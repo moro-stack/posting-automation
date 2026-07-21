@@ -319,3 +319,23 @@ def test_master_delete_action_deactivates_on_negative_value():
     assert L.master_delete_action(-1) == "deactivate"
 
 
+def test_master_row_subtitle_distributor():
+    row = {"kind": "業務委託", "pay_type": "歩合"}
+    assert L.master_row_subtitle("distributor", row) == "業務委託・歩合"
+
+
+def test_master_row_subtitle_distributor_partial():
+    assert L.master_row_subtitle("distributor", {"kind": "自社社員", "pay_type": None}) == "自社社員"
+
+
+def test_master_row_subtitle_vendor():
+    row = {"default_category": "家賃", "default_original_status": "本社"}
+    assert L.master_row_subtitle("payables_vendor", row) == "家賃 / 本社"
+
+
+def test_master_row_subtitle_vendor_empty():
+    assert L.master_row_subtitle("payables_vendor", {"default_category": None, "default_original_status": None}) == ""
+
+
+def test_master_row_subtitle_other_master():
+    assert L.master_row_subtitle("project", {"name": "A社チラシ"}) == ""
