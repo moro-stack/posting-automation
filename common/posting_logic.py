@@ -230,3 +230,44 @@ def rows_for_excel(edited_df, *, select_col="選択"):
         if row.get(select_col):
             out.append({k: v for k, v in row.items() if k != select_col})
     return out
+
+
+def company_summary_totals(*, receivables, payables, petty, contract_lines, manual):
+    """全社の売上(売掛)・原価(買掛+小口+業務委託+直接入力)・利益。"""
+    s = sum(_num(r.get("amount")) for r in receivables)
+    c = (sum(_num(r.get("amount")) for r in payables)
+         + sum(_num(r.get("amount")) for r in petty)
+         + sum(_num(r.get("amount")) for r in contract_lines)
+         + sum(_num(r.get("amount")) for r in manual))
+    return {"sales": s, "cost": c, "profit": s - c}
+
+
+def company_summary_rows(*, receivables, payables, petty, contract_lines, manual,
+                         id2proj, id2vendor, id2cat, id2client, id2dist):
+    """区分・日付・項目・案件・金額 に正規化した明細行のリスト（原価・売上まとめ用）。"""
+    def _proj(pid):
+        return id2proj.get(pid, "") if pid is not None else ""
+    rows = []
+    for r in receivables:
+        rows.append({"区分": "売上", "日付": r.get("month") or "",
+                     "項目": id2client.get(r.get("client_id"), ""),
+                     "案件": _proj(r.get("project_id")), "金額": _num(r.get("amount"))})
+    for r in payables:
+        rows.append({"区分": "買掛", "日付": r.get("date") or r.get("month") or "",
+                     "項目": r.get("vendor_name") or id2vendor.get(r.get("vendor_id"), ""),
+                     "案件": _proj(r.get("project_id")), "金額": _num(r.get("amount"))})
+    for r in petty:
+        item = id2cat.get(r.get("category_id"), "")
+        if r.get("memo"):
+            item = f"{item}（{r['memo']}）" if item else r["memo"]
+        rows.append({"区分": "小口", "日付": r.get("date") or "", "項目": item or "小口",
+                     "案件": _proj(r.get("project_id")), "金額": _num(r.get("amount"))})
+    for r in contract_lines:
+        rows.append({"区分": "業務委託", "日付": r.get("issue_date") or "",
+                     "項目": id2dist.get(r.get("distributor_id"), ""),
+                     "案件": _proj(r.get("project_id")), "金額": _num(r.get("amount"))})
+    for r in manual:
+        rows.append({"区分": "直接入力", "日付": r.get("work_date") or "",
+                     "項目": r.get("content") or "",
+                     "案件": _proj(r.get("project_id")), "金額": _num(r.get("amount"))})
+    return rows
