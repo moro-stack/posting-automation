@@ -1,4 +1,15 @@
+import os
+
 from common import posting_store as store
+
+
+def seed_for_boot(*, db_path=None) -> bool:
+    """起動時のseed。DEMO_MODE なら架空データ(実名を出さない)、そうでなければ実マスタpreset。
+    実名preset(関西ぱど等)がデモに漏れないための分岐をここに集約し、テストで守る。"""
+    if os.environ.get("DEMO_MODE"):
+        return seed_demo_if_empty(db_path=db_path)
+    store.seed_masters(db_path=db_path)
+    return False
 
 
 def seed_demo_if_empty(*, db_path=None) -> bool:

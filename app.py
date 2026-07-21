@@ -21,11 +21,8 @@ apply_app_style()
 def _bootstrap_db():
     store.sync_from_remote()
     store.init_db()
-    if os.environ.get("DEMO_MODE"):
-        from common import demo_seed
-        demo_seed.seed_demo_if_empty()   # 架空データ(実名presetは入れない)
-    else:
-        store.seed_masters()
+    from common import demo_seed
+    demo_seed.seed_for_boot()   # DEMO_MODEなら架空データ、そうでなければ実マスタpreset(分岐はdemo_seed側で保護)
     return True
 
 
