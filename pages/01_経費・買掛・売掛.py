@@ -7,7 +7,8 @@ from common import ocr
 from common import posting_logic
 from common import posting_store as store
 from common.ui import (apply_app_style, section_export, nice_table, period_picker,
-                       flash, show_flash, confirm_delete)
+                       flash, show_flash, confirm_delete,
+                       checkbox_list_editor, selected_rows_excel_button, bulk_delete_action)
 
 apply_app_style()
 st.title("小口／買掛／売掛の登録")
@@ -26,22 +27,6 @@ def _project_options():
 
 def _distributor_options():
     return {d["name"]: d["id"] for d in store.list_distributors(only_active=True)}
-
-
-def _delete_rows_ui(rows, disp, key_prefix, delete_fn, detail_fn, section=None):
-    """一覧の各行に削除ボタンを出す。行idを key に含めて取り違えを防ぐ。
-    確認UIは列の外＝全幅に出す(狭い列に押し込むと確認文が読めないため)。
-    section はタブごとに分けること(タブは1回の実行で全部描画されるため、
-    section を付けないと最初のタブの show_flash がメッセージを奪う)。"""
-    if not rows:
-        return
-    st.markdown("**行を削除**")
-    for r, d in zip(rows, disp):
-        c1, c2 = st.columns([5, 1])
-        c1.caption(detail_fn(r, d))
-        confirm_delete(key=f"{key_prefix}_{r['id']}", detail=detail_fn(r, d),
-                       on_confirm=lambda rid=r["id"]: delete_fn(rid),
-                       section=section, button_container=c2)
 
 
 def _yen(v):
@@ -213,16 +198,24 @@ if mode == "小口":
         _cats, _projs = _names(store.list_expense_categories), _names(store.list_projects)
         _dists = _names(store.list_distributors)
         _rows = _period_filter(store.list_petty_cash(), "date", "petty_period", "小口")
-        _disp = [{"日付": r["date"] or "", "配布員": _dists.get(r.get("distributor_id"), ""),
+        _disp = [{"No.": r["id"], "日付": r["date"] or "",
+                  "配布員": _dists.get(r.get("distributor_id"), ""),
                   "費目": _cats.get(r["category_id"], ""),
                   "金額": _yen(r["amount"]), "案件": _projs.get(r["project_id"], ""),
                   "メモ": r["memo"] or "",
                   "登録日": (r.get("created_at") or "")[:10]} for r in _rows]
-        nice_table(_disp, "小口の登録はまだありません。")
-        section_export(_disp, "小口一覧", key="petty")
-        _delete_rows_ui(_rows, _disp, "del_petty", store.delete_petty_cash,
-                        lambda r, d: f'{d["日付"] or "日付なし"} ／ {d["費目"]} ／ {d["金額"]}',
-                        section="petty")
+        if not _disp:
+            st.caption("小口の登録はまだありません。")
+        else:
+            section_export(_disp, "小口一覧", key="petty")   # 全件Excel/印刷（残す）
+            edited = checkbox_list_editor(_disp, key="petty_select")
+            selected_ids = posting_logic.selected_ids_from_editor(edited)
+            st.caption(f"選択中：{len(selected_ids)}件")
+            b1, b2 = st.columns(2)
+            selected_rows_excel_button(edited, key="petty_sel_xlsx",
+                                       filename="小口_選択一覧", container=b1)
+            bulk_delete_action(selected_ids, delete_fn=store.delete_petty_cash,
+                               section="petty", key="petty_bulk_del", container=b2)
 
 elif mode == "買掛":
     st.subheader("買掛（固定費・法人業者）")
@@ -344,18 +337,25 @@ elif mode == "買掛":
         st.markdown("**登録済みの買掛一覧**")
         _vends = _names(store.list_payables_vendors)
         _rows = _period_filter(store.list_payables(), "month", "pay_period", "買掛")
-        _disp = [{"請求月度": r.get("month") or "",
+        _disp = [{"No.": r["id"], "請求月度": r.get("month") or "",
                   "請求書の日付": r.get("date") or "",
                   "取引先": r.get("vendor_name") or _vends.get(r.get("vendor_id"), ""),
                   "金額": _yen(r["amount"]),
                   "原本区分": r.get("original_status") or "",
                   "備考": r.get("note") or "",
                   "登録日": (r.get("created_at") or "")[:10]} for r in _rows]
-        nice_table(_disp, "買掛の登録はまだありません。")
-        section_export(_disp, "買掛一覧", key="pay")
-        _delete_rows_ui(_rows, _disp, "del_pay", store.delete_payable,
-                        lambda r, d: f'{d["請求書の日付"] or d["請求月度"]} ／ {d["取引先"]} ／ {d["金額"]}',
-                        section="payable")
+        if not _disp:
+            st.caption("買掛の登録はまだありません。")
+        else:
+            section_export(_disp, "買掛一覧", key="pay")
+            edited = checkbox_list_editor(_disp, key="pay_select")
+            selected_ids = posting_logic.selected_ids_from_editor(edited)
+            st.caption(f"選択中：{len(selected_ids)}件")
+            b1, b2 = st.columns(2)
+            selected_rows_excel_button(edited, key="pay_sel_xlsx",
+                                       filename="買掛_選択一覧", container=b1)
+            bulk_delete_action(selected_ids, delete_fn=store.delete_payable,
+                               section="payable", key="pay_bulk_del", container=b2)
 
 else:  # 売掛
     st.subheader("売掛（売上）")
@@ -408,12 +408,20 @@ else:  # 売掛
         st.markdown("**登録済みの売掛一覧**")
         _clients, _projs = _names(store.list_receivables_clients), _names(store.list_projects)
         _rows = _period_filter(store.list_receivables(), "month", "recv_period", "売掛")
-        _disp = [{"月度": r.get("month") or "", "売掛先": _clients.get(r["client_id"], ""),
+        _disp = [{"No.": r["id"], "月度": r.get("month") or "",
+                  "売掛先": _clients.get(r["client_id"], ""),
                   "金額": _yen(r["amount"]), "備考": r.get("note") or "",
                   "案件": _projs.get(r["project_id"], ""),
                   "登録日": (r.get("created_at") or "")[:10]} for r in _rows]
-        nice_table(_disp, "売掛の登録はまだありません。")
-        section_export(_disp, "売掛一覧", key="recv")
-        _delete_rows_ui(_rows, _disp, "del_recv", store.delete_receivable,
-                        lambda r, d: f'{d["月度"]} ／ {d["売掛先"]} ／ {d["金額"]}',
-                        section="receivable")
+        if not _disp:
+            st.caption("売掛の登録はまだありません。")
+        else:
+            section_export(_disp, "売掛一覧", key="recv")
+            edited = checkbox_list_editor(_disp, key="recv_select")
+            selected_ids = posting_logic.selected_ids_from_editor(edited)
+            st.caption(f"選択中：{len(selected_ids)}件")
+            b1, b2 = st.columns(2)
+            selected_rows_excel_button(edited, key="recv_sel_xlsx",
+                                       filename="売掛_選択一覧", container=b1)
+            bulk_delete_action(selected_ids, delete_fn=store.delete_receivable,
+                               section="receivable", key="recv_bulk_del", container=b2)

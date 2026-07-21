@@ -747,15 +747,22 @@ def test_petty_registration_saves_distributor(db):
 
 
 def test_petty_list_has_delete_button_and_deletes_the_right_row(db):
+    """行ごとの削除ボタンはもう無い。チェックで選んだ行だけを一括削除で消せること。"""
     a = store.add_petty_cash("2026-07-10", None, 1000, memo="A", db_path=db)
     b = store.add_petty_cash("2026-07-11", None, 2000, memo="B", db_path=db)
     at = _run(_EXPENSE_PAGE)
     keys = {btn.key for btn in at.button}
-    assert f"del_petty_{a}_btn" in keys
-    assert f"del_petty_{b}_btn" in keys
+    assert not any(k and k.startswith("del_petty_") for k in keys)
 
-    at.button(key=f"del_petty_{b}_btn").click().run()
-    at.button(key=f"del_petty_{b}_ok").click().run()
+    rows = store.list_petty_cash(db_path=db)
+    idx_b = next(i for i, r in enumerate(rows) if r["id"] == b)
+    # AppTest の data_editor は edited_rows を渡した直後の1回の run() でしか反映されない
+    # ため、選択のセットとボタンのクリック予約を同じ run() にまとめて渡す。
+    at.session_state["petty_select"] = {
+        "edited_rows": {idx_b: {"選択": True}}, "added_rows": [], "deleted_rows": []}
+    at.button(key="petty_bulk_del_btn").click()
+    at.run()
+    at.button(key="petty_bulk_del_ok").click().run()
 
     assert not at.exception
     ids = [r["id"] for r in store.list_petty_cash(db_path=db)]
@@ -768,12 +775,57 @@ def test_petty_delete_announces_in_the_list_tab(db):
      登録タブの show_flash() がメッセージを消費してしまう)"""
     rid = store.add_petty_cash("2026-07-10", None, 1000, db_path=db)
     at = _run(_EXPENSE_PAGE)
-    at.button(key=f"del_petty_{rid}_btn").click().run()
-    at.button(key=f"del_petty_{rid}_ok").click().run()
+    at.session_state["petty_select"] = {
+        "edited_rows": {0: {"選択": True}}, "added_rows": [], "deleted_rows": []}
+    at.button(key="petty_bulk_del_btn").click()
+    at.run()
+    at.button(key="petty_bulk_del_ok").click().run()
 
     assert not at.exception
-    assert [s.value for s in at.tabs[1].success] == ["削除しました"]
+    assert [s.value for s in at.tabs[1].success] == ["1件を削除しました"]
     assert [s.value for s in at.tabs[0].success] == []
+
+
+def _seed_petty(db):
+    cat = store.add_expense_category("消耗品", db_path=db)
+    store.add_petty_cash(date="2026-07-01", category_id=cat, amount=100, memo="A", db_path=db)
+    store.add_petty_cash(date="2026-07-02", category_id=cat, amount=200, memo="B", db_path=db)
+    return [r["id"] for r in store.list_petty_cash(db_path=db)]
+
+
+def test_petty_bulk_delete_removes_only_selected(db):
+    _seed_petty(db)
+    # mode の radio は key 無し＝既定で先頭「小口」。Streamlit の tabs は1実行で全内容を
+    # 描画するので、一覧タブの中身は既定状態で描画される（mode を触る必要はない）。
+    at = AppTest.from_file(os.path.join(ROOT, "pages", "01_経費・買掛・売掛.py"), default_timeout=30)
+    at.run()
+    # 先頭行(index 0)だけ選択。AppTest の data_editor は edited_rows を渡した直後の1回の
+    # run() でしか反映されないため、選択のセットとボタンのクリック予約を同じ run() にまとめる。
+    at.session_state["petty_select"] = {
+        "edited_rows": {0: {"選択": True}}, "added_rows": [], "deleted_rows": []}
+    at.button(key="petty_bulk_del_btn").click()
+    at.run()
+    at.button(key="petty_bulk_del_ok").click().run()
+    remaining = [r["id"] for r in store.list_petty_cash(db_path=db)]
+    assert len(remaining) == 1  # 1件だけ消えた
+
+
+def test_petty_per_row_delete_gone(db):
+    _seed_petty(db)
+    at = AppTest.from_file(os.path.join(ROOT, "pages", "01_経費・買掛・売掛.py"), default_timeout=30)
+    at.run()
+    keys = [b.key for b in at.button]
+    assert not any(k and k.startswith("del_petty_") for k in keys)  # 行ごと削除は無い
+
+
+def test_petty_whole_list_export_kept(db):
+    _seed_petty(db)
+    at = AppTest.from_file(os.path.join(ROOT, "pages", "01_経費・買掛・売掛.py"), default_timeout=30)
+    at.run()
+    # このstreamlitバージョンのAppTestには download_button ショートカットが無いため get() で拾う。
+    # また download_button ノードは .key が None を返すため .id（key を含む内部ID）で見る。
+    ids = [b.id for b in at.get("download_button")]
+    assert any("petty_xlsx" in i for i in ids)  # section_export の全件Excelが残る
 
 
 def _payable_page(db):
@@ -855,31 +907,49 @@ def test_payable_no_caption_when_master_default_is_not_selectable(db):
 
 
 def test_payable_list_deletes_the_right_row_and_announces(db):
+    """行ごとの削除ボタンはもう無い。チェックで選んだ行だけを一括削除で消せること。"""
     a = store.add_payable(None, None, 1000, date="2026-07-10", vendor_name="A社", db_path=db)
     b = store.add_payable(None, None, 2000, date="2026-07-11", vendor_name="B社", db_path=db)
     at = _payable_page(db)
-    at.button(key=f"del_pay_{b}_btn").click().run()
-    at.button(key=f"del_pay_{b}_ok").click().run()
+    keys = {btn.key for btn in at.button}
+    assert not any(k and k.startswith("del_pay_") for k in keys)
+
+    rows = store.list_payables(db_path=db)
+    idx_b = next(i for i, r in enumerate(rows) if r["id"] == b)
+    at.session_state["pay_select"] = {
+        "edited_rows": {idx_b: {"選択": True}}, "added_rows": [], "deleted_rows": []}
+    at.button(key="pay_bulk_del_btn").click()
+    at.run()
+    at.button(key="pay_bulk_del_ok").click().run()
 
     assert not at.exception
     assert [r["id"] for r in store.list_payables(db_path=db)] == [a]
-    assert [s.value for s in at.tabs[1].success] == ["削除しました"]
+    assert [s.value for s in at.tabs[1].success] == ["1件を削除しました"]
     assert [s.value for s in at.tabs[0].success] == []
 
 
 def test_receivable_list_deletes_the_right_row_and_announces(db):
+    """行ごとの削除ボタンはもう無い。チェックで選んだ行だけを一括削除で消せること。"""
     cid = store.add_receivables_client("得意先", db_path=db)
     a = store.add_receivable("2026-07", cid, 1000, db_path=db)
     b = store.add_receivable("2026-07", cid, 2000, db_path=db)
     at = AppTest.from_file(os.path.join(ROOT, "pages", _EXPENSE_PAGE), default_timeout=30)
     at.run()
     at.radio[0].set_value("売掛").run()
-    at.button(key=f"del_recv_{b}_btn").click().run()
-    at.button(key=f"del_recv_{b}_ok").click().run()
+    keys = {btn.key for btn in at.button}
+    assert not any(k and k.startswith("del_recv_") for k in keys)
+
+    rows = store.list_receivables(db_path=db)
+    idx_b = next(i for i, r in enumerate(rows) if r["id"] == b)
+    at.session_state["recv_select"] = {
+        "edited_rows": {idx_b: {"選択": True}}, "added_rows": [], "deleted_rows": []}
+    at.button(key="recv_bulk_del_btn").click()
+    at.run()
+    at.button(key="recv_bulk_del_ok").click().run()
 
     assert not at.exception
     assert [r["id"] for r in store.list_receivables(db_path=db)] == [a]
-    assert [s.value for s in at.tabs[1].success] == ["削除しました"]
+    assert [s.value for s in at.tabs[1].success] == ["1件を削除しました"]
     assert [s.value for s in at.tabs[0].success] == []
 
 
