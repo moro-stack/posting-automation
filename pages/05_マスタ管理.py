@@ -3,7 +3,7 @@ import streamlit as st
 
 from common import posting_logic
 from common import posting_store as store
-from common.ui import apply_app_style, nice_table, flash, show_flash, confirm_delete
+from common.ui import apply_app_style, flash, show_flash, confirm_delete
 
 apply_app_style()
 st.title("マスタ管理")
@@ -16,33 +16,6 @@ _KINDS = ["業務委託", "自社社員", "アルバイト"]
 def _index_of(options, value):
     """selectbox の初期選択位置。今の値が選択肢に無ければ先頭に落とす(既存データの保険)。"""
     return options.index(value) if value in options else 0
-
-
-def _split_active(rows):
-    """有効な行と停止中の行に分ける。一覧は有効だけを出し、停止中は折りたたみへ。"""
-    return ([r for r in rows if r.get("active", 1)],
-            [r for r in rows if not r.get("active", 1)])
-
-
-def _remove_ui(master, row, *, label_name, update_fn, button_container=None):
-    """削除ボタン。使用実績があれば物理削除でなく停止中にする(過去データを守るため)。
-    button_container を渡すと、ボタンだけをそこ(行の右端の狭い列)に置き、
-    確認UIは呼び出した場所＝全幅に出す。section は master 名＝タブごとに分ける。"""
-    n = store.count_master_usage(master, row["id"])
-    if posting_logic.master_delete_action(n) == "delete":
-        confirm_delete(
-            key=f"del_{master}_{row['id']}", label="削除",
-            detail=f"{label_name}「{row['name']}」を削除します。使用実績はありません。",
-            on_confirm=lambda: _delete_master(master, row["id"]),
-            success="削除しました", section=master, button_container=button_container)
-    else:
-        confirm_delete(
-            key=f"off_{master}_{row['id']}", label="停止中にする",
-            warning=f"⚠️ 「{row['name']}」は {n}件のデータで使用中です。",
-            detail="過去データを残すため、削除ではなく停止中にします"
-                   "（登録の選択肢から消えるだけで、一覧・報告書の表示は変わりません）。",
-            on_confirm=lambda: update_fn(row["id"], active=0),
-            success="停止中にしました", section=master, button_container=button_container)
 
 
 _DELETE_FNS = {
@@ -61,20 +34,6 @@ def _delete_master(master, row_id):
         # 配布員も物理削除の対象になり、掃除しないと孤立行が残る。一緒に消しておく。
         store.replace_daily_rates(row_id, [])
     _DELETE_FNS[master](row_id)
-
-
-def _inactive_ui(master, inactive, *, update_fn):
-    """停止中のマスタは折りたたみの中に。ここから有効に戻せる。"""
-    if not inactive:
-        return
-    with st.expander(f"停止中（{len(inactive)}件）", expanded=False):
-        for r in inactive:
-            c1, c2 = st.columns([3, 1])
-            c1.write(r["name"])
-            if c2.button("有効に戻す", key=f"on_{master}_{r['id']}"):
-                update_fn(r["id"], active=1)
-                flash("有効に戻しました", master)
-                st.rerun()
 
 
 @st.dialog("編集")
@@ -171,15 +130,58 @@ def _distributor_fields(row):
             "monthly_rate": (int(monthly) or None)}
 
 
+def _status_ui(master, row, *, update_fn, status_col):
+    """行のステータス列。運用中=光る水色トグル(確認あり→停止中)、停止中=グレー(→有効化)。
+    ボタン自体は狭い status_col の中に置く(CSSの st-key-mstat-* スコープを効かせるため)が、
+    confirm_delete はここ＝行関数のトップレベルで呼び、確認UI(警告・詳細・はい/やめる)は
+    button_container 経由でボタンだけを狭い列に描画しつつ、確認UI本体は全幅に出す。"""
+    if row.get("active", 1):
+        with status_col:
+            kc = st.container(key=f"mstat-on-{master}-{row['id']}")
+        n = store.count_master_usage(master, row["id"])
+        detail = (f"「{row['name']}」を停止中にします。"
+                  + (f"{n}件のデータで使用中のため、登録の選択肢から消えるだけで"
+                     "一覧・報告書の表示は変わりません。" if n else
+                     "登録の選択肢から外します（いつでも有効に戻せます）。"))
+        confirm_delete(
+            key=f"deact_{master}_{row['id']}", label="運用中",
+            warning=f"⚠️「{row['name']}」を停止中にしますか？", detail=detail,
+            on_confirm=lambda: update_fn(row["id"], active=0),
+            success="停止中にしました", section=master, button_container=kc)
+    else:
+        with status_col:
+            with st.container(key=f"mstat-off-{master}-{row['id']}"):
+                if st.button("停止中", key=f"react_{master}_{row['id']}"):
+                    update_fn(row["id"], active=1)
+                    flash("有効に戻しました", master)
+                    st.rerun()
+
+
+def _trash_ui(master, row, *, trash_col):
+    """使用実績0件の行だけに出す物理削除(ゴミ箱)。使用中の行には呼ばない。
+    ボタンは狭い trash_col に、確認UIは呼び出し場所＝全幅に出す(button_container 経由)。"""
+    with trash_col:
+        kc = st.container(key=f"mtrash-{master}-{row['id']}")
+    confirm_delete(
+        key=f"del_{master}_{row['id']}", label="🗑",
+        detail=f"「{row['name']}」を完全に削除します。使用実績はありません。",
+        on_confirm=lambda: _delete_master(master, row["id"]),
+        success="削除しました", section=master, button_container=kc)
+
+
 def _row_ui(master, row, *, update_fn, label_name, fields_fn, with_daily=False):
-    """有効な行1つ。右端に編集・削除(or 停止中)ボタンを置く。
-    編集は別窓(st.dialog)、確認UIは列の外＝全幅に出す(狭い列に押し込むと読めないため)。"""
-    c1, c2, c3 = st.columns([4, 1, 1])
-    c1.write(row["name"])
-    if c2.button("編集", key=f"edit_{master}_{row['id']}"):
+    """1行: 名前＋補助情報｜ステータス｜編集｜(未使用のみ)🗑。編集・確認は列の外＝全幅。"""
+    sub = posting_logic.master_row_subtitle(master, row)
+    c_name, c_status, c_edit, c_trash = st.columns([4, 2, 1, 1])
+    with c_name:
+        st.write(row["name"])
+        if sub:
+            st.caption(sub)
+    _status_ui(master, row, update_fn=update_fn, status_col=c_status)
+    if c_edit.button("編集", key=f"edit_{master}_{row['id']}"):
         _edit_dialog(master, row, update_fn=update_fn, fields_fn=fields_fn, with_daily=with_daily)
-    _remove_ui(master, row, label_name=label_name, update_fn=update_fn,
-               button_container=c3)
+    if posting_logic.master_delete_action(store.count_master_usage(master, row["id"])) == "delete":
+        _trash_ui(master, row, trash_col=c_trash)
 
 
 def _rows_ui(master, rows, *, update_fn, label_name, fields_fn):
@@ -251,10 +253,8 @@ def _simple_master(label, master, list_fn, add_fn, update_fn):
     show_flash(master)
     if st.button("＋ 新規登録", key=f"add_open_{master}"):
         _add_simple_dialog(label, master, add_fn)
-    active, inactive = _split_active(list_fn())
-    _rows_ui(master, active, update_fn=update_fn, label_name=label,
+    _rows_ui(master, list_fn(), update_fn=update_fn, label_name=label,
              fields_fn=_name_fields(master, label))
-    _inactive_ui(master, inactive, update_fn=update_fn)   # ← Task 5 で廃止
 
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(
@@ -272,15 +272,10 @@ with tab3:
     show_flash(master)
     if st.button("＋ 新規登録", key="add_open_payables_vendor"):
         _add_vendor_dialog()
-    active, inactive = _split_active(store.list_payables_vendors())
-    disp = [{"取引先": r["name"], "既定の費目": r.get("default_category") or "",
-             "既定の原本区分": r.get("default_original_status") or ""} for r in active]
-    nice_table(disp, "買掛先はまだ登録されていません。")
     st.caption("既定の原本区分を入れておくと、買掛登録で取引先名が一致したときに自動で入ります。")
-    for r in active:
+    for r in store.list_payables_vendors():
         _row_ui(master, r, update_fn=store.update_payables_vendor,
                 label_name="買掛先", fields_fn=_vendor_fields)
-    _inactive_ui(master, inactive, update_fn=store.update_payables_vendor)
 
 with tab4:
     _simple_master("売掛先", "receivables_client", store.list_receivables_clients,
@@ -291,13 +286,6 @@ with tab5:
     show_flash(master)
     if st.button("＋ 新規登録", key="add_open_distributor"):
         _add_distributor_dialog()
-    active, inactive = _split_active(store.list_distributors())
-    disp = [{"配布員 氏名": r["name"], "区分": r.get("kind") or "",
-             "支払形態": r.get("pay_type") or "",
-             "時給額": r.get("hourly_rate") or "", "月額": r.get("monthly_rate") or "",
-             "振込先": r.get("bank_info") or ""} for r in active]
-    nice_table(disp, "業務委託はまだ登録されていません。")
-    for r in active:
+    for r in store.list_distributors():
         _row_ui(master, r, update_fn=store.update_distributor,
                 label_name="業務委託", fields_fn=_distributor_fields, with_daily=True)
-    _inactive_ui(master, inactive, update_fn=store.update_distributor)

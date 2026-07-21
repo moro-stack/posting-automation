@@ -54,27 +54,26 @@ def test_master_page_tab_is_renamed_to_gyomu_itaku(db):
 
 
 def test_master_page_hides_inactive_from_main_list(db):
-    """停止中のマスタは通常の一覧に出さない。"""
+    """停止中のマスタも同じ一覧にインライン表示する(折りたたみ・別セクションは無い)。"""
     alive = store.add_distributor("現役の人", db_path=db)
     gone = store.add_distributor("辞めた人", active=0, db_path=db)
     at = _run("05_マスタ管理.py")
 
-    # 有効な人は一覧に出て、削除(or 停止中)ボタンが並ぶ
+    # 有効な人は運用中トグル(確認あり→停止中)を持つ
     body = " ".join(m.value for m in at.markdown)
     assert "現役の人" in body
-    # 停止中の人は一覧の削除ボタンを持たず、「有効に戻す」だけを持つ
     keys = {b.key for b in at.button}
-    assert f"del_distributor_{alive}_btn" in keys
-    assert f"del_distributor_{gone}_btn" not in keys
-    assert f"off_distributor_{gone}_btn" not in keys
-    assert f"on_distributor_{gone}" in keys
+    assert f"deact_distributor_{alive}_btn" in keys
+    # 停止中の人は同じ一覧に出て、確認なしの「停止中」トグル(→有効化)を持つ
+    assert f"deact_distributor_{gone}_btn" not in keys
+    assert f"react_distributor_{gone}" in keys
 
 
-def test_master_page_reactivates_from_expander(db):
-    """停止中の折りたたみから「有効に戻す」で復帰できる。"""
+def test_master_page_reactivates_inline(db):
+    """一覧にインライン表示された「停止中」トグルから復帰できる(折りたたみは無い)。"""
     gone = store.add_distributor("戻る人", active=0, db_path=db)
     at = _run("05_マスタ管理.py")
-    at.button(key=f"on_distributor_{gone}").click().run()
+    at.button(key=f"react_distributor_{gone}").click().run()
 
     assert not at.exception
     rows = {r["id"]: r for r in store.list_distributors(db_path=db)}
@@ -108,8 +107,8 @@ def test_master_page_deactivates_distributor_in_use(db):
     assert store.count_master_usage("distributor", did, db_path=db) > 0
 
     at = _run("05_マスタ管理.py")
-    at.button(key=f"off_distributor_{did}_btn").click().run()
-    at.button(key=f"off_distributor_{did}_ok").click().run()
+    at.button(key=f"deact_distributor_{did}_btn").click().run()
+    at.button(key=f"deact_distributor_{did}_ok").click().run()
 
     assert not at.exception
     rows = {r["name"]: r for r in store.list_distributors(db_path=db)}
@@ -414,14 +413,14 @@ def test_master_page_edit_ignores_empty_name(db):
     assert {r["id"]: r for r in store.list_distributors(db_path=db)}[did]["name"] == "山田太郎"
 
 
-def test_master_page_edit_button_only_for_active_rows(db):
-    """編集は有効な行にだけ。停止中は「有効に戻す」→編集で足りる(非対称性を保つ)。"""
+def test_master_page_edit_button_for_active_and_inactive_rows(db):
+    """編集は有効・停止中どちらの行にも出る(停止中も同じ一覧にインライン表示のため)。"""
     alive = store.add_distributor("現役の人", db_path=db)
     gone = store.add_distributor("辞めた人", active=0, db_path=db)
     at = _run(_MASTER_PAGE)
     keys = {b.key for b in at.button}
     assert f"edit_distributor_{alive}" in keys
-    assert f"edit_distributor_{gone}" not in keys
+    assert f"edit_distributor_{gone}" in keys
 
 
 def test_confirm_delete_shows_confirmation_before_running(db):
@@ -569,7 +568,7 @@ def test_master_page_announces_in_the_tab_that_was_operated(db):
     """
     gone = store.add_distributor("戻る人", active=0, db_path=db)
     at = _run("05_マスタ管理.py")
-    at.button(key=f"on_distributor_{gone}").click().run()
+    at.button(key=f"react_distributor_{gone}").click().run()
     assert not at.exception
 
     labels = [t.label for t in at.tabs]
@@ -602,8 +601,8 @@ def test_master_page_deactivate_announces_in_the_tab_that_was_operated(db):
         did, "2026-07-17", "2026-07-01", "2026-07-31",
         [{"report_qty": 10, "unit_price": 100}], db_path=db)
     at = _run("05_マスタ管理.py")
-    at.button(key=f"off_distributor_{did}_btn").click().run()
-    at.button(key=f"off_distributor_{did}_ok").click().run()
+    at.button(key=f"deact_distributor_{did}_btn").click().run()
+    at.button(key=f"deact_distributor_{did}_ok").click().run()
     assert not at.exception
     labels = [t.label for t in at.tabs]
     assert [s.value for s in at.tabs[labels.index("業務委託")].success] == ["停止中にしました"]
@@ -1428,3 +1427,41 @@ def test_no_bottom_daily_section_label(db):
     at = _run("05_マスタ管理.py")
     text = _rendered_text(at)
     assert "日当金額の設定" not in text
+
+
+def test_status_toggle_deactivates(db):
+    store.add_distributor("運用中さん", kind="業務委託", pay_type="歩合", db_path=db)
+    at = _run("05_マスタ管理.py")
+    rid = [r["id"] for r in store.list_distributors(db_path=db) if r["name"] == "運用中さん"][0]
+    # 運用中トグル→確認→はい で停止中になる
+    at.button(key=f"deact_distributor_{rid}_btn").click().run()
+    at.button(key=f"deact_distributor_{rid}_ok").click().run()
+    row = [r for r in store.list_distributors(db_path=db) if r["id"] == rid][0]
+    assert not row["active"]
+
+
+def test_inactive_shown_inline_and_reactivates(db):
+    store.add_distributor("停止さん", kind="業務委託", pay_type="歩合", db_path=db)
+    rid = [r["id"] for r in store.list_distributors(db_path=db) if r["name"] == "停止さん"][0]
+    store.update_distributor(rid, active=0, db_path=db)
+    at = _run("05_マスタ管理.py")
+    # 折りたたみでなく同じ一覧に「停止中」トグルとして出る → 押すと有効に戻る
+    at.button(key=f"react_distributor_{rid}").click().run()
+    row = [r for r in store.list_distributors(db_path=db) if r["id"] == rid][0]
+    assert row["active"]
+
+
+def test_trash_only_for_unused(db):
+    # 未使用の配布員には🗑(削除)、使用中には出ない
+    store.add_distributor("未使用さん", kind="業務委託", pay_type="歩合", db_path=db)
+    at = _run("05_マスタ管理.py")
+    rid = [r["id"] for r in store.list_distributors(db_path=db) if r["name"] == "未使用さん"][0]
+    keys = [b.key for b in at.button]
+    assert f"del_distributor_{rid}_btn" in keys  # 未使用は🗑あり
+
+
+def test_no_readonly_table_header(db):
+    # 読み取り専用テーブルの見出し「配布員 氏名」等が本文に出ない（行リストに一本化）
+    at = _run("05_マスタ管理.py")
+    text = _rendered_text(at)
+    assert "停止中（" not in text  # 折りたたみの見出しが無い
