@@ -257,6 +257,31 @@ div[data-baseweb="popover"]:has([data-baseweb="calendar"]) label{ display:none !
 }
 [data-testid="stTable"] tbody tr:nth-child(even) td{ background:#f7fafc; }
 [data-testid="stTable"] tbody tr:hover td{ background:var(--primary-soft); }
+
+/* ===== マスタ管理: ステータストグル（運用中=光る水色の丸 / 停止中=グレーの丸） ===== */
+/* 行ごとの st.container(key="mstat-on-<master>-<id>") が付ける st-key-* で全行をまとめてスコープ */
+[class*="st-key-mstat-on-"] .stButton>button{
+  border-radius:999px !important; background:var(--primary) !important; color:#fff !important;
+  border:none !important; font-weight:700 !important; padding:.35rem 1rem !important;
+  animation:mstatpulse 1.7s infinite;
+}
+@keyframes mstatpulse{
+  0%{ box-shadow:0 0 0 0 rgba(20,164,220,.55); }
+  70%{ box-shadow:0 0 0 8px rgba(20,164,220,0); }
+  100%{ box-shadow:0 0 0 0 rgba(20,164,220,0); }
+}
+[class*="st-key-mstat-off-"] .stButton>button{
+  border-radius:999px !important; background:#eef1f4 !important; color:#8b98a6 !important;
+  border:1px solid var(--line) !important; font-weight:700 !important; padding:.35rem 1rem !important;
+  box-shadow:none !important;
+}
+[class*="st-key-mstat-off-"] .stButton>button:hover{ background:#e4e8ee !important; color:#67788a !important; }
+/* 削除(ゴミ箱)は控えめなアイコンボタンに */
+[class*="st-key-mtrash-"] .stButton>button{
+  background:#fff !important; color:#c0392b !important; border:1px solid var(--line) !important;
+  box-shadow:none !important; padding:.35rem .6rem !important;
+}
+[class*="st-key-mtrash-"] .stButton>button:hover{ background:#fdecea !important; }
 </style>
 """
 

@@ -1331,3 +1331,11 @@ def test_home_keeps_deactivated_project(db):
     assert not at.exception
     names = list(at.dataframe[0].value["案件"])
     assert "案件A" in names
+
+
+def test_status_toggle_css_present():
+    # 運用中の脈打ちアニメ・停止中のグレー・スコープ用クラスが CSS に入っている
+    from common import ui as _ui
+    assert "mstatpulse" in _ui._STYLE
+    assert "st-key-mstat-on-" in _ui._STYLE
+    assert "st-key-mstat-off-" in _ui._STYLE
