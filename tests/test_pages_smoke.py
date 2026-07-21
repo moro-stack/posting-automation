@@ -1289,28 +1289,26 @@ def test_issue_page_shows_name_of_deactivated_distributor_for_petty(db):
     assert "辞めた花子" in _rendered_text(at)
 
 
-def test_issue_page_payable_row_has_empty_distributor_cell(db):
-    """買掛は配布員を持たない(オーナー判断で小口のみ)ため、雑費の内訳の配布員列は
-    空欄になる。列自体は存在すること(小口行と列がずれないため)。"""
+def test_issue_page_payable_not_shown_in_misc(db):
+    """買掛は号別明細の集計対象から除外される(原価・売上まとめページ側でのみ扱う)ため、
+    雑費の内訳には出ない。"""
     pid = store.add_project("案件A", db_path=db)
     store.add_payable(None, None, 3000, date="2026-07-17", vendor_name="ABC商事",
                       project_id=pid, db_path=db)
     at = _issue_page(db)
     assert not at.exception
-    misc = [t.value for t in at.table if "支払方法" in list(t.value.columns)]
-    assert len(misc) == 1
-    df = misc[0]
-    assert list(df.columns) == ["配布員", "項目", "金額", "支払方法", "日付"]
-    assert list(df["配布員"]) == [""]
+    text = _rendered_text(at)
+    assert "ABC商事" not in text
+    assert "3,000" not in text
 
 
 def test_issue_page_contract_breakdown_column_order(db):
-    """配布員は種別の左に置くこと(オーナー要望の並び)。"""
+    """支払日(発行日)を先頭に、配布員は種別の左に置くこと(オーナー要望の並び)。"""
     _seed_invoice(db, pay_type="歩合")
     at = _issue_page(db)
     con = [t.value for t in at.table if "種別" in list(t.value.columns)]
     assert len(con) == 1
-    assert list(con[0].columns) == ["配布員", "種別", "数量", "単価", "合計"]
+    assert list(con[0].columns) == ["支払日", "配布員", "種別", "数量", "単価", "合計"]
 
 
 def test_issue_page_nichito_qty_uses_saved_pay_type(db):
@@ -1370,7 +1368,7 @@ def test_issue_page_genka_xlsx_has_distributor_column(db, monkeypatch):
     xls = _genka_xlsx(seen)
     con = pd.read_excel(xls, "業務委託")
     misc = pd.read_excel(xls, "雑費")
-    assert list(con.columns) == ["配布員", "種別", "数量", "単価", "合計"]
+    assert list(con.columns) == ["支払日", "配布員", "種別", "数量", "単価", "合計"]
     assert list(con["配布員"]) == ["山田太郎"]
     assert list(misc.columns) == ["配布員", "項目", "金額", "支払方法", "日付"]
     assert list(misc["配布員"]) == ["山田太郎"]
@@ -1386,7 +1384,7 @@ def test_issue_page_genka_xlsx_columns_when_empty(db, monkeypatch):
     at = _issue_page(db)
     assert not at.exception
     xls = _genka_xlsx(seen)
-    assert list(pd.read_excel(xls, "業務委託").columns) == ["配布員", "種別", "数量", "単価", "合計"]
+    assert list(pd.read_excel(xls, "業務委託").columns) == ["支払日", "配布員", "種別", "数量", "単価", "合計"]
     assert list(pd.read_excel(xls, "雑費").columns) == ["配布員", "項目", "金額", "支払方法", "日付"]
 
 
