@@ -1454,10 +1454,18 @@ def test_inactive_shown_inline_and_reactivates(db):
 def test_trash_only_for_unused(db):
     # 未使用の配布員には🗑(削除)、使用中には出ない
     store.add_distributor("未使用さん", kind="業務委託", pay_type="歩合", db_path=db)
+
+    used_id = store.add_distributor("使用中さん", db_path=db)
+    store.add_contract_invoice(
+        used_id, "2026-07-17", "2026-07-01", "2026-07-31",
+        [{"report_qty": 10, "unit_price": 100}], db_path=db)
+    assert store.count_master_usage("distributor", used_id, db_path=db) > 0
+
     at = _run("05_マスタ管理.py")
     rid = [r["id"] for r in store.list_distributors(db_path=db) if r["name"] == "未使用さん"][0]
     keys = [b.key for b in at.button]
     assert f"del_distributor_{rid}_btn" in keys  # 未使用は🗑あり
+    assert f"del_distributor_{used_id}_btn" not in keys  # 使用中には🗑が出ない(過去データを守るため)
 
 
 def test_no_readonly_table_header(db):
