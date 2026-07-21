@@ -1473,3 +1473,40 @@ def test_no_readonly_table_header(db):
     at = _run("05_マスタ管理.py")
     text = _rendered_text(at)
     assert "停止中（" not in text  # 折りたたみの見出しが無い
+
+
+def test_bulk_delete_action_confirms_then_deletes():
+    def _page():
+        import streamlit as st
+        from common.ui import bulk_delete_action, apply_app_style
+        apply_app_style()
+        # 削除された id を session_state に記録（AppTest.from_function はクロージャ不可のため）
+        st.session_state.setdefault("_deleted", [])
+        bulk_delete_action(
+            [10, 20], delete_fn=lambda i: st.session_state["_deleted"].append(i),
+            section="t", key="bd")
+
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_function(_page).run()
+    # 最初は削除ボタンのみ・まだ消えていない
+    assert at.session_state["_deleted"] == []
+    at.button(key="bd_btn").click().run()          # 削除ボタン→確認待ち
+    assert at.session_state["_deleted"] == []      # 確認前は消えない
+    at.button(key="bd_ok").click().run()           # はい
+    assert at.session_state["_deleted"] == [10, 20]
+
+
+def test_bulk_delete_action_cancel_does_not_delete():
+    def _page():
+        import streamlit as st
+        from common.ui import bulk_delete_action, apply_app_style
+        apply_app_style()
+        st.session_state.setdefault("_deleted", [])
+        bulk_delete_action([10], delete_fn=lambda i: st.session_state["_deleted"].append(i),
+                           section="t", key="bd")
+
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_function(_page).run()
+    at.button(key="bd_btn").click().run()
+    at.button(key="bd_no").click().run()           # やめる
+    assert at.session_state["_deleted"] == []

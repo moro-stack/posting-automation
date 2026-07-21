@@ -441,6 +441,72 @@ def confirm_delete(*, key: str, detail: str, on_confirm, label: str = "削除",
         st.rerun()
 
 
+def checkbox_list_editor(disp_rows, *, key, select_col="選択"):
+    """一覧を『選択チェック列＋他列は読み取り専用』の data_editor で描画して返す。
+    disp_rows は list[dict] か DataFrame（表示用に整形済み・id列も含めておく）。"""
+    import pandas as pd
+
+    df = disp_rows if isinstance(disp_rows, pd.DataFrame) else pd.DataFrame(disp_rows)
+    if df.empty:
+        st.caption("表示できる行がありません。")
+        return df
+    other = [c for c in df.columns if c != select_col]
+    if select_col not in df.columns:
+        df = df.copy()
+        df.insert(0, select_col, False)
+    df = df[[select_col] + [c for c in df.columns if c != select_col]]
+    return st.data_editor(
+        df, hide_index=True, use_container_width=True,
+        column_config={select_col: st.column_config.CheckboxColumn(select_col, default=False)},
+        disabled=other, key=key)
+
+
+def selected_rows_excel_button(edited_df, *, key, filename, select_col="選択",
+                               label=None, container=None):
+    """選択された行だけを（選択列を除いて）Excel化する download_button。0件は無効。"""
+    from common import posting_logic
+    from common.excel_io import freeze_xlsx_bytes
+    import pandas as pd
+
+    rows = posting_logic.rows_for_excel(edited_df, select_col=select_col)
+    target = container if container is not None else st
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        pd.DataFrame(rows or [{}]).to_excel(w, index=False, sheet_name="選択した行")
+    target.download_button(
+        label or f"選択した行をExcelで保存（{len(rows)}件）",
+        data=freeze_xlsx_bytes(buf.getvalue()), file_name=f"{filename}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        icon=":material/download:", disabled=not rows, key=key,
+        use_container_width=True)
+
+
+def bulk_delete_action(selected_ids, *, delete_fn, section, key, noun="件", container=None):
+    """選択した行をまとめて削除する。確認を挟み、押した時点の選択idを固定してから消す。
+    ボタンだけ container(列)に置くと、確認UIは呼び出し位置＝全幅に出る。"""
+    pending = f"_bulkdel_pending_{key}"
+    ids = st.session_state.get(pending)
+    if ids:  # 確認待ち
+        st.warning(f"⚠️ 選択した{len(ids)}{noun}を削除しますか？")
+        c1, c2, _ = st.columns([1, 1, 4])
+        if c1.button("はい、削除する", type="primary", key=f"{key}_ok"):
+            for i in ids:
+                delete_fn(i)
+            st.session_state.pop(pending, None)
+            flash(f"{len(ids)}{noun}を削除しました", section)
+            st.rerun()
+        if c2.button("やめる", key=f"{key}_no"):
+            st.session_state.pop(pending, None)
+            st.rerun()
+        return
+    target = container if container is not None else st
+    if target.button(f"選択した行を削除（{len(selected_ids)}{noun}）",
+                     key=f"{key}_btn", disabled=not selected_ids,
+                     use_container_width=True):
+        st.session_state[pending] = list(selected_ids)
+        st.rerun()
+
+
 def page_header(title: str, subtitle: str = "", icon: str = ""):
     """統一感のあるページ見出し(任意)。"""
     prefix = f"{icon} " if icon else ""
