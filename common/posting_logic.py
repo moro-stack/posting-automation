@@ -212,3 +212,21 @@ def master_row_subtitle(master, row) -> str:
         parts = [p for p in [row.get("default_category"), row.get("default_original_status")] if p]
         return " / ".join(parts)
     return ""
+
+
+def selected_ids_from_editor(edited_df, *, id_col="No.", select_col="選択"):
+    """data_editor の編集結果から、選択された行の id を int のリストで返す。"""
+    ids = []
+    for _, row in edited_df.iterrows():
+        if row.get(select_col):
+            ids.append(int(row[id_col]))
+    return ids
+
+
+def rows_for_excel(edited_df, *, select_col="選択"):
+    """選択された行から選択列を除いた dict のリスト（選択行のExcel出力用）。"""
+    out = []
+    for _, row in edited_df.iterrows():
+        if row.get(select_col):
+            out.append({k: v for k, v in row.items() if k != select_col})
+    return out

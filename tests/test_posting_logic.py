@@ -339,3 +339,30 @@ def test_master_row_subtitle_vendor_empty():
 
 def test_master_row_subtitle_other_master():
     assert L.master_row_subtitle("project", {"name": "A社チラシ"}) == ""
+
+
+# ---- 選択行のid抽出・Excel用行 ----
+import pandas as pd
+
+
+def test_selected_ids_from_editor():
+    df = pd.DataFrame([
+        {"選択": True, "No.": 3, "金額": "¥1"},
+        {"選択": False, "No.": 2, "金額": "¥2"},
+        {"選択": True, "No.": 5, "金額": "¥3"},
+    ])
+    assert L.selected_ids_from_editor(df) == [3, 5]
+
+
+def test_selected_ids_empty_when_none_checked():
+    df = pd.DataFrame([{"選択": False, "No.": 1}])
+    assert L.selected_ids_from_editor(df) == []
+
+
+def test_rows_for_excel_drops_select_col():
+    df = pd.DataFrame([
+        {"選択": True, "No.": 3, "金額": "¥1"},
+        {"選択": False, "No.": 2, "金額": "¥2"},
+    ])
+    rows = L.rows_for_excel(df)
+    assert rows == [{"No.": 3, "金額": "¥1"}]
