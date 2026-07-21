@@ -804,7 +804,10 @@ def test_original_statuses_come_from_common(db):
     at = _payable_page(db)
     assert _sel(at, "原本区分").options == posting_logic.ORIGINAL_STATUSES
 
+    # 買掛先の「既定の原本区分」は新規登録ダイアログの中にある(Task 3で別窓化)ため、
+    # ダイアログを開いてから selectbox を見る。
     at5 = _run("05_マスタ管理.py")
+    at5.button(key="add_open_payables_vendor").click().run()
     opts = [s.options for s in at5.selectbox if s.label == "既定の原本区分"]
     assert opts and opts[0] == ["(なし)"] + posting_logic.ORIGINAL_STATUSES
 
@@ -1339,3 +1342,37 @@ def test_status_toggle_css_present():
     assert "mstatpulse" in _ui._STYLE
     assert "st-key-mstat-on-" in _ui._STYLE
     assert "st-key-mstat-off-" in _ui._STYLE
+
+
+# ============================================================ Task 3: 新規登録の別窓化
+def test_each_tab_has_new_register_button(db):
+    at = _run("05_マスタ管理.py")
+    labels = [b.label for b in at.button]
+    # 5タブぶんの「＋ 新規登録」ボタンが描画されている
+    assert sum(1 for L in labels if "新規登録" in L) >= 5
+
+
+def test_new_distributor_via_dialog(db):
+    """🟡 AppTestの制約に注意。st.dialog は内部で st.fragment を使っており、本物の
+    ブラウザでは「ダイアログ内のウィジェット操作＝そのダイアログだけの部分再実行」に
+    なるため、"if st.button(open): dialog_fn()" の外側ボタンを押し直さなくても
+    ダイアログは開いたままになる。しかしAppTestの .run() は常にフルスクリプトの
+    再実行であり、fragment単位の再実行を再現しない。そのため
+    「開くボタンを押す→.run()→中の入力欄をset_value()→.run()」のように
+    開くボタンを押していない状態でrunすると、外側のif文が再びFalseになって
+    dialog_fn() が呼ばれず、ダイアログの中身（追加ボタンごと）が消えてしまう
+    （実際に確認済み。ページの実装・本番動作には問題無い＝これはテストハーネス側の
+    制約）。そのため、氏名の入力と「追加」ボタンのクリックは、開くボタンを
+    もう一度クリックしたのと同じ1回の .run() にまとめて送る。"""
+    at = _run("05_マスタ管理.py")
+    # 業務委託タブの新規登録を開く
+    at.button(key="add_open_distributor").click().run()
+    # ダイアログ内の氏名を入れる（この時点ではまだ送信しない）
+    at.text_input(key="add_name_distributor").set_value("テスト太郎")
+    # 開くボタンを再度「押した」ことにして、氏名入力・追加クリックと同じ1回の
+    # 再実行でダイアログを再度呼び出す（フラグメント単位の再実行が無いための代替）。
+    at.button(key="add_open_distributor").click()
+    at.button(key="add_submit_distributor").click()
+    at.run()
+    names = [r["name"] for r in store.list_distributors(db_path=db)]
+    assert "テスト太郎" in names

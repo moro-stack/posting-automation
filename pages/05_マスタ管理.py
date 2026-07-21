@@ -192,18 +192,70 @@ def _rows_ui(master, rows, *, update_fn, label_name, fields_fn):
                 fields_fn=fields_fn)
 
 
-def _simple_master(label, master, list_fn, add_fn, update_fn):
-    show_flash(master)
-    active, inactive = _split_active(list_fn())
-    _rows_ui(master, active, update_fn=update_fn, label_name=label,
-             fields_fn=_name_fields(master, label))
-    _inactive_ui(master, inactive, update_fn=update_fn)
-    with st.form(f"add_{label}", clear_on_submit=True):
-        name = st.text_input(f"{label}名を追加")
-        if st.form_submit_button("追加") and name.strip():
+@st.dialog("新規登録")
+def _add_simple_dialog(label, master, add_fn):
+    name = st.text_input(f"{label}名", key=f"add_name_{master}")
+    c1, c2 = st.columns(2)
+    if c1.button("追加", key=f"add_submit_{master}", type="primary"):
+        if name.strip():
             add_fn(name.strip())
             flash(f"{label}を追加しました", master)
             st.rerun()
+    if c2.button("やめる", key=f"add_cancel_{master}"):
+        st.rerun()
+
+
+@st.dialog("買掛先を新規登録")
+def _add_vendor_dialog():
+    master = "payables_vendor"
+    n = st.text_input("取引先名", key="add_name_payables_vendor")
+    c = st.text_input("既定の費目（家賃・電気 など）", key="add_cat_payables_vendor")
+    o = st.selectbox("既定の原本区分", ["(なし)"] + _ORIGINAL_STATUSES, key="add_orig_payables_vendor")
+    c1, c2 = st.columns(2)
+    if c1.button("追加", key="add_submit_payables_vendor", type="primary"):
+        if n.strip():
+            store.add_payables_vendor(n.strip(), default_category=(c.strip() or None),
+                                      default_original_status=(None if o == "(なし)" else o))
+            flash("買掛先を追加しました", master)
+            st.rerun()
+    if c2.button("やめる", key="add_cancel_payables_vendor"):
+        st.rerun()
+
+
+@st.dialog("業務委託を新規登録")
+def _add_distributor_dialog():
+    master = "distributor"
+    n = st.text_input("配布員 氏名", key="add_name_distributor")
+    kind = st.selectbox("区分（雇用形態）", _KINDS, key="add_kind_distributor")
+    pay_type = st.selectbox("支払形態（報酬の計算方法）", _PAY_TYPES, key="add_pay_distributor")
+    bank = st.text_area("振込先", key="add_bank_distributor",
+                        placeholder="例：三井住友銀行 梅田支店 普通 1234567 ヤマダ タロウ")
+    h1, h2 = st.columns(2)
+    hourly = h1.number_input("時給額", min_value=0, step=1, key="add_hourly_distributor")
+    monthly = h2.number_input("月額", min_value=0, step=1, key="add_monthly_distributor")
+    st.caption("時給額は支払形態が「時給」、月額は「月給」のときだけ使います。"
+               "日当の金額は登録後、その人の「編集」から設定できます。")
+    c1, c2 = st.columns(2)
+    if c1.button("追加", key="add_submit_distributor", type="primary"):
+        if n.strip():
+            store.add_distributor(n.strip(), kind=kind, pay_type=pay_type,
+                                  bank_info=(bank.strip() or None),
+                                  hourly_rate=(int(hourly) or None),
+                                  monthly_rate=(int(monthly) or None))
+            flash("業務委託を追加しました", master)
+            st.rerun()
+    if c2.button("やめる", key="add_cancel_distributor"):
+        st.rerun()
+
+
+def _simple_master(label, master, list_fn, add_fn, update_fn):
+    show_flash(master)
+    if st.button("＋ 新規登録", key=f"add_open_{master}"):
+        _add_simple_dialog(label, master, add_fn)
+    active, inactive = _split_active(list_fn())
+    _rows_ui(master, active, update_fn=update_fn, label_name=label,
+             fields_fn=_name_fields(master, label))
+    _inactive_ui(master, inactive, update_fn=update_fn)   # ← Task 5 で廃止
 
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(
@@ -219,6 +271,8 @@ with tab2:
 with tab3:
     master = "payables_vendor"
     show_flash(master)
+    if st.button("＋ 新規登録", key="add_open_payables_vendor"):
+        _add_vendor_dialog()
     active, inactive = _split_active(store.list_payables_vendors())
     disp = [{"取引先": r["name"], "既定の費目": r.get("default_category") or "",
              "既定の原本区分": r.get("default_original_status") or ""} for r in active]
@@ -228,16 +282,6 @@ with tab3:
         _row_ui(master, r, update_fn=store.update_payables_vendor,
                 label_name="買掛先", fields_fn=_vendor_fields)
     _inactive_ui(master, inactive, update_fn=store.update_payables_vendor)
-    with st.form("add_vendor", clear_on_submit=True):
-        n = st.text_input("取引先名")
-        c = st.text_input("既定の費目（家賃・電気 など）")
-        o = st.selectbox("既定の原本区分", ["(なし)"] + _ORIGINAL_STATUSES)
-        if st.form_submit_button("追加") and n.strip():
-            store.add_payables_vendor(
-                n.strip(), default_category=(c.strip() or None),
-                default_original_status=(None if o == "(なし)" else o))
-            flash("買掛先を追加しました", master)
-            st.rerun()
 
 with tab4:
     _simple_master("売掛先", "receivables_client", store.list_receivables_clients,
@@ -246,6 +290,8 @@ with tab4:
 with tab5:
     master = "distributor"
     show_flash(master)
+    if st.button("＋ 新規登録", key="add_open_distributor"):
+        _add_distributor_dialog()
     active, inactive = _split_active(store.list_distributors())
     disp = [{"配布員 氏名": r["name"], "区分": r.get("kind") or "",
              "支払形態": r.get("pay_type") or "",
@@ -256,24 +302,6 @@ with tab5:
         _row_ui(master, r, update_fn=store.update_distributor,
                 label_name="業務委託", fields_fn=_distributor_fields)
     _inactive_ui(master, inactive, update_fn=store.update_distributor)
-
-    with st.form("add_dist", clear_on_submit=True):
-        n = st.text_input("配布員 氏名")
-        kind = st.selectbox("区分（雇用形態）", _KINDS)
-        pay_type = st.selectbox("支払形態（報酬の計算方法）", _PAY_TYPES)
-        bank = st.text_area("振込先", placeholder="例：三井住友銀行 梅田支店 普通 1234567 ヤマダ タロウ")
-        h1, h2 = st.columns(2)
-        hourly = h1.number_input("時給額", min_value=0, step=1)
-        monthly = h2.number_input("月額", min_value=0, step=1)
-        st.caption("時給額は支払形態が「時給」のとき、月額は「月給」のときだけ使います。"
-                   "日当の金額は、登録した後に下の「日当金額の設定」で入れてください。")
-        if st.form_submit_button("追加") and n.strip():
-            store.add_distributor(n.strip(), kind=kind, pay_type=pay_type,
-                                  bank_info=(bank.strip() or None),
-                                  hourly_rate=(int(hourly) or None),
-                                  monthly_rate=(int(monthly) or None))
-            flash("業務委託を追加しました", master)
-            st.rerun()
 
     # --- 日当金額の設定（支払形態=日当の人だけ）---
     # st.form の中では「日当を選んだ瞬間に表を出す」ができない(Streamlitの仕様)ため、
