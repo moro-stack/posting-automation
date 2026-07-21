@@ -18,6 +18,7 @@ def _bootstrap_db():
 _bootstrap_db()
 
 pages = [
+    st.Page("pages/06_原価・売上まとめ.py", title="原価・売上まとめ", icon=":material/summarize:"),
     st.Page("pages/03_号別明細.py", title="号別明細", icon=":material/table_chart:", default=True),
     st.Page("pages/01_経費・買掛・売掛.py", title="小口・買掛・売掛", icon=":material/receipt_long:"),
     st.Page("pages/02_業務委託登録.py", title="業務委託登録", icon=":material/description:"),
