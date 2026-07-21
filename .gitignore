@@ -6,6 +6,7 @@ data/
 # 秘密情報
 .env
 *.log
+.streamlit/secrets.toml
 
 # Python
 __pycache__/
