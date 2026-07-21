@@ -1,7 +1,17 @@
+import os
+import time
 import streamlit as st
 
 from common import posting_store as store
+from common import auth
 from common.ui import apply_app_style
+
+# Streamlit Cloud の secrets を環境変数へ橋渡し(既存の os.environ ベースのコードがそのまま動く)
+try:
+    for _k, _v in st.secrets.items():
+        os.environ.setdefault(_k, str(_v))
+except Exception:  # secrets 未設定でも落ちない
+    pass
 
 st.set_page_config(page_title="配布コスト管理", page_icon="📮", layout="wide")
 apply_app_style()
@@ -11,11 +21,34 @@ apply_app_style()
 def _bootstrap_db():
     store.sync_from_remote()
     store.init_db()
-    store.seed_masters()
+    if os.environ.get("DEMO_MODE"):
+        from common import demo_seed
+        demo_seed.seed_demo_if_empty()   # 架空データ(実名presetは入れない)
+    else:
+        store.seed_masters()
     return True
 
 
 _bootstrap_db()
+
+
+def _render_login():
+    st.markdown("## 📮 配布コスト管理")
+    st.caption("共有パスワードを入力してください。")
+    if auth.is_locked_out(st.session_state, time.time()):
+        st.error("試行が続いたため一時的にロックしています。30秒ほど待って再度お試しください。")
+    st.text_input("パスワード", type="password", key="login_pw")
+    if st.button("ログイン", type="primary"):
+        if not auth.is_locked_out(st.session_state, time.time()) and \
+                auth.attempt_login(st.session_state.get("login_pw", ""), st.session_state, time.time()):
+            st.rerun()
+        else:
+            st.error("パスワードが違います。")
+
+
+if os.environ.get("APP_PASSWORD") and not auth.is_authenticated(st.session_state):
+    _render_login()
+    st.stop()
 
 pages = [
     st.Page("pages/06_原価・売上まとめ.py", title="原価・売上まとめ", icon=":material/summarize:"),
