@@ -77,51 +77,49 @@ def _inactive_ui(master, inactive, *, update_fn):
                 st.rerun()
 
 
-def _edit_slot(master):
-    """そのタブで「今どの行を編集中か」を覚えておく場所(行idを入れる)。
-    開くのは常に1行だけ＝一覧が縦に伸びず、どこを直しているのか迷わない。"""
-    return f"_edit_row_{master}"
+@st.dialog("編集")
+def _edit_dialog(master, row, *, update_fn, fields_fn, with_daily=False):
+    """編集ボタン→別窓(st.dialog)でその行の項目を直す。
 
-
-def _open_edit(master, row_id):
-    st.session_state[_edit_slot(master)] = row_id
-
-
-def _close_edit(master):
-    st.session_state.pop(_edit_slot(master), None)
-
-
-def _edit_ui(master, row, *, update_fn, fields_fn, button_container=None):
-    """編集ボタン→その行の項目を直せるフォーム。confirm_delete と同じ考え方で、
-    ボタンだけを button_container(行の右端の狭い列)に置き、フォームは呼び出した場所
-    ＝全幅に出す(狭い列に押し込むと画面幅3%に潰れて読めないため)。
+    st.form は使わず素のウィジェット＋「更新／やめる」ボタン(st.data_editor を
+    form 内に入れる不確実性を避けるため)。業務委託で支払形態＝日当のときだけ、
+    同じ窓に業務名×金額の日当金額の設定を出し、更新時に replace_daily_rates で保存する。
 
     fields_fn(row) が入力欄を描き、update_fn に渡す kwargs の dict を返す。
-    開く・閉じるは on_click のコールバックで行う。コールバックはスクリプト本体より先に
-    走るため、押したその実行で対象行が切り替わる(st.rerun が要らない)。
 
     ⚠️ fields_fn の中のウィジェット key には必ず行idを入れること。固定keyだと
     Streamlit が session_state を保持し、編集する行を切り替えても前の行に入力した値が
     残ったまま描画され、更新時に別の行へ誤って書き込む(2026-07-14に実際に起きた事故)。
     """
-    target = button_container if button_container is not None else st
-    target.button("編集", key=f"edit_{master}_{row['id']}",
-                  on_click=_open_edit, args=(master, row["id"]))
-    if st.session_state.get(_edit_slot(master)) != row["id"]:
-        return
     st.markdown(f"**「{row['name']}」を編集**")
-    with st.form(f"edit_form_{master}_{row['id']}"):
-        kwargs = fields_fn(row)
-        c1, c2, _ = st.columns([1, 1, 4])
-        ok = c1.form_submit_button("更新")
-        c2.form_submit_button("やめる", on_click=_close_edit, args=(master,))
-        if ok and str(kwargs.get("name") or "").strip():
+    kwargs = fields_fn(row)   # 素のウィジェット。key に行idを含む(既存 _*_fields のまま)
+    edited_rates = None
+    if with_daily and kwargs.get("pay_type") == "日当":
+        st.markdown("**日当金額の設定**")
+        rates = store.list_daily_rates(row["id"])
+        base = pd.DataFrame(
+            [{"業務名": r["work_name"], "金額": int(r["amount"])} for r in rates]
+            or [{"業務名": "", "金額": 0}])
+        edited_rates = st.data_editor(
+            base, num_rows="dynamic", use_container_width=True,
+            column_config={"金額": st.column_config.NumberColumn(min_value=0, step=1,
+                                                                format="localized")},
+            key=f"edit_rates_{row['id']}")
+        st.caption("ここで登録した業務名と金額が、業務委託登録の明細で選べるようになります。")
+    c1, c2 = st.columns(2)
+    if c1.button("更新", key=f"edit_submit_{master}_{row['id']}", type="primary"):
+        if str(kwargs.get("name") or "").strip():
             update_fn(row["id"], **kwargs)
-            _close_edit(master)
+            if edited_rates is not None:
+                store.replace_daily_rates(row["id"], [
+                    {"work_name": str(r["業務名"]), "amount": int(r["金額"] or 0)}
+                    for _, r in edited_rates.iterrows() if str(r["業務名"] or "").strip()])
             # section(=master)を付けないと、最初に描画される案件タブの show_flash() が
             # メッセージを奪い、操作したタブには何も出ない。
             flash("更新しました", master)
             st.rerun()
+    if c2.button("やめる", key=f"edit_cancel_{master}_{row['id']}"):
+        st.rerun()
 
 
 def _name_fields(master, label_name):
@@ -173,12 +171,13 @@ def _distributor_fields(row):
             "monthly_rate": (int(monthly) or None)}
 
 
-def _row_ui(master, row, *, update_fn, label_name, fields_fn):
+def _row_ui(master, row, *, update_fn, label_name, fields_fn, with_daily=False):
     """有効な行1つ。右端に編集・削除(or 停止中)ボタンを置く。
-    編集フォーム・確認UIは列の外＝全幅に出す(狭い列に押し込むと読めないため)。"""
+    編集は別窓(st.dialog)、確認UIは列の外＝全幅に出す(狭い列に押し込むと読めないため)。"""
     c1, c2, c3 = st.columns([4, 1, 1])
     c1.write(row["name"])
-    _edit_ui(master, row, update_fn=update_fn, fields_fn=fields_fn, button_container=c2)
+    if c2.button("編集", key=f"edit_{master}_{row['id']}"):
+        _edit_dialog(master, row, update_fn=update_fn, fields_fn=fields_fn, with_daily=with_daily)
     _remove_ui(master, row, label_name=label_name, update_fn=update_fn,
                button_container=c3)
 
@@ -300,34 +299,5 @@ with tab5:
     nice_table(disp, "業務委託はまだ登録されていません。")
     for r in active:
         _row_ui(master, r, update_fn=store.update_distributor,
-                label_name="業務委託", fields_fn=_distributor_fields)
+                label_name="業務委託", fields_fn=_distributor_fields, with_daily=True)
     _inactive_ui(master, inactive, update_fn=store.update_distributor)
-
-    # --- 日当金額の設定（支払形態=日当の人だけ）---
-    # st.form の中では「日当を選んだ瞬間に表を出す」ができない(Streamlitの仕様)ため、
-    # 登録フォームとは別のセクションに置く。
-    st.divider()
-    st.markdown("**日当金額の設定**")
-    nichito = [r for r in active if r.get("pay_type") == "日当"]
-    if not nichito:
-        st.caption("支払形態が「日当」の業務委託がいません。上で登録してください。")
-    else:
-        name2id = {r["name"]: r["id"] for r in nichito}
-        pick = st.selectbox("配布員", list(name2id.keys()), key="rate_pick")
-        did = name2id[pick]
-        rates = store.list_daily_rates(did)
-        base = pd.DataFrame(
-            [{"業務名": r["work_name"], "金額": int(r["amount"])} for r in rates]
-            or [{"業務名": "", "金額": 0}])
-        edited = st.data_editor(
-            base, num_rows="dynamic", use_container_width=True,
-            column_config={"金額": st.column_config.NumberColumn(min_value=0, step=1,
-                                                                format="localized")},
-            key=f"rate_editor_{did}")
-        st.caption("ここで登録した業務名と金額が、業務委託登録の明細で選べるようになります。")
-        if st.button("日当金額を保存", key="rate_save"):
-            store.replace_daily_rates(did, [
-                {"work_name": str(r["業務名"]), "amount": int(r["金額"] or 0)}
-                for _, r in edited.iterrows() if str(r["業務名"] or "").strip()])
-            flash("日当金額を保存しました", master)
-            st.rerun()

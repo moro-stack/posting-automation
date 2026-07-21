@@ -122,18 +122,38 @@ _MASTER_PAGE = "05_マスタ管理.py"
 
 
 def _edit_widget(seq, prefix):
-    """開いている編集フォームの入力欄を、ウィジェットkeyの先頭一致で取る。
+    """開いている編集ダイアログの入力欄を、ウィジェットkeyの先頭一致で取る。
     行idまでは指定しない＝固定キーへの退行後も同じように取れるので、テストの判定は
     「DBの中身がどうなったか」だけに依存する(keyの形を変えただけでは通ってしまわない)。
     登録フォーム側の同名ラベル(振込先・時給額など)は key を持たないので混ざらない。"""
     hits = [w for w in seq if (w.key or "").startswith(prefix)]
-    assert len(hits) == 1, f"{prefix}: {len(hits)}件(編集フォームは1つだけ開くはず)"
+    assert len(hits) == 1, f"{prefix}: {len(hits)}件(編集ダイアログは1つだけ開くはず)"
     return hits[0]
 
 
-def _submit_edit(at):
-    """開いている編集フォームの「更新」を押す。"""
-    [b for b in at.button if b.label == "更新"][0].click().run()
+def _submit_edit(at, open_key):
+    """開いている編集ダイアログの「更新」を押す。
+
+    🟡 AppTestの制約に注意(test_new_distributor_via_dialog と同じ理由)。st.dialog は
+    内部で st.fragment を使っており、本物のブラウザでは「ダイアログ内のウィジェット操作
+    ＝そのダイアログだけの部分再実行」になるため、開くボタン(`if st.button(...): dialog()`)
+    を押し直さなくてもダイアログは開いたままになる。しかしAppTestの .run() は常にフル
+    スクリプトの再実行であり、fragment単位の再実行を再現しないため、開くボタンを
+    再クリックしないまま .run() すると外側の if が再び False になってダイアログの中身
+    (「更新」ボタンごと)が消えてしまう(実際に確認済み)。そのため、フィールドの変更・
+    「更新」クリックは、開くボタンをもう一度「押した」ことにしたのと同じ1回の .run() に
+    まとめて送る(ページの実装・本番動作には問題無い＝これはテストハーネス側の制約)。"""
+    at.button(key=open_key).click()
+    [b for b in at.button if b.label == "更新"][0].click()
+    at.run()
+
+
+def _cancel_edit(at, open_key):
+    """開いている編集ダイアログの「やめる」を押す。_submit_edit と同じ理由で、開くボタンの
+    再クリックと同じ1回の .run() にまとめて送る。"""
+    at.button(key=open_key).click()
+    [b for b in at.button if b.label == "やめる"][0].click()
+    at.run()
 
 
 def test_master_page_edit_distributor_updates_all_fields(db):
@@ -151,7 +171,7 @@ def test_master_page_edit_distributor_updates_all_fields(db):
     _edit_widget(at.text_area, "edit_bank_distributor").set_value("三井住友 2222222")
     _edit_widget(at.number_input, "edit_hourly_distributor").set_value(1500)
     _edit_widget(at.number_input, "edit_monthly_distributor").set_value(250000)
-    _submit_edit(at)
+    _submit_edit(at, f"edit_distributor_{did}")
 
     assert not at.exception
     row = {r["id"]: r for r in store.list_distributors(db_path=db)}[did]
@@ -178,7 +198,7 @@ def test_master_page_edit_payables_vendor_updates_fields(db):
     _edit_widget(at.text_input, "edit_cat_payables_vendor").set_value("電気")
     _edit_widget(at.selectbox, "edit_orig_payables_vendor").set_value(
         posting_logic.ORIGINAL_STATUSES[-1])
-    _submit_edit(at)
+    _submit_edit(at, f"edit_payables_vendor_{vid}")
 
     assert not at.exception
     row = {r["id"]: r for r in store.list_payables_vendors(db_path=db)}[vid]
@@ -192,7 +212,7 @@ def test_master_page_edit_project_updates_name(db):
     at = _run(_MASTER_PAGE)
     at.button(key=f"edit_project_{pid}").click().run()
     _edit_widget(at.text_input, "edit_name_project").set_value("案件A改")
-    _submit_edit(at)
+    _submit_edit(at, f"edit_project_{pid}")
 
     assert not at.exception
     assert {r["id"]: r for r in store.list_projects(db_path=db)}[pid]["name"] == "案件A改"
@@ -235,7 +255,7 @@ def test_master_page_edit_updates_only_the_target_row(db):
     #    (振込先・月額・区分・支払形態には触らない)
     at.button(key=f"edit_distributor_{b}").click().run()
     _edit_widget(at.text_input, "edit_name_distributor").set_value("佐藤花")
-    _submit_edit(at)
+    _submit_edit(at, f"edit_distributor_{b}")
     assert not at.exception
 
     rows = {r["id"]: r for r in store.list_distributors(db_path=db)}
@@ -262,7 +282,7 @@ def test_master_page_edit_announces_in_the_tab_that_was_operated(db):
     at = _run(_MASTER_PAGE)
     at.button(key=f"edit_distributor_{did}").click().run()
     _edit_widget(at.text_input, "edit_name_distributor").set_value("山田太郎改")
-    _submit_edit(at)
+    _submit_edit(at, f"edit_distributor_{did}")
 
     assert not at.exception
     labels = [t.label for t in at.tabs]
@@ -271,19 +291,21 @@ def test_master_page_edit_announces_in_the_tab_that_was_operated(db):
 
 
 def test_master_page_edit_closes_the_form_after_updating(db):
-    """更新したら編集フォームは閉じること(開きっぱなしだと、直した後もフォームが残って
-    「まだ保存できていないのか」と迷う。編集中の行は _edit_row_<master> で覚えている)。
-    ※ st.rerun をまたぐと AppTest の要素ツリーに前の実行の残骸が残るため、
-      「閉じたこと」は画面ではなく session_state で見る。"""
+    """更新したら編集ダイアログは閉じること(開きっぱなしだと、直した後もダイアログが残って
+    「まだ保存できていないのか」と迷う)。
+    ※ st.rerun をまたぐと AppTest の要素ツリーに前の実行の残骸(閉じたダイアログの
+      ウィジェット)が残ることがある(既知のAppTestの制約。要素は残るが中身は
+      session_state から既に消えている)ため、「閉じたこと」は画面ではなく
+      session_state にそのウィジェットkeyが無いことで見る。"""
     did = store.add_distributor("山田太郎", db_path=db)
     at = _run(_MASTER_PAGE)
     at.button(key=f"edit_distributor_{did}").click().run()
-    assert at.session_state["_edit_row_distributor"] == did
+    assert f"edit_name_distributor_{did}" in at.session_state
     _edit_widget(at.text_input, "edit_name_distributor").set_value("山田太郎改")
-    _submit_edit(at)
+    _submit_edit(at, f"edit_distributor_{did}")
 
     assert not at.exception
-    assert "_edit_row_distributor" not in at.session_state
+    assert f"edit_name_distributor_{did}" not in at.session_state
 
 
 def test_master_page_edit_form_is_not_shown_until_button_is_pressed(db):
@@ -295,17 +317,19 @@ def test_master_page_edit_form_is_not_shown_until_button_is_pressed(db):
 
 
 def test_master_page_edit_cancel_does_not_update(db):
-    """「やめる」で閉じるだけ。入力した値はDBに入らない。"""
+    """「やめる」で閉じるだけ。入力した値はDBに入らない。
+    ※ 閉じたことの見方は test_master_page_edit_closes_the_form_after_updating と同じ理由で
+    session_state にウィジェットkeyが無いことで見る(要素ツリーはAppTestの制約で残骸が残る)。"""
     did = store.add_distributor("山田太郎", db_path=db)
     at = _run(_MASTER_PAGE)
     at.button(key=f"edit_distributor_{did}").click().run()
     _edit_widget(at.text_input, "edit_name_distributor").set_value("押し間違え")
-    [b for b in at.button if b.label == "やめる"][0].click().run()
+    _cancel_edit(at, f"edit_distributor_{did}")
 
     assert not at.exception
     assert {r["id"]: r for r in store.list_distributors(db_path=db)}[did]["name"] == "山田太郎"
     # 閉じているのでフォームは消えている
-    assert not [w for w in at.text_input if (w.key or "").startswith("edit_name_distributor")]
+    assert f"edit_name_distributor_{did}" not in at.session_state
 
 
 def test_master_page_edit_vendor_name_only_keeps_other_fields(db):
@@ -320,7 +344,7 @@ def test_master_page_edit_vendor_name_only_keeps_other_fields(db):
     at = _run(_MASTER_PAGE)
     at.button(key=f"edit_payables_vendor_{vid}").click().run()
     _edit_widget(at.text_input, "edit_name_payables_vendor").set_value("ABC商事株式会社")
-    _submit_edit(at)
+    _submit_edit(at, f"edit_payables_vendor_{vid}")
 
     assert not at.exception
     row = {r["id"]: r for r in store.list_payables_vendors(db_path=db)}[vid]
@@ -340,7 +364,7 @@ def test_master_page_edit_vendor_can_clear_original_status(db):
     at = _run(_MASTER_PAGE)
     at.button(key=f"edit_payables_vendor_{vid}").click().run()
     _edit_widget(at.selectbox, "edit_orig_payables_vendor").set_value("(なし)")
-    _submit_edit(at)
+    _submit_edit(at, f"edit_payables_vendor_{vid}")
 
     assert not at.exception
     row = {r["id"]: r for r in store.list_payables_vendors(db_path=db)}[vid]
@@ -354,7 +378,7 @@ def test_master_page_edit_strips_whitespace_from_name(db):
     at = _run(_MASTER_PAGE)
     at.button(key=f"edit_project_{pid}").click().run()
     _edit_widget(at.text_input, "edit_name_project").set_value("  新しい名前  ")
-    _submit_edit(at)
+    _submit_edit(at, f"edit_project_{pid}")
 
     assert not at.exception
     row = {r["id"]: r for r in store.list_projects(db_path=db)}[pid]
@@ -370,7 +394,7 @@ def test_master_page_edit_vendor_can_clear_default_category(db):
     at = _run(_MASTER_PAGE)
     at.button(key=f"edit_payables_vendor_{vid}").click().run()
     _edit_widget(at.text_input, "edit_cat_payables_vendor").set_value("   ")
-    _submit_edit(at)
+    _submit_edit(at, f"edit_payables_vendor_{vid}")
 
     assert not at.exception
     row = {r["id"]: r for r in store.list_payables_vendors(db_path=db)}[vid]
@@ -384,7 +408,7 @@ def test_master_page_edit_ignores_empty_name(db):
     at = _run(_MASTER_PAGE)
     at.button(key=f"edit_distributor_{did}").click().run()
     _edit_widget(at.text_input, "edit_name_distributor").set_value("   ")
-    _submit_edit(at)
+    _submit_edit(at, f"edit_distributor_{did}")
 
     assert not at.exception
     assert {r["id"]: r for r in store.list_distributors(db_path=db)}[did]["name"] == "山田太郎"
@@ -1376,3 +1400,31 @@ def test_new_distributor_via_dialog(db):
     at.run()
     names = [r["name"] for r in store.list_distributors(db_path=db)]
     assert "テスト太郎" in names
+
+
+def test_edit_distributor_via_dialog(db):
+    """🟡 AppTestの制約に注意(_submit_edit と同じ理由)。st.dialog は内部で st.fragment を
+    使っており、本物のブラウザでは「ダイアログ内のウィジェット操作＝そのダイアログだけの
+    部分再実行」になるため、開くボタンを押し直さなくてもダイアログは開いたままになる。
+    しかしAppTestの .run() は常にフルスクリプトの再実行であり、fragment単位の再実行を
+    再現しないため、氏名の入力と「更新」クリックは、開くボタンをもう一度「押した」ことに
+    したのと同じ1回の .run() にまとめて送る(ページの実装・本番動作には問題無い＝これは
+    テストハーネス側の制約。test_new_distributor_via_dialog と同じパターン)。"""
+    store.add_distributor("編集前", kind="業務委託", pay_type="歩合", db_path=db)
+    at = _run("05_マスタ管理.py")
+    rid = [r["id"] for r in store.list_distributors(db_path=db) if r["name"] == "編集前"][0]
+    at.button(key=f"edit_distributor_{rid}").click().run()
+    at.text_input(key=f"edit_name_distributor_{rid}").set_value("編集後")
+    at.button(key=f"edit_distributor_{rid}").click()
+    at.button(key=f"edit_submit_distributor_{rid}").click()
+    at.run()
+    names = [r["name"] for r in store.list_distributors(db_path=db)]
+    assert "編集後" in names and "編集前" not in names
+
+
+def test_no_bottom_daily_section_label(db):
+    # 日当金額の設定は編集窓に移り、ページ下部の独立セクションは無い
+    store.add_distributor("日当さん", kind="業務委託", pay_type="日当", db_path=db)
+    at = _run("05_マスタ管理.py")
+    text = _rendered_text(at)
+    assert "日当金額の設定" not in text
