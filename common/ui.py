@@ -417,7 +417,7 @@ def confirm_delete(*, key: str, detail: str, on_confirm, label: str = "削除",
     success  : 実行後に出すメッセージ
     section  : flash(success) の宛先(タブ毎に分けたいとき。show_flash(section) と対で使う)
     button_container: 削除ボタンだけを描画する場所(st.columns の列など)。
-      渡すと、確認UI(警告文・詳細・はい/やめる)は呼び出した場所にそのまま出るので、
+      渡すと、確認UI(警告文・詳細・はい/いいえ)は呼び出した場所にそのまま出るので、
       行の右端の狭い列にボタンを置きつつ確認は全幅で出せる。省略時は全部その場に描画。
     """
     pending = f"_del_pending_{key}"

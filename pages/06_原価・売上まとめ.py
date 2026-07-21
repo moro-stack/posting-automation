@@ -4,7 +4,6 @@ import streamlit as st
 
 from common import posting_logic
 from common import posting_store as store
-from common.excel_io import freeze_xlsx_bytes
 from common.ui import apply_app_style, section_export, nice_table, period_picker, show_flash
 
 apply_app_style()
