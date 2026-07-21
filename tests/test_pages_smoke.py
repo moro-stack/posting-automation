@@ -1192,6 +1192,8 @@ def test_contract_registration_houbai_does_not_send_copies(db):
 
 
 def test_contract_list_deletes_the_right_row(db):
+    """一覧は発行日の新しい順。a(07-17)が0行目、b(07-16)が1行目に来るので、
+    1行目だけ選択してbだけが消えることを確かめる。"""
     _, pid, a = _seed_invoice(db, pay_type="歩合", name="A太郎")
     did_b = store.add_distributor("B太郎", pay_type="歩合", db_path=db)
     b = store.add_contract_invoice(did_b, "2026-07-16", "2026-07-01", "2026-07-15",
@@ -1199,11 +1201,13 @@ def test_contract_list_deletes_the_right_row(db):
                                      "remark": "配布"}], db_path=db)
     at = _run(_CONTRACT_PAGE)
     keys = {btn.key for btn in at.button}
-    assert f"del_inv_{a}_btn" in keys
-    assert f"del_inv_{b}_btn" in keys
+    assert not any(k and k.startswith("del_inv_") for k in keys)  # 行ごと削除は無い
+    assert "invoice_bulk_del_btn" in keys
 
-    at.button(key=f"del_inv_{b}_btn").click().run()
-    at.button(key=f"del_inv_{b}_ok").click().run()
+    at.session_state["contract_list_editor"] = {
+        "edited_rows": {1: {"選択": True}}, "added_rows": [], "deleted_rows": []}
+    at.button(key="invoice_bulk_del_btn").click().run()
+    at.button(key="invoice_bulk_del_ok").click().run()
 
     assert not at.exception
     assert [i["id"] for i in store.list_contract_invoices(db_path=db)] == [a]
@@ -1213,12 +1217,15 @@ def test_contract_delete_announces_in_the_list_tab(db):
     """削除のアナウンスは一覧タブに出て、先に描画される登録タブに奪われないこと。"""
     _, _, iid = _seed_invoice(db, pay_type="歩合")
     at = _run(_CONTRACT_PAGE)
-    at.button(key=f"del_inv_{iid}_btn").click().run()
-    at.button(key=f"del_inv_{iid}_ok").click().run()
+    at.session_state["contract_list_editor"] = {
+        "edited_rows": {0: {"選択": True}}, "added_rows": [], "deleted_rows": []}
+    at.button(key="invoice_bulk_del_btn").click().run()
+    at.button(key="invoice_bulk_del_ok").click().run()
 
     assert not at.exception
-    assert [s.value for s in at.tabs[1].success] == ["削除しました"]
+    assert [s.value for s in at.tabs[1].success] == ["1件を削除しました"]
     assert [s.value for s in at.tabs[0].success] == []
+    assert [i["id"] for i in store.list_contract_invoices(db_path=db)] == []
 
 
 # ============================================================ Task 14: 号別明細
@@ -1580,3 +1587,34 @@ def test_bulk_delete_action_cancel_does_not_delete():
     at.button(key="bd_btn").click().run()
     at.button(key="bd_no").click().run()           # やめる
     assert at.session_state["_deleted"] == []
+
+
+def _seed_contract(db):
+    did = store.add_distributor("配布太郎", kind="業務委託", pay_type="歩合", db_path=db)
+    pid = store.add_project("A社チラシ", db_path=db)
+    for d in ("2026-07-01", "2026-07-02"):
+        store.add_contract_invoice(did, d, d, d,
+            [{"project_id": pid, "report_qty": 1, "unit_price": 100,
+              "remark": "配布", "other_label": None, "copies": None}],
+            pay_type="歩合", db_path=db)
+    return [i["id"] for i in store.list_contract_invoices(db_path=db)]
+
+
+def test_contract_per_row_delete_gone(db):
+    _seed_contract(db)
+    at = AppTest.from_file(os.path.join(ROOT, "pages", "02_業務委託登録.py"), default_timeout=30)
+    at.run()
+    keys = [b.key for b in at.button]
+    assert not any(k and k.startswith("del_inv_") for k in keys)   # 行ごと削除は無い
+    assert "invoice_bulk_del_btn" in keys                          # 選択削除がある
+
+
+def test_contract_bulk_delete_removes_selected(db):
+    _seed_contract(db)
+    at = AppTest.from_file(os.path.join(ROOT, "pages", "02_業務委託登録.py"), default_timeout=30)
+    at.run()
+    at.session_state["contract_list_editor"] = {
+        "edited_rows": {0: {"選択": True}}, "added_rows": [], "deleted_rows": []}
+    at.button(key="invoice_bulk_del_btn").click().run()
+    at.button(key="invoice_bulk_del_ok").click().run()
+    assert len(store.list_contract_invoices(db_path=db)) == 1

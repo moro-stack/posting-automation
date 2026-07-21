@@ -9,7 +9,7 @@ from common import invoice_excel
 from common import posting_logic
 from common import posting_store as store
 from common.ui import (apply_app_style, section_export, nice_table, period_picker,
-                       flash, show_flash, confirm_delete)
+                       flash, show_flash, bulk_delete_action)
 from common.excel_io import freeze_xlsx_bytes
 
 apply_app_style()
@@ -290,20 +290,8 @@ with tab_list:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             icon=":material/download:", key="dl_sel_list")
 
-    # --- 請求を削除 ---
-    st.divider()
-    st.markdown("**請求を削除**")
-    for inv in invoices:
-        total = posting_logic.invoice_total(detail_by_id[inv["id"]]["lines"])
-        name = id2name.get(inv["distributor_id"], "?")
-        detail_txt = (f'No.{inv["id"]} ／ {name} ／ {inv.get("issue_date")}'
-                      f' ／ ¥{posting_logic.fmt_num(total)}')
-        c1, c2 = st.columns([5, 1])
-        c1.caption(detail_txt)
-        # 確認UIは列の外＝全幅に出し、ボタンだけを c2 に置く
-        confirm_delete(key=f"del_inv_{inv['id']}", detail=detail_txt,
-                       on_confirm=lambda i=inv["id"]: store.delete_contract_invoice(i),
-                       section="invoice_list", button_container=c2)
+    bulk_delete_action(selected_ids, delete_fn=store.delete_contract_invoice,
+                       section="invoice_list", key="invoice_bulk_del")
 
     # --- 配布員別 報酬合計（表示期間内） ---
     st.divider()
