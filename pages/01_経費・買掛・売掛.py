@@ -148,7 +148,7 @@ if mode == "小口":
             st.warning("⚠️ 同様の内容が登録済みです。それでも登録しますか？")
             st.caption(f"日付 {p['date'] or '—'} ／ 金額 ¥{p['amount']:,}")
             cc1, cc2, _ = st.columns([1, 1, 4])
-            if cc1.button("はい、登録する", type="primary", key="petty_ok"):
+            if cc1.button("はい", type="primary", key="petty_ok"):
                 store.add_petty_cash(p["date"], p["category_id"], p["amount"],
                                      project_id=p["project_id"], memo=p["memo"],
                                      source=p["source"], other_label=p.get("other_label"),
@@ -156,7 +156,7 @@ if mode == "小口":
                 del st.session_state["petty_pending"]
                 flash("登録しました")
                 st.rerun()
-            if cc2.button("やめる", key="petty_no"):
+            if cc2.button("いいえ", key="petty_no"):
                 del st.session_state["petty_pending"]
                 st.rerun()
 
@@ -279,7 +279,7 @@ elif mode == "買掛":
             st.warning("⚠️ 同様の内容が登録済みです。それでも登録しますか？")
             st.caption(f"請求書の日付 {p['date'] or '—'} ／ 金額 ¥{p['amount']:,}")
             cc1, cc2, _ = st.columns([1, 1, 4])
-            if cc1.button("はい、登録する", type="primary", key="pay_ok"):
+            if cc1.button("はい", type="primary", key="pay_ok"):
                 store.add_payable(None, None, p["amount"], date=p["date"],
                                   vendor_name=p["vendor_name"], original_status=p["original_status"],
                                   note=p["note"], source=p["source"],
@@ -287,7 +287,7 @@ elif mode == "買掛":
                 del st.session_state["pay_pending"]
                 flash("登録しました")
                 st.rerun()
-            if cc2.button("やめる", key="pay_no"):
+            if cc2.button("いいえ", key="pay_no"):
                 del st.session_state["pay_pending"]
                 st.rerun()
 
@@ -368,14 +368,14 @@ else:  # 売掛
             st.warning("⚠️ 同様の内容が登録済みです。それでも登録しますか？")
             st.caption(f"月度 {p['month'] or '—'} ／ 金額 ¥{p['amount']:,}")
             cc1, cc2, _ = st.columns([1, 1, 4])
-            if cc1.button("はい、登録する", type="primary", key="recv_ok"):
+            if cc1.button("はい", type="primary", key="recv_ok"):
                 store.add_receivable(p["month"], p["client_id"], p["amount"],
                                      note=p["note"], project_id=p["project_id"],
                                      other_label=p.get("other_label"))
                 del st.session_state["recv_pending"]
                 flash("登録しました")
                 st.rerun()
-            if cc2.button("やめる", key="recv_no"):
+            if cc2.button("いいえ", key="recv_no"):
                 del st.session_state["recv_pending"]
                 st.rerun()
 

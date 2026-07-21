@@ -426,12 +426,12 @@ def confirm_delete(*, key: str, detail: str, on_confirm, label: str = "削除",
         if detail:
             st.caption(detail)
         c1, c2, _ = st.columns([1, 1, 4])
-        if c1.button("はい、削除する", type="primary", key=f"{key}_ok"):
+        if c1.button("はい", type="primary", key=f"{key}_ok"):
             on_confirm()
             st.session_state.pop(pending, None)
             flash(success, section)
             st.rerun()
-        if c2.button("やめる", key=f"{key}_no"):
+        if c2.button("いいえ", key=f"{key}_no"):
             st.session_state.pop(pending, None)
             st.rerun()
         return
@@ -489,13 +489,13 @@ def bulk_delete_action(selected_ids, *, delete_fn, section, key, noun="件", con
     if ids:  # 確認待ち
         st.warning(f"⚠️ 選択した{len(ids)}{noun}を削除しますか？")
         c1, c2, _ = st.columns([1, 1, 4])
-        if c1.button("はい、削除する", type="primary", key=f"{key}_ok"):
+        if c1.button("はい", type="primary", key=f"{key}_ok"):
             for i in ids:
                 delete_fn(i)
             st.session_state.pop(pending, None)
             flash(f"{len(ids)}{noun}を削除しました", section)
             st.rerun()
-        if c2.button("やめる", key=f"{key}_no"):
+        if c2.button("いいえ", key=f"{key}_no"):
             st.session_state.pop(pending, None)
             st.rerun()
         return

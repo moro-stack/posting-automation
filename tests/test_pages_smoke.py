@@ -442,7 +442,7 @@ def test_confirm_delete_shows_confirmation_before_running(db):
     # 確認が出て、まだ実行されていない
     assert at.session_state["called"] == 0
     assert len(at.warning) == 1
-    assert any(b.label == "はい、削除する" for b in at.button)
+    assert any(b.label == "はい" for b in at.button)
     assert any(c.value == "7/17 ／ 駐車場代 ／ ¥1,500" for c in at.caption)
 
 
