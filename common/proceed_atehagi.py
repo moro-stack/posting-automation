@@ -34,9 +34,6 @@ PROCEED_TEMPLATE = os.path.join(
 MEDIA_NAME = "リビング"
 MEDIA_SIZE = "ﾀﾌﾞﾛｲﾄﾞ"
 
-_AD_COL_START = 7    # G列
-_AD_COL_END = 15     # O列まで(Pはチラシ枚数なので手前で止める)
-_FIRST_AREA_ROW = 9  # 明細開始(1-indexed)
 _FIRST_DETAIL_ROW = 7   # あて紙の広告主明細開始行
 _LAST_DETAIL_ROW = 46
 _CHIRASHI_COUNT_CELL = "I48"
@@ -59,46 +56,90 @@ def _is_number(v) -> bool:
     return _to_int(v) is not None
 
 
-def _cell(table, excel_row, excel_col):
-    """1-indexed の Excel 座標で table(list[list]) を引く。"""
-    r, c = excel_row - 1, excel_col - 1
-    if r < 0 or r >= len(table):
-        return None
-    row = table[r]
-    if row is None or c < 0 or c >= len(row):
-        return None
-    return row[c]
+def _at(row, c):
+    """0-indexの列cをrowから安全に引く。"""
+    return row[c] if row is not None and 0 <= c < len(row) else None
+
+
+def _find_cell(table, kw):
+    """kw を含む最初のセルの (row, col)（0-index）を返す。無ければ None。"""
+    for r, row in enumerate(table):
+        if not row:
+            continue
+        for c, v in enumerate(row):
+            if v is not None and kw in str(v):
+                return (r, c)
+    return None
+
+
+def _find_col_in_row(row, kw):
+    for c, v in enumerate(row or []):
+        if v is not None and kw in str(v):
+            return c
+    return None
 
 
 def parse_haifu_irai(table):
-    """配布依頼書テーブル(list[list]) を構造化する。"""
-    title = _s(_cell(table, 1, 9))              # I1
-    m = re.search(r"【(.+?)】", title)
-    group = m.group(1) if m else ""
-    gou = ""
-    a2 = _s(_cell(table, 2, 1))                  # A2
-    mg = re.search(r"\d+年\s*\d+月\s*\d+日号", a2.replace("\n", " "))
-    if mg:
-        gou = mg.group(0)
+    """配布依頼書テーブル(list[list]) を構造化する。
 
+    ⚠️ 列位置は号・エリアで1列ずれることがある（例: 豊中版はA列に「刷り分け版」があり
+    全体が1列右）。固定位置ではなく、ヘッダー語（チラシ名/配布エリア/媒体部数/件数）を
+    検出して列を決める。
+    """
+    # タイトル→エリアグループ、号
+    tp = _find_cell(table, "配布依頼書")
+    group = ""
+    if tp:
+        m = re.search(r"【(.+?)】", str(table[tp[0]][tp[1]]))
+        group = m.group(1) if m else ""
+    gou = ""
+    gp = _find_cell(table, "日号")
+    if gp:
+        m = re.search(r"\d+年\s*\d+月\s*\d+日号", str(table[gp[0]][gp[1]]).replace("\n", " "))
+        gou = m.group(0) if m else ""
+
+    # 広告主: 「チラシ名」ラベルの右～「チラシ枚数」の手前
+    al = _find_cell(table, "チラシ名")
+    if al is None:
+        raise ValueError("広告主ヘッダー（チラシ名）が見つかりません")
+    ad_row, ad_col = al
+    maisuu_col = None
+    for c in range(ad_col + 1, len(table[ad_row])):
+        v = table[ad_row][c]
+        if v is not None and "枚数" in str(v):
+            maisuu_col = c
+            break
+    if maisuu_col is None:
+        maisuu_col = len(table[ad_row])
     advertisers = []
-    for c in range(_AD_COL_START, _AD_COL_END + 1):
-        name = _s(_cell(table, 2, c))
-        if name == "" or name == "チラシ名":
-            continue
-        advertisers.append({"col": c, "name": name, "size": _s(_cell(table, 5, c))})
+    for c in range(ad_col + 1, maisuu_col):
+        name = _s(_at(table[ad_row], c))
+        if name != "":
+            advertisers.append({"col": c, "name": name, "size": ""})
+    # サイズ行（チラシ名ラベル列に「サイズ」がある行）から各広告主のサイズ
+    for r in range(ad_row + 1, min(ad_row + 6, len(table))):
+        if _s(_at(table[r], ad_col)) == "サイズ":
+            for ad in advertisers:
+                ad["size"] = _s(_at(table[r], ad["col"]))
+            break
+
+    # 明細ヘッダー行（「配布エリア」を含む行）から 件数/エリア/媒体部数 の列を決める
+    dh = _find_cell(table, "配布エリア")
+    if dh is None:
+        raise ValueError("明細ヘッダー（配布エリア）が見つかりません")
+    dh_row = dh[0]
+    area_col = _find_col_in_row(table[dh_row], "配布エリア")
+    media_col = _find_col_in_row(table[dh_row], "媒体部数")
 
     areas = []
-    r = _FIRST_AREA_ROW
-    max_row = len(table)
-    while r <= max_row:
-        a = _cell(table, r, 1)
-        code = _s(_cell(table, r, 2))
-        if code == "" or not _is_number(a):
-            break                                # 「合 計」等で終了
-        media = _to_int(_cell(table, r, 6)) or 0
-        ads = [(_to_int(_cell(table, r, ad["col"])) or 0) for ad in advertisers]
-        town = _s(_cell(table, r + 1, 2))
+    r = dh_row + 1
+    while r < len(table):
+        code = _s(_at(table[r], area_col))
+        if code == "" or code.startswith("合"):
+            break
+        media = _to_int(_at(table[r], media_col)) or 0
+        ads = [(_to_int(_at(table[r], ad["col"])) or 0) for ad in advertisers]
+        town = _s(_at(table[r + 1], area_col)) if r + 1 < len(table) else ""
         areas.append({"code": code, "media_busuu": media, "town": town, "ads": ads})
         r += 2
 
