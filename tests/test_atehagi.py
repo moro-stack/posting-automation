@@ -19,3 +19,38 @@ def test_chiku_name_kita_rule():
 def test_chiku_name_minami_not_configured():
     with pytest.raises(NotImplementedError):
         A.chiku_name(A.KEIHAN_MINAMI, "10101")
+
+
+def _sample_table():
+    # 実データを模した最小の合成テーブル（表題行＋ヘッダー行＋データ4行）
+    header = ["配布日", "号数", "ルート", "異動", "配送順位", "ぱどんな", "住所",
+              "電話番号", "担当地区", "チラシコード", "配送物", "配布部数", "配送備考",
+              "町界名", "街区（番地）名称", "受注種別", "チラシサイズ"]
+    return [
+        ["配送管理表", "2026-06-26", "(1248号)", "作成日:2026/06/18"],
+        header,
+        ["2026-06-26", 1248, 0, None, None, "テスト太郎", None, None, 10101, None,
+         "01 ぱど", 224, " ", "大住ヶ丘", "1丁目", None, None],
+        ["2026-06-26", 1248, 0, None, None, "テスト太郎", None, None, 10101, 28,
+         "京都生協", 224, " ", "大住ヶ丘", "1丁目", "全戸配布(チラシ)", "Ｂ４(折済)"],
+        ["2026-06-26", 1248, 0, None, None, "テスト花子", None, None, 46501, None,
+         "04 ぱど", 436, " ", "香里園", "1丁目", None, None],
+        [None] * 17,  # 空行は無視される
+    ]
+
+
+def test_rows_from_table_normalizes():
+    rows = A.rows_from_table(_sample_table())
+    assert len(rows) == 3
+    assert rows[0] == {
+        "padonna": "テスト太郎", "chiku": 10101, "haisoubutsu": "01 ぱど",
+        "busuu": 224, "size": "", "gou": 1248, "haifubi": "2026-06-26",
+    }
+    assert rows[1]["size"] == "Ｂ４(折済)"
+    assert rows[1]["busuu"] == 224
+    assert rows[2]["chiku"] == 46501
+
+
+def test_rows_from_table_no_header_raises():
+    with pytest.raises(ValueError):
+        A.rows_from_table([["a", "b"], ["c", "d"]])
