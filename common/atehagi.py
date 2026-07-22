@@ -202,6 +202,74 @@ def atehagi_filename(version, rows) -> str:
     return "_".join(parts) + ".xlsx"
 
 
+_JISSEKI_HEADERS = ["No.", "エリア", "担当地区", "リーダー",
+                    "チラシ種類数", "チラシ内容", "部数", "サイン"]
+
+
+def jisseki_rows(groups, version):
+    """挟み込み実績表(サイン台紙)の行を作る。1地区=1行。挟み込みチラシ(サイズ有り)が
+    無い地区(ぱどのみ)は飛ばして詰める。"""
+    out = []
+    n = 0
+    for chiku, rows in groups.items():
+        chirashi = [r for r in rows if _s(r.get("size")) != ""]
+        if not chirashi:
+            continue                      # ぱどのみ地区はスキップ
+        n += 1
+        out.append({
+            "No.": n,
+            "エリア": chiku_name(version, chiku),
+            "担当地区": int(chiku) if str(chiku).isdigit() else chiku,
+            "リーダー": rows[0]["padonna"],
+            "チラシ種類数": len(chirashi),
+            "チラシ内容": "、".join(r["haisoubutsu"] for r in chirashi),
+            "部数": rows[0]["busuu"],
+            "サイン": "",
+        })
+    return out
+
+
+def build_jisseki_workbook(rows, title="京阪 挟み込み実績表") -> bytes:
+    """実績表(サイン台紙)の印刷用Excelを bytes で返す。"""
+    from openpyxl.styles import Alignment, Font
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "実績表"
+    ws.append([title])
+    ws["A1"].font = Font(bold=True, size=14)
+    ws.append(_JISSEKI_HEADERS)
+    for r in rows:
+        ws.append([r.get(h) for h in _JISSEKI_HEADERS])
+    for c in range(1, len(_JISSEKI_HEADERS) + 1):
+        ws.cell(row=2, column=c).font = Font(bold=True)
+        ws.cell(row=2, column=c).alignment = Alignment(horizontal="center")
+    widths = [5, 12, 10, 14, 11, 40, 8, 12]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+    ws.print_area = f"A1:H{len(rows) + 2}"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToWidth = 1
+    from openpyxl.worksheet.properties import PageSetupProperties
+    ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return freeze_xlsx_bytes(buf.getvalue())
+
+
+def jisseki_filename(version, rows) -> str:
+    label = _VERSION_LABEL.get(version, "京阪")
+    gou = next((r["gou"] for r in rows if r.get("gou")), None)
+    hb = next((r["haifubi"] for r in rows if r.get("haifubi")), "")
+    ymd = re.sub(r"\D", "", str(hb))[:8]
+    parts = [label, "挟み込み実績表"]
+    if gou:
+        parts.append(f"{gou}号")
+    if ymd:
+        parts.append(ymd)
+    return "_".join(parts) + ".xlsx"
+
+
 def read_uploaded(name: str, data: bytes):
     """アップロードされたCSV/xlsxの先頭シートをテーブル（list[list]）化する。
 

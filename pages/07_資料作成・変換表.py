@@ -36,14 +36,28 @@ with tab_atehagi:
         if version == A.KEIHAN_MINAMI:
             st.warning("京阪南版の地区名ルールが未設定です。"
                        "管理者に地区名ルールの登録を依頼してください。")
-        elif st.button("あて紙を生成", type="primary"):
-            data = A.build_atehagi_workbook(groups, version)
-            st.download_button(
-                "あて紙をダウンロード",
-                data=data,
-                file_name=A.atehagi_filename(version, rows),
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
+        else:
+            c1, c2 = st.columns(2)
+            if c1.button("あて紙を生成", type="primary", key="keihan_atehagi"):
+                data = A.build_atehagi_workbook(groups, version)
+                st.download_button(
+                    "あて紙をダウンロード",
+                    data=data,
+                    file_name=A.atehagi_filename(version, rows),
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="keihan_atehagi_dl",
+                )
+            if c2.button("挟み込み実績表を生成", key="keihan_jisseki"):
+                jrows = A.jisseki_rows(groups, version)
+                jdata = A.build_jisseki_workbook(jrows)
+                st.caption(f"挟み込みチラシがある地区 {len(jrows)}件（ぱどのみ地区は除外）")
+                st.download_button(
+                    "実績表をダウンロード",
+                    data=jdata,
+                    file_name=A.jisseki_filename(version, rows),
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="keihan_jisseki_dl",
+                )
 
 with tab_proceed:
     st.caption("リビングプロシードの配布依頼書（エリア×広告主）をアップロードすると、"
