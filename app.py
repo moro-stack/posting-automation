@@ -53,5 +53,6 @@ pages = [
     st.Page("pages/01_経費・買掛・売掛.py", title="小口・買掛・売掛", icon=":material/receipt_long:"),
     st.Page("pages/02_業務委託登録.py", title="業務委託登録", icon=":material/description:"),
     st.Page("pages/05_マスタ管理.py", title="マスタ管理", icon=":material/settings:"),
+    st.Page("pages/07_資料作成・変換表.py", title="資料作成・変換表", icon=":material/transform:"),
 ]
 st.navigation(pages).run()

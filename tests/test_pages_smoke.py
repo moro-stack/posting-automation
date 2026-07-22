@@ -46,6 +46,11 @@ def test_master_page_renders(db):
     assert not at.exception
 
 
+def test_shiryo_henkan_page_renders(db):
+    at = _run("07_資料作成・変換表.py")
+    assert not at.exception
+
+
 def test_master_page_tab_is_renamed_to_gyomu_itaku(db):
     at = _run("05_マスタ管理.py")
     labels = [t.label for t in at.tabs]
