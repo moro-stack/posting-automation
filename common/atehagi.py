@@ -270,6 +270,107 @@ def jisseki_filename(version, rows) -> str:
     return "_".join(parts) + ".xlsx"
 
 
+def shukei_data(groups, version):
+    """集計表の集計。逆算で確定したロジック:
+    - エリア = 担当地区コード先頭1桁 / リーダー = ぱどんな
+    - (エリア,リーダー)ごとに、地区を「チラシ種類数」でグループ化し 地区数・部数 を出す
+    - 総計/エリア別部数/チラシ総数/ぱどのみ部数 も算出
+    """
+    from collections import defaultdict
+
+    per = defaultdict(lambda: {"chiku": 0, "busuu": 0,
+                               "by_type": defaultdict(lambda: [0, 0])})
+    area_busuu = defaultdict(int)
+    area_chiku = defaultdict(int)
+    total_chiku = 0
+    total_busuu = 0
+    chirashi_sou = 0
+    pado_only_busuu = 0
+    for chiku, rows in groups.items():
+        area = area5(chiku)[:1]
+        leader = rows[0]["padonna"]
+        busuu = rows[0]["busuu"] or 0
+        ctype = sum(1 for r in rows if _s(r.get("size")) != "")   # チラシ種類数
+        total_chiku += 1
+        total_busuu += busuu
+        area_busuu[area] += busuu
+        area_chiku[area] += 1
+        p = per[(area, leader)]
+        p["chiku"] += 1
+        p["busuu"] += busuu
+        p["by_type"][ctype][0] += 1
+        p["by_type"][ctype][1] += busuu
+        if ctype == 0:
+            pado_only_busuu += busuu
+        for r in rows:
+            if _s(r.get("size")) != "":
+                chirashi_sou += (r["busuu"] or 0)
+    return {
+        "per": per, "area_busuu": dict(area_busuu), "area_chiku": dict(area_chiku),
+        "total_chiku": total_chiku, "total_busuu": total_busuu,
+        "chirashi_sou": chirashi_sou, "pado_only_busuu": pado_only_busuu,
+    }
+
+
+def build_shukei_workbook(data, version, title="京阪 集計表") -> bytes:
+    """集計表Excel（リーダー別×チラシ種類数の明細＋エリア別＋総計）を bytes で返す。"""
+    from openpyxl.styles import Font
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "集計表"
+    ws.append([title])
+    ws["A1"].font = Font(bold=True, size=14)
+    ws.append([])
+    ws.append(["エリア", "リーダー", "チラシ種類数", "地区数(コース数)", "配布部数"])
+    hdr = ws.max_row
+    for c in range(1, 6):
+        ws.cell(row=hdr, column=c).font = Font(bold=True)
+    for (area, leader) in sorted(data["per"].keys()):
+        p = data["per"][(area, leader)]
+        for ctype in sorted(p["by_type"].keys()):
+            ku, bu = p["by_type"][ctype]
+            ws.append([area, leader, ctype, ku, bu])
+        row = ws.append(["", f"　{leader} 計", "", p["chiku"], p["busuu"]])
+        ws.cell(row=ws.max_row, column=2).font = Font(bold=True)
+        ws.cell(row=ws.max_row, column=4).font = Font(bold=True)
+        ws.cell(row=ws.max_row, column=5).font = Font(bold=True)
+
+    ws.append([])
+    ws.append(["エリア別", "地区数", "配布部数"])
+    for c in range(1, 4):
+        ws.cell(row=ws.max_row, column=c).font = Font(bold=True)
+    for area in sorted(data["area_busuu"].keys()):
+        ws.append([f"エリア{area}", data["area_chiku"][area], data["area_busuu"][area]])
+
+    ws.append([])
+    ws.append(["総計", ""])
+    ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
+    ws.append(["総地区数", data["total_chiku"]])
+    ws.append(["総配布部数", data["total_busuu"]])
+    ws.append(["チラシ総数(全チラシ部数)", data["chirashi_sou"]])
+    ws.append(["ぱどのみ部数", data["pado_only_busuu"]])
+
+    for col, w in zip("ABCDE", [12, 18, 14, 16, 12]):
+        ws.column_dimensions[col].width = w
+    buf = io.BytesIO()
+    wb.save(buf)
+    return freeze_xlsx_bytes(buf.getvalue())
+
+
+def shukei_filename(version, rows) -> str:
+    label = _VERSION_LABEL.get(version, "京阪")
+    gou = next((r["gou"] for r in rows if r.get("gou")), None)
+    hb = next((r["haifubi"] for r in rows if r.get("haifubi")), "")
+    ymd = re.sub(r"\D", "", str(hb))[:8]
+    parts = [label, "集計表"]
+    if gou:
+        parts.append(f"{gou}号")
+    if ymd:
+        parts.append(ymd)
+    return "_".join(parts) + ".xlsx"
+
+
 def read_uploaded(name: str, data: bytes):
     """アップロードされたCSV/xlsxの先頭シートをテーブル（list[list]）化する。
 

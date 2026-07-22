@@ -58,6 +58,18 @@ with tab_atehagi:
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key="keihan_jisseki_dl",
                 )
+            if st.button("集計表を生成", key="keihan_shukei"):
+                sdata = A.shukei_data(groups, version)
+                swb = A.build_shukei_workbook(sdata, version)
+                st.caption(f"総地区数 {sdata['total_chiku']} / 総配布部数 {sdata['total_busuu']:,} / "
+                           f"チラシ総数 {sdata['chirashi_sou']:,}")
+                st.download_button(
+                    "集計表をダウンロード",
+                    data=swb,
+                    file_name=A.shukei_filename(version, rows),
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="keihan_shukei_dl",
+                )
 
 with tab_proceed:
     st.caption("リビングプロシードの配布依頼書（エリア×広告主）をアップロードすると、"
