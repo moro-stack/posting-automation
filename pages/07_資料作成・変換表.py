@@ -2,11 +2,13 @@ import streamlit as st
 
 from common.ui import apply_app_style
 from common import atehagi as A
+from common import proceed_atehagi as PR
 
 apply_app_style()
 st.title("資料作成・変換表")
 
-tab_atehagi, tab_other = st.tabs(["京阪 あて紙", "その他（準備中）"])
+tab_atehagi, tab_proceed, tab_other = st.tabs(
+    ["京阪 あて紙", "リビングプロシード あて紙", "その他（準備中）"])
 
 with tab_atehagi:
     st.caption("関西ぱどの配送管理表（CSV / Excel）をアップロードすると、"
@@ -42,6 +44,34 @@ with tab_atehagi:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
 
+with tab_proceed:
+    st.caption("リビングプロシードの配布依頼書（エリア×広告主）をアップロードすると、"
+               "担当地区ごとのあて紙をまとめたExcelを作成します。")
+    up_p = st.file_uploader("配布依頼書をアップロード", type=["xlsx", "xls", "csv"],
+                            key="proceed_upload")
+    if up_p is not None:
+        try:
+            parsed = PR.read_and_parse(up_p.name, up_p.getvalue())
+        except Exception as e:  # noqa: BLE001
+            st.error(f"読み取りに失敗しました: {e}")
+            st.stop()
+
+        if not parsed["areas"]:
+            st.warning("エリア（担当地区）が読み取れませんでした。配布依頼書の様式をご確認ください。")
+        else:
+            st.success(
+                f"読み込みOK：{parsed['group'] or '—'} / 号 {parsed['gou'] or '—'} / "
+                f"広告主 {len(parsed['advertisers'])}社 / エリア {len(parsed['areas'])}件")
+            if st.button("あて紙を生成", type="primary", key="proceed_build"):
+                data = PR.build_proceed_atehagi_workbook(parsed)
+                st.download_button(
+                    "あて紙をダウンロード",
+                    data=data,
+                    file_name=PR.proceed_atehagi_filename(parsed),
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="proceed_dl",
+                )
+
 with tab_other:
-    st.info("リビングプロシード（配布依頼書→あて紙）、京阪の報告書・集計表・実績表、"
+    st.info("京阪の報告書・集計表・実績表、"
             "アドバリュー（依頼表→報告書＋エリア被り判定）は順次追加予定です。")
