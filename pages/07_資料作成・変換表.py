@@ -3,12 +3,13 @@ import streamlit as st
 from common.ui import apply_app_style
 from common import atehagi as A
 from common import proceed_atehagi as PR
+from common import advalue as AV
 
 apply_app_style()
 st.title("資料作成・変換表")
 
-tab_atehagi, tab_proceed, tab_other = st.tabs(
-    ["京阪 あて紙", "リビングプロシード あて紙", "その他（準備中）"])
+tab_atehagi, tab_proceed, tab_advalue, tab_other = st.tabs(
+    ["京阪 あて紙", "リビングプロシード あて紙", "アドバリュー 報告書", "その他（準備中）"])
 
 with tab_atehagi:
     st.caption("関西ぱどの配送管理表（CSV / Excel）をアップロードすると、"
@@ -72,6 +73,40 @@ with tab_proceed:
                     key="proceed_dl",
                 )
 
+with tab_advalue:
+    st.caption("アドバリューの依頼表と、京阪南版の配送管理表をアップロードすると、"
+               "各町丁目が京阪南版と被る担当地区を割り出した報告書を作成します。")
+    col1, col2 = st.columns(2)
+    with col1:
+        up_irai = st.file_uploader("① アドバリュー依頼表", type=["xlsx", "xls", "csv"],
+                                   key="adv_irai")
+    with col2:
+        up_minami = st.file_uploader("② 京阪南版 配送管理表", type=["xlsx", "xls", "csv", "xlsm"],
+                                     key="adv_minami")
+    if up_irai is not None and up_minami is not None:
+        try:
+            irai = AV.read_irai(up_irai.name, up_irai.getvalue())
+            index = AV.read_minami_index(up_minami.name, up_minami.getvalue())
+            report_rows = AV.build_report_rows(irai, index)
+        except Exception as e:  # noqa: BLE001
+            st.error(f"読み取りに失敗しました: {e}")
+            st.stop()
+
+        summ = AV.overlap_summary(report_rows)
+        st.success(f"読み込みOK：依頼表 {summ['total']}エリア／"
+                   f"京阪南と被り {summ['overlap']}件・被らない {summ['non_overlap']}件")
+        st.dataframe(report_rows, use_container_width=True, hide_index=True)
+        if st.button("報告書を生成", type="primary", key="adv_build"):
+            data = AV.build_advalue_report_workbook(report_rows)
+            st.download_button(
+                "報告書をダウンロード",
+                data=data,
+                file_name="アドバリュー_エリア被り報告書.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="adv_dl",
+            )
+    elif up_irai is not None or up_minami is not None:
+        st.info("依頼表と京阪南版 配送管理表の**両方**をアップロードしてください。")
+
 with tab_other:
-    st.info("京阪の報告書・集計表・実績表、"
-            "アドバリュー（依頼表→報告書＋エリア被り判定）は順次追加予定です。")
+    st.info("京阪の報告書・集計表・実績表は順次追加予定です。")
