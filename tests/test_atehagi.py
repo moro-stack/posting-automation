@@ -32,7 +32,7 @@ def _sample_table():
         ["2026-06-26", 1248, 0, None, None, "テスト太郎", None, None, 10101, None,
          "01 ぱど", 224, " ", "大住ヶ丘", "1丁目", None, None],
         ["2026-06-26", 1248, 0, None, None, "テスト太郎", None, None, 10101, 28,
-         "京都生協", 224, " ", "大住ヶ丘", "1丁目", "全戸配布(チラシ)", "Ｂ４(折済)"],
+         "サンプル生協", 224, " ", "大住ヶ丘", "1丁目", "全戸配布(チラシ)", "Ｂ４(折済)"],
         ["2026-06-26", 1248, 0, None, None, "テスト花子", None, None, 46501, None,
          "04 ぱど", 436, " ", "香里園", "1丁目", None, None],
         [None] * 17,  # 空行は無視される
@@ -61,5 +61,5 @@ def test_group_by_chiku_preserves_order_and_counts():
     groups = A.group_by_chiku(rows)
     assert list(groups.keys()) == ["10101", "46501"]     # 出現順
     assert len(groups["10101"]) == 2
-    assert A.chirashi_count(groups["10101"]) == 1        # 京都生協のみサイズ有り
+    assert A.chirashi_count(groups["10101"]) == 1        # サンプル生協のみサイズ有り
     assert A.chirashi_count(groups["46501"]) == 0        # 04 ぱど のみ・サイズ無し

@@ -22,7 +22,7 @@ def test_build_atehagi_cells_match_layout():
     assert s["B5"].value == "01 ぱど"
     assert s["I5"].value in (None, "")          # 先頭行はサイズ無し
     assert s["J5"].value == 224
-    assert s["B6"].value == "京都生協"
+    assert s["B6"].value == "サンプル生協"
     assert s["I6"].value == "Ｂ４(折済)"
     assert s["J6"].value == 224
     assert s["I18"].value == 1                   # チラシ数
