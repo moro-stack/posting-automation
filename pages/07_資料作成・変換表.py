@@ -25,7 +25,8 @@ with tab_atehagi:
             st.stop()
 
         gou = next((r["gou"] for r in rows if r.get("gou")), "—")
-        hb = next((r["haifubi"] for r in rows if r.get("haifubi")), "—")
+        hb_raw = next((r["haifubi"] for r in rows if r.get("haifubi")), "")
+        hb = str(hb_raw).split(" ")[0] if hb_raw else "—"   # 時刻(00:00:00)を落として日付だけ表示
         st.success(f"読み込みOK：号数 {gou} / 配布日 {hb} / "
                    f"データ {len(rows)}行 / 地区 {len(groups)}件")
 

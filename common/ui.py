@@ -233,7 +233,7 @@ div[data-baseweb="popover"]:has([data-baseweb="calendar"]) label{ display:none !
 [data-testid="stFileUploaderDropzoneInstructions"]{ display:none !important; }
 [data-testid="stFileUploaderDropzone"]{ position:relative; min-height:84px; align-items:center; }
 [data-testid="stFileUploaderDropzone"]::before{
-  content:"ここにファイルをドラッグ、または右のボタンで選択（画像・PDF）";
+  content:"ここにファイルをドラッグ、または右のボタンで選択";
   color:var(--muted); font-size:.9rem; padding-left:.7rem;
 }
 /* 「Browse files」ボタンだけ日本語化。×(削除)・＋(追加)ボタンには効かせない
