@@ -3,6 +3,7 @@
 現行 VBA `Module2`（担当地区別_あてがみテンプレ反映）の再現。
 DB非依存・Streamlit非依存の純関数として実装し、TDDで検証する。
 """
+import csv as _csv
 import io
 import os
 import re
@@ -199,3 +200,27 @@ def atehagi_filename(version, rows) -> str:
     if ymd:
         parts.append(ymd)
     return "_".join(parts) + ".xlsx"
+
+
+def read_uploaded(name: str, data: bytes):
+    """アップロードされたCSV/xlsxの先頭シートをテーブル（list[list]）化する。
+
+    xlsx/xlsm/xls は先頭シートを読み取り、CSVは cp932→utf-8-sig→utf-8 の順で復号する。
+    """
+    lower = str(name).lower()
+    if lower.endswith((".xlsx", ".xlsm", ".xls")):
+        wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        ws = wb[wb.sheetnames[0]]
+        table = [list(r) for r in ws.iter_rows(values_only=True)]
+        wb.close()
+        return table
+    text = None
+    for enc in ("cp932", "utf-8-sig", "utf-8"):
+        try:
+            text = data.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        raise ValueError("CSVの文字コードを判別できません（cp932/utf-8）")
+    return [row for row in _csv.reader(io.StringIO(text))]
