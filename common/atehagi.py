@@ -4,6 +4,7 @@
 DB非依存・Streamlit非依存の純関数として実装し、TDDで検証する。
 """
 import re
+from collections import OrderedDict
 
 KEIHAN_KITA = "北"
 KEIHAN_MINAMI = "南"
@@ -93,3 +94,16 @@ def rows_from_table(table):
             "haifubi": _s(get(row, "haifubi")),
         })
     return out
+
+
+def group_by_chiku(rows):
+    """担当地区コード（area5）をキーに、出現順を保持して束ねる。"""
+    groups = OrderedDict()
+    for r in rows:
+        groups.setdefault(area5(r["chiku"]), []).append(r)
+    return groups
+
+
+def chirashi_count(group_rows) -> int:
+    """グループ内でチラシサイズが非空の明細件数（I18）。"""
+    return sum(1 for r in group_rows if _s(r.get("size")) != "")

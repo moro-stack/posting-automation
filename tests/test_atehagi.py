@@ -54,3 +54,12 @@ def test_rows_from_table_normalizes():
 def test_rows_from_table_no_header_raises():
     with pytest.raises(ValueError):
         A.rows_from_table([["a", "b"], ["c", "d"]])
+
+
+def test_group_by_chiku_preserves_order_and_counts():
+    rows = A.rows_from_table(_sample_table())
+    groups = A.group_by_chiku(rows)
+    assert list(groups.keys()) == ["10101", "46501"]     # 出現順
+    assert len(groups["10101"]) == 2
+    assert A.chirashi_count(groups["10101"]) == 1        # 京都生協のみサイズ有り
+    assert A.chirashi_count(groups["46501"]) == 0        # 04 ぱど のみ・サイズ無し
