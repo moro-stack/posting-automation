@@ -18,6 +18,9 @@ def test_shukei_data_totals_and_by_type():
     assert d["pado_only_busuu"] == 436      # 46501 は ぱどのみ
     assert d["area_busuu"] == {"1": 224, "4": 436}
     assert d["area_chiku"] == {"1": 1, "4": 1}
+    assert d["sashikomi_busuu"] == 224       # 挿込=チラシ有り地区(10101)の部数
+    assert d["choai_busuu"] == 0             # 帳合=2種以上の地区は無し
+    assert d["type_dist"] == {1: [1, 224], 0: [1, 436]}
     p1 = d["per"][("1", "テスト太郎")]
     assert p1["chiku"] == 1 and p1["busuu"] == 224
     assert dict(p1["by_type"]) == {1: [1, 224]}       # チラシ1種の地区が1つ・224部

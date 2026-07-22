@@ -282,10 +282,13 @@ def shukei_data(groups, version):
                                "by_type": defaultdict(lambda: [0, 0])})
     area_busuu = defaultdict(int)
     area_chiku = defaultdict(int)
+    type_dist = defaultdict(lambda: [0, 0])   # チラシ種類数 -> [地区数, 部数]（全体分布）
     total_chiku = 0
     total_busuu = 0
     chirashi_sou = 0
     pado_only_busuu = 0
+    choai_busuu = 0        # 帳合＝チラシ2種類以上の地区の部数
+    sashikomi_busuu = 0    # 挿込＝チラシがある地区の部数（=総-ぱどのみ）
     for chiku, rows in groups.items():
         area = area5(chiku)[:1]
         leader = rows[0]["padonna"]
@@ -295,6 +298,8 @@ def shukei_data(groups, version):
         total_busuu += busuu
         area_busuu[area] += busuu
         area_chiku[area] += 1
+        type_dist[ctype][0] += 1
+        type_dist[ctype][1] += busuu
         p = per[(area, leader)]
         p["chiku"] += 1
         p["busuu"] += busuu
@@ -302,13 +307,19 @@ def shukei_data(groups, version):
         p["by_type"][ctype][1] += busuu
         if ctype == 0:
             pado_only_busuu += busuu
+        if ctype >= 1:
+            sashikomi_busuu += busuu
+        if ctype >= 2:
+            choai_busuu += busuu
         for r in rows:
             if _s(r.get("size")) != "":
                 chirashi_sou += (r["busuu"] or 0)
     return {
         "per": per, "area_busuu": dict(area_busuu), "area_chiku": dict(area_chiku),
+        "type_dist": {k: list(v) for k, v in type_dist.items()},
         "total_chiku": total_chiku, "total_busuu": total_busuu,
         "chirashi_sou": chirashi_sou, "pado_only_busuu": pado_only_busuu,
+        "choai_busuu": choai_busuu, "sashikomi_busuu": sashikomi_busuu,
     }
 
 
@@ -344,12 +355,22 @@ def build_shukei_workbook(data, version, title="京阪 集計表") -> bytes:
         ws.append([f"エリア{area}", data["area_chiku"][area], data["area_busuu"][area]])
 
     ws.append([])
+    ws.append(["チラシ種類数分布", "地区数", "部数"])
+    for c in range(1, 4):
+        ws.cell(row=ws.max_row, column=c).font = Font(bold=True)
+    for t in sorted(data["type_dist"].keys(), reverse=True):
+        ku, bu = data["type_dist"][t]
+        ws.append([f"{t}種", ku, bu])
+
+    ws.append([])
     ws.append(["総計", ""])
     ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
     ws.append(["総地区数", data["total_chiku"]])
     ws.append(["総配布部数", data["total_busuu"]])
     ws.append(["チラシ総数(全チラシ部数)", data["chirashi_sou"]])
-    ws.append(["ぱどのみ部数", data["pado_only_busuu"]])
+    ws.append(["帳合(チラシ2種以上の地区の部数)", data["choai_busuu"]])
+    ws.append(["挿込(チラシがある地区の部数)", data["sashikomi_busuu"]])
+    ws.append(["ぱどのみ部数(チラシ無し)", data["pado_only_busuu"]])
 
     for col, w in zip("ABCDE", [12, 18, 14, 16, 12]):
         ws.column_dimensions[col].width = w
