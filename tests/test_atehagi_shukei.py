@@ -99,3 +99,14 @@ def test_build_shukei_daishi_layout():
     # エリア別部数
     assert ws["M18"].value == "エリア1" and ws["P18"].value == 350
     assert ws.page_setup.orientation == "landscape"
+    assert "1248号" in ws["G1"].value          # 号数がタイトルに入る
+
+
+def test_build_shukei_daishi_print_area_scales_with_areas():
+    data = dict(_sample_shukei_data())
+    data["area_busuu"] = {str(i): 100 for i in range(1, 7)}   # 6エリア
+    out = A.build_shukei_daishi_workbook(data, A.KEIHAN_KITA, gou=1, haifubi="2026-06-26")
+    ws = openpyxl.load_workbook(io.BytesIO(out)).active
+    tail = ws.print_area.split(":")[1]
+    last = int("".join(ch for ch in tail if ch.isdigit()))
+    assert last >= 23           # 6番目のエリア行(br+8+5=23)が印刷範囲に入る

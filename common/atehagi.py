@@ -589,7 +589,8 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
     md = _md_from(haifubi)
     ws.cell(1, 1, label).font = Font(bold=True, size=14)
     ws.merge_cells("A1:E1")
-    g = ws.cell(1, 7, f"{md} 号" if md else "号")
+    _tparts = [p for p in [md, (f"{gou}号" if gou else None)] if p]
+    g = ws.cell(1, 7, "　".join(_tparts) if _tparts else "号")
     g.font = bold
     ws.merge_cells(start_row=1, start_column=7, end_row=1, end_column=31)
 
@@ -670,7 +671,7 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
     ws.column_dimensions["AG"].width = 10.6
     ws.column_dimensions["AH"].width = 8.6
 
-    last_row = max(total_row, br + 12)
+    last_row = max(total_row, br + 8 + len(data["area_busuu"]) - 1)
     ws.print_area = f"A1:AH{last_row}"
     ws.page_setup.orientation = "landscape"
     ws.page_setup.fitToWidth = 1
