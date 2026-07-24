@@ -410,6 +410,92 @@ def build_jisseki_workbook(rows, title="京阪 挟み込み実績表") -> bytes:
     return freeze_xlsx_bytes(buf.getvalue())
 
 
+def _md_from(haifubi) -> str:
+    """配布日から "M/D"（例 6/26）。datetime/文字列どちらも可。"""
+    import datetime
+    if isinstance(haifubi, (datetime.date, datetime.datetime)):
+        return f"{haifubi.month}/{haifubi.day}"
+    s = str(haifubi or "")
+    m = re.search(r"(\d{4})\D(\d{1,2})\D(\d{1,2})", s)
+    if m:
+        return f"{int(m.group(2))}/{int(m.group(3))}"
+    return ""
+
+
+def build_jisseki_daishi_workbook(courses, version, gou, haifubi, per_row=4) -> bytes:
+    """実績表を実物台紙スタイルで出力。1コース=ヘッダー行(コース名)+本文行
+    (案件名/枚数を1チラシ1行+サイン空)。per_row コース/行で折り返す。"""
+    from openpyxl.styles import Alignment, Font, Border, Side
+    from openpyxl.worksheet.properties import PageSetupProperties
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "実績表"
+    ncol = per_row * 2
+
+    label = _VERSION_LABEL.get(version, "京阪")
+    md = _md_from(haifubi)
+    gou_part = f"{gou}号" if gou else "号"
+    title = f"{md} ／ {gou_part}　{label}"
+    ws.cell(row=1, column=1, value=title)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncol)
+    t = ws.cell(row=1, column=1)
+    t.font = Font(bold=True, size=16)
+    t.alignment = Alignment(horizontal="left", vertical="center")
+    ws.row_dimensions[1].height = 28
+
+    thin = Side(style="thin")
+    thick = Side(style="medium")
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    topleft = Alignment(horizontal="left", vertical="top", wrap_text=True)
+    topright = Alignment(horizontal="right", vertical="top", wrap_text=True)
+
+    for i, c in enumerate(courses):
+        grp, col = divmod(i, per_row)
+        rh = 2 + grp * 2
+        rb = rh + 1
+        c0 = 1 + col * 2
+        c1 = c0 + 1
+        ws.merge_cells(start_row=rh, start_column=c0, end_row=rh, end_column=c1)
+        h = ws.cell(row=rh, column=c0, value=c["course_name"])
+        h.font = Font(bold=True, size=11)
+        h.alignment = center
+        names = "\n".join([f["name"] for f in c["flyers"]] + ["（サイン）"])
+        counts = "\n".join([str(f["count"]) for f in c["flyers"]])
+        bn = ws.cell(row=rb, column=c0, value=names)
+        bn.alignment = topleft
+        bc = ws.cell(row=rb, column=c1, value=counts)
+        bc.alignment = topright
+        for (r, cc) in [(rh, c0), (rh, c1), (rb, c0), (rb, c1)]:
+            ws.cell(row=r, column=cc).border = Border(
+                left=thick if cc == c0 else thin,
+                right=thick if cc == c1 else thin,
+                top=thick if r == rh else thin,
+                bottom=thick if r == rb else thin,
+            )
+
+    ngrp = (len(courses) + per_row - 1) // per_row
+    for grp in range(ngrp):
+        block = courses[grp * per_row:(grp + 1) * per_row]
+        max_lines = max((len(c["flyers"]) + 1) for c in block)
+        ws.row_dimensions[2 + grp * 2].height = 20
+        ws.row_dimensions[3 + grp * 2].height = max(40, max_lines * 18)
+    for col in range(per_row):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(1 + col * 2)].width = 24
+        ws.column_dimensions[openpyxl.utils.get_column_letter(2 + col * 2)].width = 6
+
+    last_row = 1 + ngrp * 2 if ngrp else 1
+    last_col = openpyxl.utils.get_column_letter(ncol)
+    ws.print_area = f"A1:{last_col}{last_row}"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToWidth = 1
+    ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return freeze_xlsx_bytes(buf.getvalue())
+
+
 def jisseki_filename(version, rows) -> str:
     label = _VERSION_LABEL.get(version, "京阪")
     gou = next((r["gou"] for r in rows if r.get("gou")), None)

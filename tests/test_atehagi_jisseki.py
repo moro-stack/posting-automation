@@ -81,3 +81,44 @@ def test_jisseki_courses_multi_flyer_keeps_order():
         {"name": "SUUMO/注文住宅", "count": 400},
         {"name": "ECC/宮野", "count": 400},
     ]
+
+
+def test_md_from():
+    assert A._md_from("2026-06-26") == "6/26"
+    import datetime
+    assert A._md_from(datetime.date(2026, 6, 26)) == "6/26"
+    assert A._md_from("") == ""
+
+
+def test_build_daishi_title_and_first_course():
+    groups = A.group_by_chiku(A.rows_from_table(_sample_table()))
+    courses = A.jisseki_courses(groups, A.KEIHAN_KITA)
+    data = A.build_jisseki_daishi_workbook(courses, A.KEIHAN_KITA, gou=1248,
+                                           haifubi="2026-06-26")
+    import io
+    wb = openpyxl.load_workbook(io.BytesIO(data))
+    ws = wb.active
+    assert ws["A1"].value == "6/26 ／ 1248号　京阪北版"
+    assert ws["A2"].value == "010101 枚方・交野"          # ヘッダー(コース名)
+    assert ws["A3"].value == "サンプル生協\n（サイン）"     # 本文(案件名+サイン)
+    assert ws["B3"].value == "224"                        # 本文(枚数)
+    assert ws.page_setup.orientation == "landscape"
+
+
+def test_build_daishi_wrapping_4_per_row():
+    # 5コース → 2行目(grp1)に5コース目が来る（行2-3がgrp0、行4-5がgrp1）
+    courses = [
+        {"code": f"01010{i}", "chiku_name": "枚方・交野",
+         "course_name": f"01010{i} 枚方・交野",
+         "flyers": [{"name": "A", "count": 100}]}
+        for i in range(1, 6)
+    ]
+    data = A.build_jisseki_daishi_workbook(courses, A.KEIHAN_KITA, gou=1,
+                                           haifubi="2026-06-26")
+    import io
+    wb = openpyxl.load_workbook(io.BytesIO(data))
+    ws = wb.active
+    # 4コース目は grp0 の col3 → 案件名列 = 1+3*2 = 7 (G列) の行2
+    assert ws["G2"].value == "010104 枚方・交野"
+    # 5コース目は grp1 の col0 → A列 の行4
+    assert ws["A4"].value == "010105 枚方・交野"
