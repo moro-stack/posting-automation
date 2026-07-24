@@ -360,6 +360,28 @@ def jisseki_rows(groups, version):
     return out
 
 
+def jisseki_courses(groups, version):
+    """実績表台紙の1コース分データ。挟み込みチラシ(size非空)が1つ以上ある
+    コースのみ。ぱどのみ地区は除外。flyers は元の並び順。"""
+    out = []
+    for chiku, rows in groups.items():
+        flyers = [
+            {"name": r["haisoubutsu"], "count": r["busuu"]}
+            for r in rows if _s(r.get("size")) != ""
+        ]
+        if not flyers:
+            continue
+        name = chiku_name(version, chiku)
+        code = area_code6(chiku)
+        out.append({
+            "code": code,
+            "chiku_name": name,
+            "course_name": f"{code} {name}",
+            "flyers": flyers,
+        })
+    return out
+
+
 def build_jisseki_workbook(rows, title="京阪 挟み込み実績表") -> bytes:
     """実績表(サイン台紙)の印刷用Excelを bytes で返す。"""
     from openpyxl.styles import Alignment, Font
