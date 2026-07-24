@@ -28,17 +28,6 @@ def test_shukei_data_totals_and_by_type():
     assert dict(p4["by_type"]) == {0: [1, 436]}       # ぱどのみ(0種)
 
 
-def test_build_shukei_workbook():
-    d = A.shukei_data(_groups(), A.KEIHAN_KITA)
-    data = A.build_shukei_workbook(d, A.KEIHAN_KITA)
-    wb = openpyxl.load_workbook(io.BytesIO(data))
-    ws = wb.active
-    assert ws["A1"].value == "京阪 集計表"
-    text = "\n".join(str(c.value) for row in ws.iter_rows() for c in row if c.value is not None)
-    assert "エリア" in text and "リーダー" in text
-    assert "総地区数" in text and "チラシ総数(全チラシ部数)" in text
-
-
 def test_shukei_filename():
     rows = A.rows_from_table(_sample_table())
     name = A.shukei_filename(A.KEIHAN_KITA, rows)

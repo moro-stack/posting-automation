@@ -513,62 +513,6 @@ def shukei_data(groups, version):
     }
 
 
-def build_shukei_workbook(data, version, title="京阪 集計表") -> bytes:
-    """集計表Excel（リーダー別×チラシ種類数の明細＋エリア別＋総計）を bytes で返す。"""
-    from openpyxl.styles import Font
-
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "集計表"
-    ws.append([title])
-    ws["A1"].font = Font(bold=True, size=14)
-    ws.append([])
-    ws.append(["エリア", "リーダー", "チラシ種類数", "地区数(コース数)", "配布部数"])
-    hdr = ws.max_row
-    for c in range(1, 6):
-        ws.cell(row=hdr, column=c).font = Font(bold=True)
-    for (area, leader) in sorted(data["per"].keys()):
-        p = data["per"][(area, leader)]
-        for ctype in sorted(p["by_type"].keys()):
-            ku, bu = p["by_type"][ctype]
-            ws.append([area, leader, ctype, ku, bu])
-        row = ws.append(["", f"　{leader} 計", "", p["chiku"], p["busuu"]])
-        ws.cell(row=ws.max_row, column=2).font = Font(bold=True)
-        ws.cell(row=ws.max_row, column=4).font = Font(bold=True)
-        ws.cell(row=ws.max_row, column=5).font = Font(bold=True)
-
-    ws.append([])
-    ws.append(["エリア別", "地区数", "配布部数"])
-    for c in range(1, 4):
-        ws.cell(row=ws.max_row, column=c).font = Font(bold=True)
-    for area in sorted(data["area_busuu"].keys()):
-        ws.append([f"エリア{area}", data["area_chiku"][area], data["area_busuu"][area]])
-
-    ws.append([])
-    ws.append(["チラシ種類数分布", "地区数", "部数"])
-    for c in range(1, 4):
-        ws.cell(row=ws.max_row, column=c).font = Font(bold=True)
-    for t in sorted(data["type_dist"].keys(), reverse=True):
-        ku, bu = data["type_dist"][t]
-        ws.append([f"{t}種", ku, bu])
-
-    ws.append([])
-    ws.append(["総計", ""])
-    ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
-    ws.append(["総地区数", data["total_chiku"]])
-    ws.append(["総配布部数", data["total_busuu"]])
-    ws.append(["チラシ総数(全チラシ部数)", data["chirashi_sou"]])
-    ws.append(["帳合(チラシ2種以上の地区の部数)", data["choai_busuu"]])
-    ws.append(["挿込(チラシがある地区の部数)", data["sashikomi_busuu"]])
-    ws.append(["ぱどのみ部数(チラシ無し)", data["pado_only_busuu"]])
-
-    for col, w in zip("ABCDE", [12, 18, 14, 16, 12]):
-        ws.column_dimensions[col].width = w
-    buf = io.BytesIO()
-    wb.save(buf)
-    return freeze_xlsx_bytes(buf.getvalue())
-
-
 def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
     """集計表を実物帳票レイアウトで出力。上部=エリア×リーダー×チラシ種類数
     マトリクス(6/行折返し・縦結合・右端に配布部数計/地区数計)、下部=チラシ種類数別・
