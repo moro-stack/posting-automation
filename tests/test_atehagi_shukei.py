@@ -89,6 +89,11 @@ def test_build_shukei_daishi_layout():
     assert ws["M18"].value == "エリア1" and ws["P18"].value == 350
     assert ws.page_setup.orientation == "landscape"
     assert "1248号" in ws["G1"].value          # 号数がタイトルに入る
+    assert ws["A1"].font.color.rgb == "FFFF0000"        # 版名は赤字
+    assert ws["C4"].font.color.rgb == "FFFF0000"        # チラシ種類数は赤字
+    assert ws["H4"].font.color.rgb == "FFFF0000"
+    assert ws["E4"].font.color is None or ws["E4"].font.color.rgb != "FFFF0000"  # コース数は赤でない
+    assert ws["F4"].font.color is None or ws["F4"].font.color.rgb != "FFFF0000"  # 部数は赤でない
 
 
 def test_build_shukei_daishi_print_area_scales_with_areas():

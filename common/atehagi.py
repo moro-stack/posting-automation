@@ -531,7 +531,7 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
 
     label = _VERSION_LABEL.get(version, "京阪")
     md = _md_from(haifubi)
-    ws.cell(1, 1, label).font = Font(bold=True, size=14)
+    ws.cell(1, 1, label).font = Font(bold=True, size=14, color="FFFF0000")
     ws.merge_cells("A1:E1")
     _tparts = [p for p in [md, (f"{gou}号" if gou else None)] if p]
     g = ws.cell(1, 7, "　".join(_tparts) if _tparts else "号")
@@ -559,6 +559,8 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
                     cell = ws.cell(r, cc, val)
                     cell.alignment = center
                     cell.border = box
+                    if cc == col:
+                        cell.font = Font(color="FFFF0000")
             lbot = r
             bcell = ws.cell(ltop, 2, leader["name"])
             bcell.alignment = center
