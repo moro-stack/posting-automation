@@ -71,14 +71,15 @@ def test_build_daishi_title_and_first_course():
     wb = openpyxl.load_workbook(io.BytesIO(data))
     ws = wb.active
     assert ws["A1"].value == "6/26 ／ 1248号　京阪北版"
-    assert ws["A2"].value == "010101 枚方・交野"          # ヘッダー(コース名)
-    assert ws["A3"].value == "サンプル生協\n（サイン）"     # 本文(案件名+サイン)
-    assert ws["B3"].value == "224"                        # 本文(枚数)
+    assert ws["A2"].value == "010101 枚方・交野"     # ヘッダー(コース名)
+    assert ws["A3"].value == "サンプル生協"           # 本文(案件名)
+    assert ws["B3"].value == "224"                    # 本文(枚数)
+    assert ws["A4"].value == "サイン："                # サイン行
+    assert ws["A4"].border.bottom.style is not None    # 署名用の横線
     assert ws.page_setup.orientation == "landscape"
 
 
 def test_build_daishi_wrapping_4_per_row():
-    # 5コース → 2行目(grp1)に5コース目が来る（行2-3がgrp0、行4-5がgrp1）
     courses = [
         {"code": f"01010{i}", "chiku_name": "枚方・交野",
          "course_name": f"01010{i} 枚方・交野",
@@ -90,7 +91,7 @@ def test_build_daishi_wrapping_4_per_row():
     import io
     wb = openpyxl.load_workbook(io.BytesIO(data))
     ws = wb.active
-    # 4コース目は grp0 の col3 → 案件名列 = 1+3*2 = 7 (G列) の行2
+    # 4コース目 grp0 col3 → 案件名列 G, ヘッダー行2
     assert ws["G2"].value == "010104 枚方・交野"
-    # 5コース目は grp1 の col0 → A列 の行4
-    assert ws["A4"].value == "010105 枚方・交野"
+    # 5コース目 grp1 col0 → A列, ヘッダー行 = 2 + 1*3 = 5
+    assert ws["A5"].value == "010105 枚方・交野"

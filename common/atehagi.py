@@ -368,7 +368,7 @@ def _md_from(haifubi) -> str:
 
 def build_jisseki_daishi_workbook(courses, version, gou, haifubi, per_row=4) -> bytes:
     """実績表を実物台紙スタイルで出力。1コース=ヘッダー行(コース名)+本文行
-    (案件名/枚数を1チラシ1行+サイン空)。per_row コース/行で折り返す。"""
+    (案件名/枚数を1チラシ1行)+サイン行(横線付き)。per_row コース/行で折り返す。"""
     from openpyxl.styles import Alignment, Font, Border, Side
     from openpyxl.worksheet.properties import PageSetupProperties
 
@@ -393,42 +393,48 @@ def build_jisseki_daishi_workbook(courses, version, gou, haifubi, per_row=4) -> 
     center = Alignment(horizontal="center", vertical="center", wrap_text=True)
     topleft = Alignment(horizontal="left", vertical="top", wrap_text=True)
     topright = Alignment(horizontal="right", vertical="top", wrap_text=True)
+    signalign = Alignment(horizontal="left", vertical="bottom")
+
+    ROWS_PER = 3  # ヘッダー・本文・サイン
 
     for i, c in enumerate(courses):
         grp, col = divmod(i, per_row)
-        rh = 2 + grp * 2
-        rb = rh + 1
+        top = 2 + grp * ROWS_PER
+        rh, rb, rs = top, top + 1, top + 2
         c0 = 1 + col * 2
         c1 = c0 + 1
         ws.merge_cells(start_row=rh, start_column=c0, end_row=rh, end_column=c1)
         h = ws.cell(row=rh, column=c0, value=c["course_name"])
         h.font = Font(bold=True, size=11)
         h.alignment = center
-        names = "\n".join([f["name"] for f in c["flyers"]] + ["（サイン）"])
-        counts = "\n".join([str(f["count"]) for f in c["flyers"]])
-        bn = ws.cell(row=rb, column=c0, value=names)
-        bn.alignment = topleft
-        bc = ws.cell(row=rb, column=c1, value=counts)
-        bc.alignment = topright
-        for (r, cc) in [(rh, c0), (rh, c1), (rb, c0), (rb, c1)]:
+        names = "\n".join(f["name"] for f in c["flyers"])
+        counts = "\n".join(str(f["count"]) for f in c["flyers"])
+        ws.cell(row=rb, column=c0, value=names).alignment = topleft
+        ws.cell(row=rb, column=c1, value=counts).alignment = topright
+        ws.merge_cells(start_row=rs, start_column=c0, end_row=rs, end_column=c1)
+        s = ws.cell(row=rs, column=c0, value="サイン：")
+        s.alignment = signalign
+        for (r, cc) in [(rh, c0), (rh, c1), (rb, c0), (rb, c1), (rs, c0), (rs, c1)]:
             ws.cell(row=r, column=cc).border = Border(
                 left=thick if cc == c0 else thin,
                 right=thick if cc == c1 else thin,
                 top=thick if r == rh else thin,
-                bottom=thick if r == rb else thin,
+                bottom=thick if r == rs else thin,
             )
 
     ngrp = (len(courses) + per_row - 1) // per_row
     for grp in range(ngrp):
         block = courses[grp * per_row:(grp + 1) * per_row]
-        max_lines = max((len(c["flyers"]) + 1) for c in block)
-        ws.row_dimensions[2 + grp * 2].height = 20
-        ws.row_dimensions[3 + grp * 2].height = max(40, max_lines * 18)
+        max_lines = max(len(c["flyers"]) for c in block)
+        top = 2 + grp * ROWS_PER
+        ws.row_dimensions[top].height = 20
+        ws.row_dimensions[top + 1].height = max(36, max_lines * 18)
+        ws.row_dimensions[top + 2].height = 28
     for col in range(per_row):
         ws.column_dimensions[openpyxl.utils.get_column_letter(1 + col * 2)].width = 24
         ws.column_dimensions[openpyxl.utils.get_column_letter(2 + col * 2)].width = 6
 
-    last_row = 1 + ngrp * 2 if ngrp else 1
+    last_row = 1 + ngrp * ROWS_PER if ngrp else 1
     last_col = openpyxl.utils.get_column_letter(ncol)
     ws.print_area = f"A1:{last_col}{last_row}"
     ws.page_setup.orientation = "landscape"
