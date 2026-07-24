@@ -569,6 +569,118 @@ def build_shukei_workbook(data, version, title="京阪 集計表") -> bytes:
     return freeze_xlsx_bytes(buf.getvalue())
 
 
+def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
+    """集計表を実物帳票レイアウトで出力。上部=エリア×リーダー×チラシ種類数
+    マトリクス(6/行折返し・縦結合・右端に配布部数計/地区数計)、下部=チラシ種類数別・
+    集計指標(折チラシは手入力"—")・エリア別部数。"""
+    from openpyxl.styles import Alignment, Font, Border, Side
+    from openpyxl.worksheet.properties import PageSetupProperties
+    from openpyxl.utils import get_column_letter as gl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "集計表"
+    thin = Side(style="thin")
+    box = Border(left=thin, right=thin, top=thin, bottom=thin)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    bold = Font(bold=True)
+
+    label = _VERSION_LABEL.get(version, "京阪")
+    md = _md_from(haifubi)
+    ws.cell(1, 1, label).font = Font(bold=True, size=14)
+    ws.merge_cells("A1:E1")
+    g = ws.cell(1, 7, f"{md} 号" if md else "号")
+    g.font = bold
+    ws.merge_cells(start_row=1, start_column=7, end_row=1, end_column=31)
+
+    for c, txt in [(1, "エリア"), (2, "リーダー"), (3, "チラシ種類"),
+                   (5, "コース数"), (33, "配布部数"), (34, "地区数")]:
+        cell = ws.cell(3, c, txt)
+        cell.font = bold
+        cell.alignment = center
+        cell.border = box
+
+    PER_ROW = 6
+    r = 4
+    for area_block in _shukei_layout(data):
+        area_top = r
+        for leader in area_block["leaders"]:
+            ltop = r
+            for i, (t, ku, bu) in enumerate(leader["types"]):
+                if i and i % PER_ROW == 0:
+                    r += 1
+                col = 3 + (i % PER_ROW) * 5
+                for cc, val in [(col, t), (col + 1, "-"), (col + 2, ku), (col + 3, bu)]:
+                    cell = ws.cell(r, cc, val)
+                    cell.alignment = center
+                    cell.border = box
+            lbot = r
+            bcell = ws.cell(ltop, 2, leader["name"])
+            bcell.alignment = center
+            bcell.border = box
+            ag = ws.cell(ltop, 33, leader["busuu"]); ag.alignment = center; ag.border = box
+            ah = ws.cell(ltop, 34, leader["chiku"]); ah.alignment = center; ah.border = box
+            if lbot > ltop:
+                ws.merge_cells(start_row=ltop, start_column=2, end_row=lbot, end_column=2)
+                ws.merge_cells(start_row=ltop, start_column=33, end_row=lbot, end_column=33)
+                ws.merge_cells(start_row=ltop, start_column=34, end_row=lbot, end_column=34)
+            r += 1
+        area_bot = r - 1
+        acell = ws.cell(area_top, 1, int(area_block["area"]))
+        acell.alignment = center
+        acell.border = box
+        if area_bot > area_top:
+            ws.merge_cells(start_row=area_top, start_column=1, end_row=area_bot, end_column=1)
+        r += 1  # エリア区切りの空行
+
+    # ---- 下部集計 ----
+    br = r + 1
+    td = data["type_dist"]
+    rr = br
+    for t in range(11, -1, -1):
+        ku, bu = td.get(t, [0, 0])
+        for cc, val in [(2, t), (3, "-"), (4, ku), (6, bu)]:
+            ws.cell(rr, cc, val).alignment = center
+        rr += 1
+    ws.cell(rr, 2, data["total_chiku"]).font = bold
+    ws.cell(rr, 6, data["total_busuu"]).font = bold
+    total_row = rr
+
+    indicators = [
+        ("帳合", data["choai_busuu"]),
+        ("挿み込み", data["sashikomi_busuu"]),
+        ("ぱどのみ", data["pado_only_busuu"]),
+        ("折チラシ（B3,B4）", "—"),
+        ("チラシ総数", data["chirashi_sou"]),
+    ]
+    for k, (lab, val) in enumerate(indicators):
+        ws.cell(br + k, 13, lab).font = bold
+        ws.cell(br + k, 17, val)
+
+    for k, area in enumerate(sorted(data["area_busuu"], key=lambda a: int(a))):
+        ws.cell(br + 8 + k, 13, f"エリア{area}").font = bold
+        ws.cell(br + 8 + k, 15, "部")
+        ws.cell(br + 8 + k, 16, data["area_busuu"][area])
+
+    base_w = [3.6, 2.6, 4.7, 9.2, 3.7]
+    for col in range(3, 33):
+        ws.column_dimensions[gl(col)].width = base_w[(col - 3) % 5]
+    ws.column_dimensions["A"].width = 6.2
+    ws.column_dimensions["B"].width = 10.7
+    ws.column_dimensions["AG"].width = 10.6
+    ws.column_dimensions["AH"].width = 8.6
+
+    last_row = max(total_row, br + 12)
+    ws.print_area = f"A1:AH{last_row}"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToWidth = 1
+    ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return freeze_xlsx_bytes(buf.getvalue())
+
+
 def _shukei_layout(data):
     """集計表 上部マトリクスの並び。エリア昇順→リーダー(部数降順)→
     チラシ種類数昇順の (種類数, コース数, 部数)。"""

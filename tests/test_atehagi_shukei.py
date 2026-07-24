@@ -68,3 +68,34 @@ def test_shukei_layout_orders_area_leader_type():
     assert [l["name"] for l in a1] == ["aim", "fs"]            # 部数降順
     assert a1[0]["types"] == [(1, 1, 100), (2, 2, 200)]        # 種類数昇順
     assert a1[0]["busuu"] == 300 and a1[0]["chiku"] == 3
+
+
+def test_build_shukei_daishi_layout():
+    data = _sample_shukei_data()
+    out = A.build_shukei_daishi_workbook(data, A.KEIHAN_KITA, gou=1248, haifubi="2026-06-26")
+    wb = openpyxl.load_workbook(io.BytesIO(out))
+    ws = wb.active
+    # タイトル・ヘッダー
+    assert ws["A1"].value == "京阪北版"
+    assert ws["A3"].value == "エリア" and ws["B3"].value == "リーダー"
+    assert ws["C3"].value == "チラシ種類" and ws["E3"].value == "コース数"
+    assert ws["AG3"].value == "配布部数" and ws["AH3"].value == "地区数"
+    # 上部マトリクス: area1 aim(row4) → 種類数1,2 が C,H ブロック
+    assert ws["A4"].value == 1 and ws["B4"].value == "aim"
+    assert ws["C4"].value == 1 and ws["D4"].value == "-" and ws["E4"].value == 1 and ws["F4"].value == 100
+    assert ws["H4"].value == 2 and ws["K4"].value == 200
+    assert ws["AG4"].value == 300 and ws["AH4"].value == 3
+    # fs(row5), area2 x(row7・区切り空行あり)
+    assert ws["B5"].value == "fs" and ws["C5"].value == 0 and ws["F5"].value == 50
+    assert ws["A7"].value == 2 and ws["B7"].value == "x" and ws["C7"].value == 3 and ws["F7"].value == 150
+    # 下部: チラシ種類数別(11→0)＋総計。br = 上部末尾+2 = 10
+    assert ws["B10"].value == 11 and ws["D10"].value == 0            # 種類数11=データ無し→0
+    assert ws["B21"].value == 0 and ws["D21"].value == 1 and ws["F21"].value == 50   # 種類数0
+    assert ws["B22"].value == 6 and ws["F22"].value == 500          # 総計
+    # 集計指標(M列ラベル/Q列値)・折チラシ空
+    assert ws["M10"].value == "帳合" and ws["Q10"].value == 200
+    assert ws["M13"].value == "折チラシ（B3,B4）" and ws["Q13"].value == "—"
+    assert ws["M14"].value == "チラシ総数" and ws["Q14"].value == 9999
+    # エリア別部数
+    assert ws["M18"].value == "エリア1" and ws["P18"].value == 350
+    assert ws.page_setup.orientation == "landscape"
