@@ -2,11 +2,13 @@ import pytest
 from common import atehagi as A
 
 
-def test_area5_extracts_last5_digits():
-    assert A.area5(10101) == "10101"
-    assert A.area5("10101") == "10101"
-    assert A.area5("X-44408") == "44408"      # 数字以外を除去
-    assert A.area5("  46501 ") == "46501"
+def test_area_code_normalizes_digits():
+    assert A.area_code(10101) == "10101"
+    assert A.area_code("10101") == "10101"
+    assert A.area_code("X-44408") == "44408"      # 数字以外を除去
+    assert A.area_code("  46501 ") == "46501"
+    assert A.area_code("911001") == "911001"      # 南版6桁は落とさない
+    assert A.area_code("1234567") == "234567"     # 7桁以上の異常値のみ末尾6桁
 
 
 def test_chiku_name_kita_rule():
@@ -16,9 +18,14 @@ def test_chiku_name_kita_rule():
     assert A.chiku_name(A.KEIHAN_KITA, 46501) == "寝屋川・枚方"    # 先頭5扱いでなく4
 
 
-def test_chiku_name_minami_not_configured():
-    with pytest.raises(NotImplementedError):
-        A.chiku_name(A.KEIHAN_MINAMI, "10101")
+def test_chiku_name_minami_is_fixed():
+    # 南版は担当地区コードによらず「守口・門真」で固定（関西ぱど 2026-07-23）
+    assert A.chiku_name(A.KEIHAN_MINAMI, "911001") == "守口・門真"
+
+
+def test_chiku_name_unknown_version_raises():
+    with pytest.raises(ValueError):
+        A.chiku_name("西", "10101")
 
 
 def _sample_table():

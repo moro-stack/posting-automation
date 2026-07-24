@@ -18,24 +18,53 @@ KEIHAN_KITA = "北"
 KEIHAN_MINAMI = "南"
 
 
-def area5(chiku) -> str:
-    """担当地区コードを数字のみ抽出し末尾5桁に正規化する（VBA GetArea5 同等）。"""
-    digits = re.sub(r"\D", "", str(chiku))
-    return digits[-5:] if len(digits) >= 5 else digits
+_CODE_MAX_DIGITS = 6      # 担当地区コードの最大桁（北版5桁 / 南版6桁）
+_ZEN2HAN = str.maketrans("０１２３４５６７８９", "0123456789")
+
+
+def area_code(chiku) -> str:
+    """担当地区コードを数字のみ抽出して正規化する（グループ化キー・シート名に使う）。
+
+    北版は5桁（10101）、南版は6桁（911001）。7桁以上の異常値のみ末尾6桁に切る。
+    日本語入力のままの全角数字も受け付ける（画面から手入力されるため）。
+    ※旧 area5 は「末尾5桁」に切っていたため、南版の先頭1桁が落ちていた。
+    """
+    digits = re.sub(r"\D", "", str(chiku).translate(_ZEN2HAN))
+    return digits[-_CODE_MAX_DIGITS:] if len(digits) > _CODE_MAX_DIGITS else digits
+
+
+def area_code6(chiku) -> str:
+    """あて紙に印字する担当地区コード（6桁ゼロ埋め）。
+
+    北版 10101 → '010101' ／ 南版 911001 → '911001'（既に6桁なので0は足さない）。
+    先頭2桁が配送物名の番号（「01 ぱど」「91 ぱど」）と一致する（関西ぱど 2026-07-23）。
+    """
+    return area_code(chiku).zfill(_CODE_MAX_DIGITS)
+
+
+def area_no(chiku) -> str:
+    """エリア番号。担当地区コードの値をそのまま使い、勝手に振り直さない。
+
+    6桁ゼロ埋めの先頭2桁（＝配送物名の番号「01 ぱど」「91 ぱど」と一致する部分）から
+    表記上の先頭0だけを落とす。
+      北版 10101 → '010101' → '01' → **'1'**（従来どおり）
+      南版 911001 → '911001' → **'91'**（'1' に読み替えない）
+    先頭0付きのテキスト（'010101'）で来ても同じ番号になる。
+    """
+    return area_code6(chiku)[:2].lstrip("0") or "0"
 
 
 def chiku_name(version: str, chiku) -> str:
-    """版設定に応じた地区名を返す。京阪北版は担当地区コード先頭1桁で判定。"""
-    code = area5(chiku)
+    """版設定に応じた地区名を返す。京阪北版はエリア番号で判定。"""
     if version == KEIHAN_KITA:
-        head = code[:1]
+        head = area_no(chiku)
         if head in ("1", "2", "3"):
             return "枚方・交野"
         if head in ("4", "5"):
             return "寝屋川・枚方"
         return ""
     if version == KEIHAN_MINAMI:
-        raise NotImplementedError("京阪南版の地区名ルールは未設定です")
+        return "守口・門真"          # 南版は担当地区によらず共通（関西ぱど 2026-07-23）
     raise ValueError(f"未知の版: {version!r}")
 
 
@@ -105,11 +134,98 @@ def rows_from_table(table):
 
 
 def group_by_chiku(rows):
-    """担当地区コード（area5）をキーに、出現順を保持して束ねる。"""
+    """担当地区コード（area_code）をキーに、出現順を保持して束ねる。"""
     groups = OrderedDict()
     for r in rows:
-        groups.setdefault(area5(r["chiku"]), []).append(r)
+        groups.setdefault(area_code(r["chiku"]), []).append(r)
     return groups
+
+
+_PADO_MARK = "ぱど"
+
+
+def pado_row(group_rows):
+    """グループ内の「ぱど」行（配送物に'ぱど'を含む行）を返す。無ければ先頭行。
+
+    あて紙上部の部数・リーダー名の基準行。実データでは常に先頭行がぱど行だが、
+    並び順に依存すると入力の順序が変わったときに静かに誤るため明示的に探す
+    （関西ぱど 2026-07-23「部数は…ぱどの配布部数を基準にする」）。
+    """
+    for r in group_rows:
+        if _PADO_MARK in _s(r.get("haisoubutsu")):
+            return r
+    return group_rows[0]
+
+
+def parse_area_codes(text):
+    """担当地区コードの入力（カンマ/空白/改行区切り）を6桁ゼロ埋め一覧に正規化する。
+
+    「10101」でも「010101」でも同じコードとして扱う。重複は除き、入力順を保つ。
+    """
+    out, seen = [], set()
+    for tok in re.split(r"[,\s、，]+", str(text or "")):
+        digits = re.sub(r"\D", "", tok.translate(_ZEN2HAN))
+        if not digits:
+            continue
+        if len(digits) > _CODE_MAX_DIGITS:
+            # 「010101046501」のように区切りを忘れた入力。末尾6桁だけ採ると
+            # 前半の地区が黙って消えるため、不正としてまとめて弾く。
+            return []
+        code = area_code6(digits)
+        if code not in seen:
+            seen.add(code)
+            out.append(code)
+    return out
+
+
+def select_groups(groups, codes):
+    """指定した担当地区コードのグループだけを、指定された順で抜き出す。
+
+    codes は文字列（カンマ区切り可）でもコード一覧でもよい。ゼロ埋めの有無は問わない。
+    存在しないコードは黙って無視する（呼び出し側で差集合を取って警告できる）。
+    """
+    if isinstance(codes, str):
+        codes = parse_area_codes(codes)
+    index = {area_code6(k): k for k in groups}
+    selected = OrderedDict()
+    for c in codes:
+        key = index.get(area_code6(c))
+        if key is not None and key not in selected:
+            selected[key] = groups[key]
+    return selected
+
+
+_VERSION_PREFIX = {
+    KEIHAN_KITA: {"01", "02", "03", "04", "05"},
+    KEIHAN_MINAMI: {"91", "92"},
+}
+
+
+def detect_version(groups):
+    """担当地区コードから版（北/南）を推定する。判断できなければ None。
+
+    6桁ゼロ埋めの先頭2桁が、配送物名の番号（「01 ぱど」「91 ぱど」）と一致することを使う。
+    版を取り違えたまま生成すると、地区名が全件誤った紙が黙って出来上がるため、
+    画面で選ばれた版との食い違いを検出する用途に使う。
+    """
+    counts = {v: 0 for v in _VERSION_PREFIX}
+    for chiku in groups:
+        head2 = area_code6(chiku)[:2]
+        for ver, heads in _VERSION_PREFIX.items():
+            if head2 in heads:
+                counts[ver] += 1
+    hit = [v for v, n in counts.items() if n]
+    return hit[0] if len(hit) == 1 else None
+
+
+def overflow_areas(groups, limit=None):
+    """明細がテンプレの行数上限を超える地区の (コード, 明細件数) 一覧を返す。
+
+    テンプレの明細枠は13行しかなく、超過分は印字できない。
+    無警告で落とすと紙とチラシ数(I18)が食い違うため、呼び出し側で必ず通知する。
+    """
+    lim = _MAX_DETAIL_ROWS if limit is None else limit
+    return [(c, len(rs)) for c, rs in groups.items() if len(rs) > lim]
 
 
 def chirashi_count(group_rows) -> int:
@@ -148,6 +264,9 @@ def _apply_merges(ws):
 def _set_print(ws):
     ws.print_area = "A1:J18"
     ws.page_setup.orientation = "portrait"
+    # 用紙(B5 JIS=テンプレ由来)の左右・上下ともに中央へ（関西ぱど 2026-07-23）
+    ws.print_options.horizontalCentered = True
+    ws.print_options.verticalCentered = True
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 1
     if ws.sheet_properties.pageSetUpPr is None:
@@ -157,10 +276,14 @@ def _set_print(ws):
 
 
 def _fill_atehagi(ws, chiku, rows, version):
+    base = pado_row(rows)               # 上部の部数・名前は「ぱど行」が基準
     ws["A1"] = chiku_name(version, chiku)
-    ws["A3"] = rows[0]["padonna"]
-    ws["D4"] = int(chiku)
-    ws["G2"] = rows[0]["busuu"]
+    ws["A3"] = base["padonna"]
+    # 担当地区は6桁ゼロ埋めの1セルに印字する（関西ぱど 2026-07-23）。
+    # テンプレ固定の C4=0 は「5桁コードを6桁に見せる」ための作りだったので消す。
+    ws["D4"] = area_code6(chiku)
+    ws["C4"] = None
+    ws["G2"] = base["busuu"]
     for r in range(5, 19):          # 明細領域をクリア（H18ラベルもクリア=マクロ挙動）
         for c in range(2, 11):
             ws.cell(row=r, column=c).value = None
@@ -189,7 +312,8 @@ def build_atehagi_workbook(groups, version, template_path=TEMPLATE_PATH) -> byte
     return freeze_xlsx_bytes(buf.getvalue())
 
 
-def atehagi_filename(version, rows) -> str:
+def atehagi_filename(version, rows, chiku=None) -> str:
+    """あて紙のファイル名。chiku を渡すと担当地区コードを末尾に付ける（単票の刷り直し用）。"""
     label = _VERSION_LABEL.get(version, "京阪")
     gou = next((r["gou"] for r in rows if r.get("gou")), None)
     hb = next((r["haifubi"] for r in rows if r.get("haifubi")), "")
@@ -199,6 +323,12 @@ def atehagi_filename(version, rows) -> str:
         parts.append(f"{gou}号")
     if ymd:
         parts.append(ymd)
+    if chiku:
+        codes = [chiku] if isinstance(chiku, (str, int)) else list(chiku)
+        suffix = area_code6(codes[0])
+        if len(codes) > 1:
+            suffix += f"他{len(codes) - 1}件"
+        parts.append(suffix)
     return "_".join(parts) + ".xlsx"
 
 
@@ -216,14 +346,15 @@ def jisseki_rows(groups, version):
         if not chirashi:
             continue                      # ぱどのみ地区はスキップ
         n += 1
+        base = pado_row(rows)             # あて紙と同じ「ぱど行」基準
         out.append({
             "No.": n,
             "エリア": chiku_name(version, chiku),
-            "担当地区": int(chiku) if str(chiku).isdigit() else chiku,
-            "リーダー": rows[0]["padonna"],
+            "担当地区": area_code6(chiku),
+            "リーダー": base["padonna"],
             "チラシ種類数": len(chirashi),
             "チラシ内容": "、".join(r["haisoubutsu"] for r in chirashi),
-            "部数": rows[0]["busuu"],
+            "部数": base["busuu"],
             "サイン": "",
         })
     return out
@@ -290,9 +421,10 @@ def shukei_data(groups, version):
     choai_busuu = 0        # 帳合＝チラシ2種類以上の地区の部数
     sashikomi_busuu = 0    # 挿込＝チラシがある地区の部数（=総-ぱどのみ）
     for chiku, rows in groups.items():
-        area = area5(chiku)[:1]
-        leader = rows[0]["padonna"]
-        busuu = rows[0]["busuu"] or 0
+        area = area_no(chiku)
+        base = pado_row(rows)             # あて紙・実績表と同じ「ぱど行」基準
+        leader = base["padonna"]
+        busuu = base["busuu"] or 0
         ctype = sum(1 for r in rows if _s(r.get("size")) != "")   # チラシ種類数
         total_chiku += 1
         total_busuu += busuu

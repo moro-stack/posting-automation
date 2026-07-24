@@ -17,7 +17,7 @@ def test_build_atehagi_cells_match_layout():
     s = wb["10101"]
     assert s["A1"].value == "枚方・交野"
     assert s["A3"].value == "テスト太郎"
-    assert s["D4"].value == 10101
+    assert s["D4"].value == "010101"          # 6桁ゼロ埋め（関西ぱど 2026-07-23）
     assert s["G2"].value == 224
     assert s["B5"].value == "01 ぱど"
     assert s["I5"].value in (None, "")          # 先頭行はサイズ無し
@@ -28,7 +28,7 @@ def test_build_atehagi_cells_match_layout():
     assert s["I18"].value == 1                   # チラシ数
     # 固定ラベルは保持
     assert str(s["A4"].value).startswith("担当地区")
-    assert s["C4"].value == 0
+    assert s["C4"].value is None               # 固定の0は消す（D4が6桁になったため）
     # 結合セルは維持
     assert {"A3:E3", "D4:G4", "G2:I2"} <= {str(m) for m in s.merged_cells.ranges}
 

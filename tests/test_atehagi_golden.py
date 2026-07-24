@@ -28,6 +28,12 @@ _HEAD_CELLS = ["A1", "A3", "D4", "G2"]
 _BUSUU_CELLS = {"G2"} | {f"J{r}" for r in range(5, 18)}   # 部数はドリフトし得る
 _MAX_BUSUU_DRIFT = 80   # 見本ファイルの部数ドリフト許容上限（実測33。ここを超えたら実装バグ）
 
+# 2026-07-23 関西ぱど指摘により、担当地区(D4)は「6桁ゼロ埋め文字列」で印字する仕様に変更した
+# （マクロは 10101 という数値、アプリは "010101" という文字列）。
+# リテラル比較からは外すが、代わりに「マクロの値を6桁ゼロ埋めしたものと完全一致」を別途必須にする
+# ＝ 緩めるのではなく、意図した変換であることを厳密に検証する。
+_CHIKU_CELL = "D4"
+
 
 def _cells(ws):
     d = {c: ws[c].value for c in _HEAD_CELLS}
@@ -61,12 +67,27 @@ def test_generated_matches_macro_sheets():
     # 2) セル単位で突合し、部数(ドリフトし得る)とそれ以外に分けて評価
     nonbusuu_mismatch = []
     busuu_mismatch = []
+    chiku_mismatch = []
     for name in golden_names:
         gc, mc = _cells(gen[name]), _cells(macro[name])
         for k in mc:
+            if k == _CHIKU_CELL:
+                # 担当地区は「マクロの値を6桁ゼロ埋めしたもの」と完全一致すること。
+                # ⚠️ 期待値の組み立てに実装(A.area_code6)を使うと自己参照になり、
+                #    ゼロ埋めが壊れても両辺が同じように壊れて検出できない。
+                #    ここでは実装を経由せずテスト内で期待値を作る。
+                expected = str(mc.get(k)).strip().zfill(6)
+                if str(gc.get(k)) != expected:
+                    chiku_mismatch.append((name, k, gc.get(k), expected))
+                continue
             if _norm(gc.get(k)) != _norm(mc.get(k)):
                 (busuu_mismatch if k in _BUSUU_CELLS else nonbusuu_mismatch).append(
                     (name, k, gc.get(k), mc.get(k)))
+
+    # 2-b) 担当地区は 1件の例外もなく「6桁ゼロ埋め」であること
+    assert not chiku_mismatch, (
+        f"担当地区(D4)が6桁ゼロ埋めになっていない {len(chiku_mismatch)}件: "
+        f"先頭 {chiku_mismatch[:10]}")
 
     # 3) 部数以外(変換ロジック)は完全一致が必須
     assert not nonbusuu_mismatch, (
