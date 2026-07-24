@@ -569,6 +569,23 @@ def build_shukei_workbook(data, version, title="京阪 集計表") -> bytes:
     return freeze_xlsx_bytes(buf.getvalue())
 
 
+def _shukei_layout(data):
+    """集計表 上部マトリクスの並び。エリア昇順→リーダー(部数降順)→
+    チラシ種類数昇順の (種類数, コース数, 部数)。"""
+    areas = {}
+    for (area, leader), p in data["per"].items():
+        types = [(t, p["by_type"][t][0], p["by_type"][t][1])
+                 for t in sorted(p["by_type"])]
+        areas.setdefault(area, []).append({
+            "name": leader, "chiku": p["chiku"], "busuu": p["busuu"], "types": types,
+        })
+    out = []
+    for area in sorted(areas, key=lambda a: int(a)):
+        leaders = sorted(areas[area], key=lambda l: (-l["busuu"], l["name"]))
+        out.append({"area": area, "leaders": leaders})
+    return out
+
+
 def shukei_filename(version, rows) -> str:
     label = _VERSION_LABEL.get(version, "京阪")
     gou = next((r["gou"] for r in rows if r.get("gou")), None)

@@ -44,3 +44,27 @@ def test_shukei_filename():
     name = A.shukei_filename(A.KEIHAN_KITA, rows)
     assert name.startswith("京阪北版_集計表_1248号_")
     assert name.endswith(".xlsx")
+
+
+def _sample_shukei_data():
+    return {
+        "per": {
+            ("1", "aim"): {"chiku": 3, "busuu": 300, "by_type": {2: [2, 200], 1: [1, 100]}},
+            ("1", "fs"): {"chiku": 1, "busuu": 50, "by_type": {0: [1, 50]}},
+            ("2", "x"): {"chiku": 2, "busuu": 150, "by_type": {3: [2, 150]}},
+        },
+        "area_busuu": {"1": 350, "2": 150},
+        "area_chiku": {"1": 4, "2": 2},
+        "type_dist": {0: [1, 50], 1: [1, 100], 2: [2, 200], 3: [2, 150]},
+        "total_chiku": 6, "total_busuu": 500, "chirashi_sou": 9999,
+        "pado_only_busuu": 50, "choai_busuu": 200, "sashikomi_busuu": 450,
+    }
+
+
+def test_shukei_layout_orders_area_leader_type():
+    layout = A._shukei_layout(_sample_shukei_data())
+    assert [b["area"] for b in layout] == ["1", "2"]           # エリア昇順
+    a1 = layout[0]["leaders"]
+    assert [l["name"] for l in a1] == ["aim", "fs"]            # 部数降順
+    assert a1[0]["types"] == [(1, 1, 100), (2, 2, 200)]        # 種類数昇順
+    assert a1[0]["busuu"] == 300 and a1[0]["chiku"] == 3
