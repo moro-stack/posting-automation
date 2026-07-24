@@ -6,10 +6,6 @@ from common import atehagi as A
 from tests.test_atehagi import _sample_table
 
 
-def _groups():
-    return A.group_by_chiku(A.rows_from_table(_sample_table()))
-
-
 def test_jisseki_filename():
     rows = A.rows_from_table(_sample_table())
     name = A.jisseki_filename(A.KEIHAN_KITA, rows)
