@@ -17,7 +17,7 @@ def test_jisseki_rows_skips_pado_only_area():
     r = rows[0]
     assert r["No."] == 1
     assert r["エリア"] == "枚方・交野"
-    assert r["担当地区"] == 10101
+    assert r["担当地区"] == "010101"     # あて紙と同じ6桁ゼロ埋め（関西ぱど 2026-07-23）
     assert r["リーダー"] == "テスト太郎"
     assert r["チラシ種類数"] == 1
     assert r["チラシ内容"] == "サンプル生協"
