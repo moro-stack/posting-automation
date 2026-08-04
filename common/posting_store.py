@@ -82,6 +82,11 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             project_id INTEGER, content TEXT, amount INTEGER NOT NULL,
             created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS distributor_daily_rates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            distributor_id INTEGER NOT NULL,
+            work_name TEXT NOT NULL,
+            amount INTEGER NOT NULL DEFAULT 0);
         """
     )
     # 買掛に請求書の日付(YYYY-MM-DD)を持たせる(#12)。旧DBは自動でカラム追加。
@@ -99,11 +104,33 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     ci_cols = {r[1] for r in conn.execute("PRAGMA table_info(contract_invoices)")}
     if "last_exported_at" not in ci_cols:
         conn.execute("ALTER TABLE contract_invoices ADD COLUMN last_exported_at TEXT")
+    # 業務委託の請求に「登録時点の支払形態」のスナップショットを持たせる。
+    # マスタの現在値を見て過去請求を描くと後からの支払形態変更で数量の意味が変わってしまうため。
+    if "pay_type" not in ci_cols:
+        conn.execute("ALTER TABLE contract_invoices ADD COLUMN pay_type TEXT")
+    # 歩合以外(日当・時給・月給)は数量が部数でないため、配布部数を別列で持つ。
+    cil_cols = {r[1] for r in conn.execute("PRAGMA table_info(contract_invoice_lines)")}
+    if "copies" not in cil_cols:
+        conn.execute("ALTER TABLE contract_invoice_lines ADD COLUMN copies INTEGER")
     # 案件=「その他」で登録した時の『何の案件か』手入力を持たせる。旧DBは自動でカラム追加。
     for tbl in ("petty_cash", "payables", "receivables", "contract_invoice_lines"):
         cols = {r[1] for r in conn.execute(f"PRAGMA table_info({tbl})")}
         if "other_label" not in cols:
             conn.execute(f"ALTER TABLE {tbl} ADD COLUMN other_label TEXT")
+    # 業務委託(配布員)に 振込先・支払形態・時給額・月額 を持たせる。旧DBは自動でカラム追加。
+    dist_cols = {r[1] for r in conn.execute("PRAGMA table_info(distributors)")}
+    for col, typ in (("bank_info", "TEXT"), ("pay_type", "TEXT"),
+                     ("hourly_rate", "INTEGER"), ("monthly_rate", "INTEGER")):
+        if col not in dist_cols:
+            conn.execute(f"ALTER TABLE distributors ADD COLUMN {col} {typ}")
+    # 小口に配布員を持たせる(誰の分の費用か号別明細で追えるように)。旧DBは自動でカラム追加。
+    petty_cols = {r[1] for r in conn.execute("PRAGMA table_info(petty_cash)")}
+    if "distributor_id" not in petty_cols:
+        conn.execute("ALTER TABLE petty_cash ADD COLUMN distributor_id INTEGER")
+    # 買掛先マスタに「既定の原本区分」を持たせる(買掛登録で自動セットするため)。
+    ven_cols = {r[1] for r in conn.execute("PRAGMA table_info(payables_vendors)")}
+    if "default_original_status" not in ven_cols:
+        conn.execute("ALTER TABLE payables_vendors ADD COLUMN default_original_status TEXT")
     conn.commit()
 
 
@@ -197,18 +224,22 @@ def delete_expense_category(row_id, *, db_path=None):
 
 
 # --- payables_vendors ---
-def add_payables_vendor(name, *, default_category=None, active=1, db_path=None):
-    return _add("payables_vendors", ["name", "default_category", "active"],
-                [name, default_category, int(active)], db_path)
+def add_payables_vendor(name, *, default_category=None, default_original_status=None,
+                        active=1, db_path=None):
+    return _add("payables_vendors",
+                ["name", "default_category", "default_original_status", "active"],
+                [name, default_category, default_original_status, int(active)], db_path)
 
 
 def list_payables_vendors(*, only_active=False, db_path=None):
     return _list("payables_vendors", only_active, db_path)
 
 
-def update_payables_vendor(row_id, *, name=_UNSET, default_category=_UNSET, active=_UNSET, db_path=None):
+def update_payables_vendor(row_id, *, name=_UNSET, default_category=_UNSET,
+                           default_original_status=_UNSET, active=_UNSET, db_path=None):
     _update("payables_vendors", row_id,
-            {"name": name, "default_category": default_category, "active": active}, db_path)
+            {"name": name, "default_category": default_category,
+             "default_original_status": default_original_status, "active": active}, db_path)
 
 
 def delete_payables_vendor(row_id, *, db_path=None):
@@ -233,20 +264,64 @@ def delete_receivables_client(row_id, *, db_path=None):
 
 
 # --- distributors ---
-def add_distributor(name, *, kind="業務委託", active=1, db_path=None):
-    return _add("distributors", ["name", "kind", "active"], [name, kind, int(active)], db_path)
+def add_distributor(name, *, kind="業務委託", bank_info=None, pay_type=None,
+                    hourly_rate=None, monthly_rate=None, active=1, db_path=None):
+    return _add("distributors",
+                ["name", "kind", "bank_info", "pay_type", "hourly_rate",
+                 "monthly_rate", "active"],
+                [name, kind, bank_info, pay_type, _int_or_none(hourly_rate),
+                 _int_or_none(monthly_rate), int(active)], db_path)
 
 
 def list_distributors(*, only_active=False, db_path=None):
     return _list("distributors", only_active, db_path)
 
 
-def update_distributor(row_id, *, name=_UNSET, kind=_UNSET, active=_UNSET, db_path=None):
-    _update("distributors", row_id, {"name": name, "kind": kind, "active": active}, db_path)
+def update_distributor(row_id, *, name=_UNSET, kind=_UNSET, bank_info=_UNSET,
+                       pay_type=_UNSET, hourly_rate=_UNSET, monthly_rate=_UNSET,
+                       active=_UNSET, db_path=None):
+    _update("distributors", row_id,
+            {"name": name, "kind": kind, "bank_info": bank_info, "pay_type": pay_type,
+             "hourly_rate": (_int_or_none(hourly_rate) if hourly_rate is not _UNSET else _UNSET),
+             "monthly_rate": (_int_or_none(monthly_rate) if monthly_rate is not _UNSET else _UNSET),
+             "active": active}, db_path)
 
 
 def delete_distributor(row_id, *, db_path=None):
     _delete("distributors", row_id, db_path)
+
+
+def list_daily_rates(distributor_id, *, db_path=None):
+    """支払形態=日当の配布員の、業務名ごとの日当金額。"""
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM distributor_daily_rates WHERE distributor_id=? ORDER BY id",
+            (int(distributor_id),)).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def replace_daily_rates(distributor_id, rates, *, db_path=None):
+    """その配布員の日当金額を丸ごと入れ替える(全消し→入れ直し)。
+    画面の data_editor が「編集後の全行」を返すので、差分を取るより入れ替えが素直。"""
+    conn = _connect(db_path)
+    try:
+        conn.execute("DELETE FROM distributor_daily_rates WHERE distributor_id=?",
+                     (int(distributor_id),))
+        for r in rates:
+            name = str(r.get("work_name") or "").strip()
+            if not name:
+                continue
+            conn.execute(
+                "INSERT INTO distributor_daily_rates (distributor_id, work_name, amount)"
+                " VALUES (?,?,?)",
+                (int(distributor_id), name, int(r.get("amount") or 0)))
+        conn.commit()
+    finally:
+        conn.close()
+    _push_remote(db_path)
 
 
 _PRESET_PROJECTS = ["関西ぱど：京阪北版", "関西ぱど：京阪南版", "アドバリュー",
@@ -269,6 +344,36 @@ _PRESET_CLIENTS = ["株式会社関西ぱど　北大阪営業部", "株式会�
                    "株式会社アド・バリュー", "株式会社リビングプロシード"]
 
 
+# マスタごとに「どのテーブルのどの列で使われているか」。停止中方式の判定に使う。
+_MASTER_USAGE = {
+    "project": [("petty_cash", "project_id"), ("payables", "project_id"),
+                ("receivables", "project_id"), ("contract_invoice_lines", "project_id"),
+                ("issue_manual_costs", "project_id")],
+    "expense_category": [("petty_cash", "category_id")],
+    "payables_vendor": [("payables", "vendor_id")],
+    "receivables_client": [("receivables", "client_id")],
+    "distributor": [("contract_invoices", "distributor_id"),
+                    ("petty_cash", "distributor_id")],
+}
+
+
+def count_master_usage(master, row_id, *, db_path=None) -> int:
+    """マスタの行が実データで何件使われているかを数える。
+    0件なら消してよい(物理削除)、1件以上なら消すと過去データの表示が欠けるので停止中にする。"""
+    if master not in _MASTER_USAGE:
+        raise ValueError(f"unknown master: {master}")
+    conn = _connect(db_path)
+    try:
+        total = 0
+        for table, col in _MASTER_USAGE[master]:
+            row = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE {col}=?",
+                               (int(row_id),)).fetchone()
+            total += int(row[0])
+        return total
+    finally:
+        conn.close()
+
+
 def seed_masters(*, db_path=None) -> None:
     if not list_projects(db_path=db_path):
         for n in _PRESET_PROJECTS:
@@ -286,12 +391,13 @@ def seed_masters(*, db_path=None) -> None:
 
 # --- petty_cash ---
 def add_petty_cash(date, category_id, amount, *, project_id=None, memo=None,
-                   source="manual", other_label=None, db_path=None, now=None):
+                   source="manual", other_label=None, distributor_id=None,
+                   db_path=None, now=None):
     return _add("petty_cash",
                 ["date", "category_id", "amount", "project_id", "memo", "source",
-                 "other_label", "created_at"],
+                 "other_label", "distributor_id", "created_at"],
                 [date, _int_or_none(category_id), int(amount), _int_or_none(project_id),
-                 memo, source, other_label, _now(now)], db_path)
+                 memo, source, other_label, _int_or_none(distributor_id), _now(now)], db_path)
 
 
 def list_petty_cash(*, project_id=None, date_from=None, date_to=None, db_path=None):
@@ -426,24 +532,27 @@ def delete_receivable(row_id, *, db_path=None):
 
 # --- contract_invoices ---
 def add_contract_invoice(distributor_id, issue_date, period_from, period_to, lines,
-                         *, db_path=None, now=None):
+                         *, pay_type=None, db_path=None, now=None):
     conn = _connect(db_path)
     try:
         cur = conn.execute(
             "INSERT INTO contract_invoices"
-            " (distributor_id, issue_date, period_from, period_to, created_at)"
-            " VALUES (?,?,?,?,?)",
-            (_int_or_none(distributor_id), issue_date, period_from, period_to, _now(now)))
+            " (distributor_id, issue_date, period_from, period_to, pay_type, created_at)"
+            " VALUES (?,?,?,?,?,?)",
+            (_int_or_none(distributor_id), issue_date, period_from, period_to,
+             pay_type, _now(now)))
         invoice_id = int(cur.lastrowid)
         for ln in lines:
             qty = float(ln.get("report_qty") or 0)
             price = float(ln.get("unit_price") or 0)
             conn.execute(
                 "INSERT INTO contract_invoice_lines"
-                " (invoice_id, project_id, report_qty, unit_price, amount, remark, other_label)"
-                " VALUES (?,?,?,?,?,?,?)",
+                " (invoice_id, project_id, report_qty, unit_price, amount, remark,"
+                "  other_label, copies)"
+                " VALUES (?,?,?,?,?,?,?,?)",
                 (invoice_id, _int_or_none(ln.get("project_id")), qty, price,
-                 qty * price, ln.get("remark"), ln.get("other_label")))
+                 qty * price, ln.get("remark"), ln.get("other_label"),
+                 _int_or_none(ln.get("copies"))))
         conn.commit()
     finally:
         conn.close()

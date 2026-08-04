@@ -33,7 +33,9 @@ def _parse_int(s):
     return int(digits) if digits else 0
 
 
-projs = store.list_projects(only_active=True)
+# 停止中も含めて引く。号別明細は「登録の選択肢」ではなく「過去データの表示」なので、
+# 案件を停止中にしても号は出し続ける(配布員の名前引きと同じ扱い)。
+projs = store.list_projects()
 if not projs:
     st.warning("案件マスタが空です。『マスタ管理』で登録してください。")
     st.stop()
@@ -57,10 +59,10 @@ st.caption(f"表示期間: {period_note}")
 # ===== コストを集める =====
 petty = posting_logic.filter_rows_by_period(
     store.list_petty_cash(project_id=pid), "date", lo, hi)
-payables = posting_logic.filter_rows_by_period(
-    store.list_payables(project_id=pid), "month", lo, hi)
 receivables = posting_logic.filter_rows_by_period(
     store.list_receivables(project_id=pid), "month", lo, hi)
+
+_dist_names = {d["id"]: d["name"] for d in store.list_distributors()}  # 停止中も含めて引く
 
 contract_lines = []
 for inv in store.list_contract_invoices():
@@ -70,6 +72,8 @@ for inv in store.list_contract_invoices():
     for ln in detail["lines"]:
         ln = dict(ln)
         ln["issue_date"] = inv.get("issue_date")   # その他の案件内訳で発行日を出すため
+        ln["distributor_name"] = _dist_names.get(inv.get("distributor_id"), "")
+        ln["pay_type"] = inv.get("pay_type")       # 登録時点の支払形態(マスタの現在値は使わない)
         contract_lines.append(ln)
 
 # 直接入力(配布員代): work_date で期間絞り込み。日付なしは常に計上。
@@ -78,10 +82,9 @@ manual = [r for r in all_manual
           if r.get("work_date") is None or posting_logic.in_period(r.get("work_date"), lo, hi)]
 
 agg = posting_logic.aggregate_issue(
-    pid, petty=petty, payables=payables, contract_lines=contract_lines, manual=manual)
+    pid, petty=petty, payables=[], contract_lines=contract_lines, manual=manual)
 groups = posting_logic.cost_groups(agg)
 petty_total = sum(posting_logic._num(r.get("amount")) for r in petty)
-pay_total = sum(posting_logic._num(r.get("amount")) for r in payables)
 receivable_total = sum(posting_logic._num(r.get("amount")) for r in receivables)
 profit = receivable_total - groups["genka"]
 
@@ -127,8 +130,11 @@ def _with_label(row, other_label):
 
 # ===== 配布員代（詳細は折りたたみ） =====
 issue_contract = [l for l in contract_lines if l.get("project_id") == pid]
-_con_disp = [_with_label({"種別": l.get("remark") or "",
-                          "数量": posting_logic.qty_label(l.get("report_qty"), l.get("remark")),
+_con_disp = [_with_label({"支払日": l.get("issue_date") or "",
+                          "配布員": l.get("distributor_name") or "",
+                          "種別": l.get("remark") or "",
+                          "数量": posting_logic.qty_label(l.get("report_qty"), l.get("remark"),
+                                                        l.get("pay_type")),
                           "単価": _yen(l.get("unit_price")), "合計": _yen(l.get("amount"))},
                          l.get("other_label"))
              for l in issue_contract]
@@ -193,40 +199,34 @@ with st.expander(f":material/groups: 配布員代の内訳（業務委託＋直�
 
 # ===== 雑費（詳細は折りたたみ） =====
 _cats = {c["id"]: c["name"] for c in store.list_expense_categories()}
-_vends = {v["id"]: v["name"] for v in store.list_payables_vendors()}
 _misc = []
 for r in petty:
     item = _cats.get(r.get("category_id"), "")
     if r.get("memo"):
         item = f'{item}（{r["memo"]}）' if item else r["memo"]
     _misc.append(_with_label(
-        {"項目": item or "小口", "金額": _yen(r.get("amount")),
+        {"配布員": _dist_names.get(r.get("distributor_id"), ""),
+         "項目": item or "小口", "金額": _yen(r.get("amount")),
          "支払方法": posting_logic.payment_method("petty", r),
          "日付": r.get("date") or ""}, r.get("other_label")))
-for r in payables:
-    item = r.get("vendor_name") or _vends.get(r.get("vendor_id"), "")
-    _misc.append(_with_label(
-        {"項目": item or "買掛", "金額": _yen(r.get("amount")),
-         "支払方法": posting_logic.payment_method("payable", r),
-         "日付": r.get("date") or r.get("month") or ""}, r.get("other_label")))
 
-with st.expander(f":material/receipt_long: 雑費の内訳（小口＋買掛）　—　小計 {_yen(groups['misc'])}",
+with st.expander(f":material/receipt_long: 雑費の内訳（小口）　—　小計 {_yen(groups['misc'])}",
                  expanded=False):
-    st.caption(f"雑費 ＝ 小口 {_yen(petty_total)} ＋ 買掛 {_yen(pay_total)}")
-    nice_table(_misc, "この号の雑費（小口・買掛）はありません。")
+    st.caption(f"雑費 ＝ 小口 {_yen(petty_total)}")
+    nice_table(_misc, "この号の雑費（小口）はありません。")
     section_export(_misc, f"雑費_{sel}", key="issue_misc")
 
 # ===== 号原価まとめ 出力 =====
 _buf = io.BytesIO()
 with pd.ExcelWriter(_buf, engine="openpyxl") as writer:
     (pd.DataFrame(_con_disp) if _con_disp
-     else pd.DataFrame(columns=["種別", "数量", "単価", "合計"])).to_excel(
+     else pd.DataFrame(columns=["支払日", "配布員", "種別", "数量", "単価", "合計"])).to_excel(
         writer, index=False, sheet_name="業務委託")
     (pd.DataFrame(_man_disp) if _man_disp
      else pd.DataFrame(columns=["日付", "曜日", "作業", "金額"])).to_excel(
         writer, index=False, sheet_name="直接入力")
     (pd.DataFrame(_misc) if _misc
-     else pd.DataFrame(columns=["項目", "金額", "支払方法", "日付"])).to_excel(
+     else pd.DataFrame(columns=["配布員", "項目", "金額", "支払方法", "日付"])).to_excel(
         writer, index=False, sheet_name="雑費")
     pd.DataFrame([{"項目": "配布員代", "金額": groups["labor"]},
                   {"項目": "雑費", "金額": groups["misc"]},

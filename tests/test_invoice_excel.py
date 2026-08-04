@@ -137,6 +137,91 @@ def test_build_invoice_rejects_more_than_max_line_rows():
             period_from="", period_to="", lines=lines)
 
 
+def test_invoice_xlsx_nichito_puts_days_in_remark():
+    """日当の請求書は備考に「配布（3 日）」と単位が出る。数量セルは日数の数値。"""
+    xlsx = invoice_excel.build_invoice_xlsx(
+        distributor_name="山田太郎", issue_date="2026-07-17",
+        period_from="2026-07-01", period_to="2026-07-15",
+        lines=[{"project_name": "案件A", "report_qty": 3, "unit_price": 8000,
+                "amount": 24000, "remark": "配布", "copies": 3713}],
+        pay_type="日当")
+    ws = _load(xlsx)
+    assert ws["D13"].value == 3
+    assert ws["G13"].value == "配布（3 日）"
+    # 報告数は copies 列から取る(数量の3ではない)
+    assert ws["F20"].value == "3,713部"
+
+
+def test_invoice_xlsx_jikyu_puts_hours_in_remark():
+    """時給は備考に「配布（8 時間）」と出る。報告数は copies から。"""
+    xlsx = invoice_excel.build_invoice_xlsx(
+        distributor_name="時給の人", issue_date="2026-07-17",
+        period_from="2026-07-01", period_to="2026-07-15",
+        lines=[{"project_name": "案件A", "report_qty": 8, "unit_price": 1200,
+                "amount": 9600, "remark": "配布", "copies": 1200}],
+        pay_type="時給")
+    ws = _load(xlsx)
+    assert ws["D13"].value == 8
+    assert ws["G13"].value == "配布（8 時間）"
+    assert ws["F20"].value == "1,200部"
+
+
+def test_invoice_xlsx_getkyu_shows_isshiki():
+    """月給は数量を数えないので数量セルが「一式」。"""
+    xlsx = invoice_excel.build_invoice_xlsx(
+        distributor_name="月給の人", issue_date="2026-07-17",
+        period_from="2026-07-01", period_to="2026-07-31",
+        lines=[{"project_name": "案件A", "report_qty": 1, "unit_price": 250000,
+                "amount": 250000, "remark": "配布", "copies": 5000}],
+        pay_type="月給")
+    ws = _load(xlsx)
+    assert ws["D13"].value == "一式"
+    assert ws["G13"].value == "配布"       # 一式の行に単位は併記しない
+    assert ws["F20"].value == "5,000部"
+
+
+def test_invoice_xlsx_nichito_does_not_add_unit_to_non_delivery_rows():
+    """日当でも、交通費・手当は数を数えない(一式)ので備考に単位を併記しない。"""
+    xlsx = invoice_excel.build_invoice_xlsx(
+        distributor_name="山田太郎", issue_date="2026-07-17",
+        period_from="2026-07-01", period_to="2026-07-15",
+        lines=[{"project_name": "案件A", "report_qty": 3, "unit_price": 8000,
+                "amount": 24000, "remark": "配布", "copies": 3713},
+               {"project_name": "案件A", "report_qty": 1, "unit_price": 540,
+                "amount": 540, "remark": "交通費"}],
+        pay_type="日当")
+    ws = _load(xlsx)
+    assert ws["G13"].value == "配布（3 日）"
+    assert ws["D14"].value == "一式"
+    assert ws["G14"].value == "交通費"
+
+
+def test_invoice_xlsx_without_pay_type_keeps_current_behavior():
+    """pay_type を渡さない既存の呼び出しは1ミリも変わらない(後方互換)。"""
+    xlsx = invoice_excel.build_invoice_xlsx(
+        distributor_name="山田太郎", issue_date="2026-07-17",
+        period_from="2026-07-01", period_to="2026-07-15",
+        lines=[{"project_name": "案件A", "report_qty": 3713, "unit_price": 2.5,
+                "amount": 9283, "remark": "配布"},
+               {"project_name": "案件A", "report_qty": 1, "unit_price": 540,
+                "amount": 540, "remark": "交通費"}])
+    ws = _load(xlsx)
+    assert ws["D13"].value == 3713          # 配布は数値のまま
+    assert ws["G13"].value == "配布"         # 備考に単位は付けない
+    assert ws["D14"].value == "一式"         # 交通費は今まで通り
+    assert ws["F20"].value == "3,713部"
+
+
+def test_invoice_xlsx_houbai_pay_type_matches_no_pay_type():
+    """歩合を明示しても、pay_type なしと同じ出力になること。"""
+    kw = dict(distributor_name="山田太郎", issue_date="2026-07-17",
+              period_from="2026-07-01", period_to="2026-07-15",
+              lines=[{"project_name": "案件A", "report_qty": 3713, "unit_price": 2.5,
+                      "amount": 9283, "remark": "配布"}])
+    assert (hashlib.md5(invoice_excel.build_invoice_xlsx(**kw, pay_type="歩合")).hexdigest()
+            == hashlib.md5(invoice_excel.build_invoice_xlsx(**kw)).hexdigest())
+
+
 def test_freeze_xlsx_bytes_stabilises_pandas_output():
     """一覧の「Excelで保存」(pandas出力)も、同じ内容なら同じバイト列になること。"""
     import pandas as pd

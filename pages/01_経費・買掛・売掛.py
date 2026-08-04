@@ -6,7 +6,9 @@ import streamlit as st
 from common import ocr
 from common import posting_logic
 from common import posting_store as store
-from common.ui import apply_app_style, section_export, nice_table, period_picker, flash, show_flash
+from common.ui import (apply_app_style, section_export, nice_table, period_picker,
+                       flash, show_flash, confirm_delete,
+                       checkbox_list_editor, selected_rows_excel_button, bulk_delete_action)
 
 apply_app_style()
 st.title("小口／買掛／売掛の登録")
@@ -16,10 +18,15 @@ mode = st.radio("入力の種類", ["小口", "買掛", "売掛"], horizontal=Tr
 _UPLOAD_TYPES = ["pdf", "jpg", "jpeg", "png"]
 _REG_TAB = "✒️ 登録"
 _LIST_TAB = "📋 登録済み一覧"
+_ORIGINAL_STATUSES = posting_logic.ORIGINAL_STATUSES
 
 
 def _project_options():
     return {p["name"]: p["id"] for p in store.list_projects(only_active=True)}
+
+
+def _distributor_options():
+    return {d["name"]: d["id"] for d in store.list_distributors(only_active=True)}
 
 
 def _yen(v):
@@ -141,14 +148,15 @@ if mode == "小口":
             st.warning("⚠️ 同様の内容が登録済みです。それでも登録しますか？")
             st.caption(f"日付 {p['date'] or '—'} ／ 金額 ¥{p['amount']:,}")
             cc1, cc2, _ = st.columns([1, 1, 4])
-            if cc1.button("はい、登録する", type="primary", key="petty_ok"):
+            if cc1.button("はい", type="primary", key="petty_ok"):
                 store.add_petty_cash(p["date"], p["category_id"], p["amount"],
                                      project_id=p["project_id"], memo=p["memo"],
-                                     source=p["source"], other_label=p.get("other_label"))
+                                     source=p["source"], other_label=p.get("other_label"),
+                                     distributor_id=p.get("distributor_id"))
                 del st.session_state["petty_pending"]
                 flash("登録しました")
                 st.rerun()
-            if cc2.button("やめる", key="petty_no"):
+            if cc2.button("いいえ", key="petty_no"):
                 del st.session_state["petty_pending"]
                 st.rerun()
 
@@ -160,6 +168,9 @@ if mode == "小口":
                                      value=int(draft.get("amount") or 0), step=1)
             projs = _project_options()
             proj = st.selectbox("案件(任意)", ["(なし)"] + list(projs.keys()))
+            dists = _distributor_options()
+            dist = st.selectbox("配布員(任意)", ["(なし)"] + list(dists.keys()),
+                                help="この費用が誰の分か。号別明細の雑費の内訳に出ます。")
             other_label = st.text_input(
                 "その他の案件名", placeholder="案件を「その他」にしたとき、何の案件か入力",
                 help="案件を『その他』にしたときだけ使われます。号別明細の『その他』で確認できます。")
@@ -168,27 +179,43 @@ if mode == "小口":
                 payload = {"date": date or None, "category_id": cats.get(cat), "amount": int(amount),
                            "project_id": projs.get(proj), "memo": memo or None,
                            "source": "ocr" if ups else "manual",
+                           "distributor_id": dists.get(dist),
                            "other_label": (other_label.strip() or None) if proj == "その他" else None}
                 if store.find_duplicate_petty(payload["date"], payload["category_id"], payload["amount"]):
                     st.session_state["petty_pending"] = payload
                     st.rerun()
                 store.add_petty_cash(payload["date"], payload["category_id"], payload["amount"],
                                      project_id=payload["project_id"], memo=payload["memo"],
-                                     source=payload["source"], other_label=payload["other_label"])
+                                     source=payload["source"], other_label=payload["other_label"],
+                                     distributor_id=payload["distributor_id"])
                 st.session_state.pop("petty_draft", None)
                 flash("登録しました")
                 st.rerun()
 
     with tab_list:
+        show_flash("petty")
         st.markdown("**登録済みの小口一覧**")
         _cats, _projs = _names(store.list_expense_categories), _names(store.list_projects)
+        _dists = _names(store.list_distributors)
         _rows = _period_filter(store.list_petty_cash(), "date", "petty_period", "小口")
-        _disp = [{"日付": r["date"] or "", "費目": _cats.get(r["category_id"], ""),
+        _disp = [{"No.": r["id"], "日付": r["date"] or "",
+                  "配布員": _dists.get(r.get("distributor_id"), ""),
+                  "費目": _cats.get(r["category_id"], ""),
                   "金額": _yen(r["amount"]), "案件": _projs.get(r["project_id"], ""),
                   "メモ": r["memo"] or "",
                   "登録日": (r.get("created_at") or "")[:10]} for r in _rows]
-        nice_table(_disp, "小口の登録はまだありません。")
-        section_export(_disp, "小口一覧", key="petty")
+        if not _disp:
+            st.caption("小口の登録はまだありません。")
+        else:
+            section_export(_disp, "小口一覧", key="petty")   # 全件Excel/印刷（残す）
+            edited = checkbox_list_editor(_disp, key="petty_select")
+            selected_ids = posting_logic.selected_ids_from_editor(edited)
+            st.caption(f"選択中：{len(selected_ids)}件")
+            b1, b2 = st.columns(2)
+            selected_rows_excel_button(edited, key="petty_sel_xlsx",
+                                       filename="小口_選択一覧", container=b1)
+            bulk_delete_action(selected_ids, delete_fn=store.delete_petty_cash,
+                               section="petty", key="petty_bulk_del", container=b2)
 
 elif mode == "買掛":
     st.subheader("買掛（固定費・法人業者）")
@@ -252,7 +279,7 @@ elif mode == "買掛":
             st.warning("⚠️ 同様の内容が登録済みです。それでも登録しますか？")
             st.caption(f"請求書の日付 {p['date'] or '—'} ／ 金額 ¥{p['amount']:,}")
             cc1, cc2, _ = st.columns([1, 1, 4])
-            if cc1.button("はい、登録する", type="primary", key="pay_ok"):
+            if cc1.button("はい", type="primary", key="pay_ok"):
                 store.add_payable(None, None, p["amount"], date=p["date"],
                                   vendor_name=p["vendor_name"], original_status=p["original_status"],
                                   note=p["note"], source=p["source"],
@@ -260,7 +287,7 @@ elif mode == "買掛":
                 del st.session_state["pay_pending"]
                 flash("登録しました")
                 st.rerun()
-            if cc2.button("やめる", key="pay_no"):
+            if cc2.button("いいえ", key="pay_no"):
                 del st.session_state["pay_pending"]
                 st.rerun()
 
@@ -270,8 +297,16 @@ elif mode == "買掛":
             vendor = st.text_input("取引先（請求元の会社名）", value=draft.get("vendor") or "")
             amount = st.number_input("金額(税込)", min_value=0,
                                      value=int(draft.get("amount") or 0), step=1)
-            original = st.selectbox("原本区分",
-                                    ["原本あり", "本社", "クレジット", "振込用紙", "なし"])
+            _vendors = store.list_payables_vendors()
+            _auto = posting_logic.resolve_original_status(vendor, _vendors)
+            original = st.selectbox(
+                "原本区分", _ORIGINAL_STATUSES,
+                index=(_ORIGINAL_STATUSES.index(_auto) if _auto in _ORIGINAL_STATUSES else 0))
+            # caption の条件は selectbox の index と必ず揃えること。`if _auto:` だけにすると
+            # 選択肢に無い値のとき、実際は先頭(原本あり)が選ばれているのに
+            # 「既定『◯◯』を反映しました」と嘘の案内が出る。
+            if _auto in _ORIGINAL_STATUSES:
+                st.caption(f"✔️ 買掛先マスタの既定「{_auto}」を反映しました（変更できます）。")
             pay_projs = _project_options()
             pay_proj = st.selectbox("案件(任意)", ["(なし)"] + list(pay_projs.keys()))
             pay_other = st.text_input(
@@ -298,18 +333,29 @@ elif mode == "買掛":
                 st.rerun()
 
     with tab_list:
+        show_flash("payable")
         st.markdown("**登録済みの買掛一覧**")
         _vends = _names(store.list_payables_vendors)
         _rows = _period_filter(store.list_payables(), "month", "pay_period", "買掛")
-        _disp = [{"請求月度": r.get("month") or "",
+        _disp = [{"No.": r["id"], "請求月度": r.get("month") or "",
                   "請求書の日付": r.get("date") or "",
                   "取引先": r.get("vendor_name") or _vends.get(r.get("vendor_id"), ""),
                   "金額": _yen(r["amount"]),
                   "原本区分": r.get("original_status") or "",
                   "備考": r.get("note") or "",
                   "登録日": (r.get("created_at") or "")[:10]} for r in _rows]
-        nice_table(_disp, "買掛の登録はまだありません。")
-        section_export(_disp, "買掛一覧", key="pay")
+        if not _disp:
+            st.caption("買掛の登録はまだありません。")
+        else:
+            section_export(_disp, "買掛一覧", key="pay")
+            edited = checkbox_list_editor(_disp, key="pay_select")
+            selected_ids = posting_logic.selected_ids_from_editor(edited)
+            st.caption(f"選択中：{len(selected_ids)}件")
+            b1, b2 = st.columns(2)
+            selected_rows_excel_button(edited, key="pay_sel_xlsx",
+                                       filename="買掛_選択一覧", container=b1)
+            bulk_delete_action(selected_ids, delete_fn=store.delete_payable,
+                               section="payable", key="pay_bulk_del", container=b2)
 
 else:  # 売掛
     st.subheader("売掛（売上）")
@@ -322,14 +368,14 @@ else:  # 売掛
             st.warning("⚠️ 同様の内容が登録済みです。それでも登録しますか？")
             st.caption(f"月度 {p['month'] or '—'} ／ 金額 ¥{p['amount']:,}")
             cc1, cc2, _ = st.columns([1, 1, 4])
-            if cc1.button("はい、登録する", type="primary", key="recv_ok"):
+            if cc1.button("はい", type="primary", key="recv_ok"):
                 store.add_receivable(p["month"], p["client_id"], p["amount"],
                                      note=p["note"], project_id=p["project_id"],
                                      other_label=p.get("other_label"))
                 del st.session_state["recv_pending"]
                 flash("登録しました")
                 st.rerun()
-            if cc2.button("やめる", key="recv_no"):
+            if cc2.button("いいえ", key="recv_no"):
                 del st.session_state["recv_pending"]
                 st.rerun()
 
@@ -358,12 +404,24 @@ else:  # 売掛
                 st.rerun()
 
     with tab_list:
+        show_flash("receivable")
         st.markdown("**登録済みの売掛一覧**")
         _clients, _projs = _names(store.list_receivables_clients), _names(store.list_projects)
         _rows = _period_filter(store.list_receivables(), "month", "recv_period", "売掛")
-        _disp = [{"月度": r.get("month") or "", "売掛先": _clients.get(r["client_id"], ""),
+        _disp = [{"No.": r["id"], "月度": r.get("month") or "",
+                  "売掛先": _clients.get(r["client_id"], ""),
                   "金額": _yen(r["amount"]), "備考": r.get("note") or "",
                   "案件": _projs.get(r["project_id"], ""),
                   "登録日": (r.get("created_at") or "")[:10]} for r in _rows]
-        nice_table(_disp, "売掛の登録はまだありません。")
-        section_export(_disp, "売掛一覧", key="recv")
+        if not _disp:
+            st.caption("売掛の登録はまだありません。")
+        else:
+            section_export(_disp, "売掛一覧", key="recv")
+            edited = checkbox_list_editor(_disp, key="recv_select")
+            selected_ids = posting_logic.selected_ids_from_editor(edited)
+            st.caption(f"選択中：{len(selected_ids)}件")
+            b1, b2 = st.columns(2)
+            selected_rows_excel_button(edited, key="recv_sel_xlsx",
+                                       filename="売掛_選択一覧", container=b1)
+            bulk_delete_action(selected_ids, delete_fn=store.delete_receivable,
+                               section="receivable", key="recv_bulk_del", container=b2)

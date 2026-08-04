@@ -233,7 +233,7 @@ div[data-baseweb="popover"]:has([data-baseweb="calendar"]) label{ display:none !
 [data-testid="stFileUploaderDropzoneInstructions"]{ display:none !important; }
 [data-testid="stFileUploaderDropzone"]{ position:relative; min-height:84px; align-items:center; }
 [data-testid="stFileUploaderDropzone"]::before{
-  content:"ここにファイルをドラッグ、または右のボタンで選択（画像・PDF）";
+  content:"ここにファイルをドラッグ、または右のボタンで選択";
   color:var(--muted); font-size:.9rem; padding-left:.7rem;
 }
 /* 「Browse files」ボタンだけ日本語化。×(削除)・＋(追加)ボタンには効かせない
@@ -257,6 +257,31 @@ div[data-baseweb="popover"]:has([data-baseweb="calendar"]) label{ display:none !
 }
 [data-testid="stTable"] tbody tr:nth-child(even) td{ background:#f7fafc; }
 [data-testid="stTable"] tbody tr:hover td{ background:var(--primary-soft); }
+
+/* ===== マスタ管理: ステータストグル（運用中=光る水色の丸 / 停止中=グレーの丸） ===== */
+/* 行ごとの st.container(key="mstat-on-<master>-<id>") が付ける st-key-* で全行をまとめてスコープ */
+[class*="st-key-mstat-on-"] .stButton>button{
+  border-radius:999px !important; background:var(--primary) !important; color:#fff !important;
+  border:none !important; font-weight:700 !important; padding:.35rem 1rem !important;
+  animation:mstatpulse 1.7s infinite;
+}
+@keyframes mstatpulse{
+  0%{ box-shadow:0 0 0 0 rgba(20,164,220,.55); }
+  70%{ box-shadow:0 0 0 8px rgba(20,164,220,0); }
+  100%{ box-shadow:0 0 0 0 rgba(20,164,220,0); }
+}
+[class*="st-key-mstat-off-"] .stButton>button{
+  border-radius:999px !important; background:#eef1f4 !important; color:#8b98a6 !important;
+  border:1px solid var(--line) !important; font-weight:700 !important; padding:.35rem 1rem !important;
+  box-shadow:none !important;
+}
+[class*="st-key-mstat-off-"] .stButton>button:hover{ background:#e4e8ee !important; color:#67788a !important; }
+/* 削除(ゴミ箱)は控えめなアイコンボタンに */
+[class*="st-key-mtrash-"] .stButton>button{
+  background:#fff !important; color:#c0392b !important; border:1px solid var(--line) !important;
+  box-shadow:none !important; padding:.35rem .6rem !important;
+}
+[class*="st-key-mtrash-"] .stButton>button:hover{ background:#fdecea !important; }
 </style>
 """
 
@@ -351,18 +376,135 @@ def period_picker(*, key: str):
     return lo, hi, ("全期間" if lo is None else f"{lo} 〜 {hi}")
 
 
-def flash(message: str):
+def _flash_slot(section: str | None) -> str:
+    """flash の保存先キー。section 省略時は従来どおり "_flash"(後方互換)。"""
+    return "_flash" if section is None else f"_flash_{section}"
+
+
+def flash(message: str, section: str | None = None):
     """登録直後の再実行(rerun)をまたいで1度だけ出す成功メッセージをセットする。
-    rerun 直前に st.success を出しても新しい実行で消えてしまうため、session_state に退避する。"""
-    st.session_state["_flash"] = message
+    rerun 直前に st.success を出しても新しい実行で消えてしまうため、session_state に退避する。
+
+    section: メッセージを出したい場所の識別子(タブ名など)。
+      Streamlit のタブは1回の実行で全タブの本体を描画するため、section を付けないと
+      最初に呼ばれた show_flash() がメッセージを奪い、操作したタブに出ない。
+      section を付けると、同じ section の show_flash() だけが受け取る。
+      省略時は従来と同じ共有の1枠を使う(既存ページはそのまま動く)。
+    """
+    st.session_state[_flash_slot(section)] = message
 
 
-def show_flash():
+def show_flash(section: str | None = None):
     """flash() でセットされたメッセージがあれば success で表示して消す(1回だけ)。
-    登録フォームの先頭で呼ぶ。"""
-    msg = st.session_state.pop("_flash", None)
+    登録フォームの先頭で呼ぶ。section を渡すと自分宛のメッセージだけを消費する。"""
+    msg = st.session_state.pop(_flash_slot(section), None)
     if msg:
         st.success(msg)
+
+
+def confirm_delete(*, key: str, detail: str, on_confirm, label: str = "削除",
+                   warning: str | None = None, success: str = "削除しました",
+                   section: str | None = None, button_container=None):
+    """削除→確認→実行を全画面で同じ挙動にする共通部品。
+    ボタンを押した時点では消さず、session_state に確認待ちを立てて確認UIを出す。
+    「はい」で on_confirm() を実行し、flash で結果を知らせる。
+
+    key      : 画面内で一意な文字列(行idを含めること。固定keyだと別の行を消しかねない)
+    detail   : 確認画面に出す対象の内容(日付・金額など)
+    on_confirm: 実際に消す処理(引数なしの呼び出し可能オブジェクト)
+    label    : ボタンの文言(マスタでは「停止中にする」を渡す)
+    warning  : 確認の見出し(省略時は「削除しますか？」)
+    success  : 実行後に出すメッセージ
+    section  : flash(success) の宛先(タブ毎に分けたいとき。show_flash(section) と対で使う)
+    button_container: 削除ボタンだけを描画する場所(st.columns の列など)。
+      渡すと、確認UI(警告文・詳細・はい/いいえ)は呼び出した場所にそのまま出るので、
+      行の右端の狭い列にボタンを置きつつ確認は全幅で出せる。省略時は全部その場に描画。
+    """
+    pending = f"_del_pending_{key}"
+    if st.session_state.get(pending):
+        st.warning(warning or "⚠️ 削除しますか？")
+        if detail:
+            st.caption(detail)
+        c1, c2, _ = st.columns([1, 1, 4])
+        if c1.button("はい", type="primary", key=f"{key}_ok"):
+            on_confirm()
+            st.session_state.pop(pending, None)
+            flash(success, section)
+            st.rerun()
+        if c2.button("いいえ", key=f"{key}_no"):
+            st.session_state.pop(pending, None)
+            st.rerun()
+        return
+    target = button_container if button_container is not None else st
+    if target.button(label, key=f"{key}_btn"):
+        st.session_state[pending] = True
+        st.rerun()
+
+
+def checkbox_list_editor(disp_rows, *, key, select_col="選択"):
+    """一覧を『選択チェック列＋他列は読み取り専用』の data_editor で描画して返す。
+    disp_rows は list[dict] か DataFrame（表示用に整形済み・id列も含めておく）。"""
+    import pandas as pd
+
+    df = disp_rows if isinstance(disp_rows, pd.DataFrame) else pd.DataFrame(disp_rows)
+    if df.empty:
+        st.caption("表示できる行がありません。")
+        return df
+    other = [c for c in df.columns if c != select_col]
+    if select_col not in df.columns:
+        df = df.copy()
+        df.insert(0, select_col, False)
+    df = df[[select_col] + [c for c in df.columns if c != select_col]]
+    return st.data_editor(
+        df, hide_index=True, use_container_width=True,
+        column_config={select_col: st.column_config.CheckboxColumn(select_col, default=False)},
+        disabled=other, key=key)
+
+
+def selected_rows_excel_button(edited_df, *, key, filename, select_col="選択",
+                               label=None, container=None):
+    """選択された行だけを（選択列を除いて）Excel化する download_button。0件は無効。"""
+    from common import posting_logic
+    from common.excel_io import freeze_xlsx_bytes
+    import pandas as pd
+
+    rows = posting_logic.rows_for_excel(edited_df, select_col=select_col)
+    target = container if container is not None else st
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        pd.DataFrame(rows or [{}]).to_excel(w, index=False, sheet_name="選択した行")
+    target.download_button(
+        label or f"選択した行をExcelで保存（{len(rows)}件）",
+        data=freeze_xlsx_bytes(buf.getvalue()), file_name=f"{filename}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        icon=":material/download:", disabled=not rows, key=key,
+        use_container_width=True)
+
+
+def bulk_delete_action(selected_ids, *, delete_fn, section, key, noun="件", container=None):
+    """選択した行をまとめて削除する。確認を挟み、押した時点の選択idを固定してから消す。
+    ボタンだけ container(列)に置くと、確認UIは呼び出し位置＝全幅に出る。"""
+    pending = f"_bulkdel_pending_{key}"
+    ids = st.session_state.get(pending)
+    if ids:  # 確認待ち
+        st.warning(f"⚠️ 選択した{len(ids)}{noun}を削除しますか？")
+        c1, c2, _ = st.columns([1, 1, 4])
+        if c1.button("はい", type="primary", key=f"{key}_ok"):
+            for i in ids:
+                delete_fn(i)
+            st.session_state.pop(pending, None)
+            flash(f"{len(ids)}{noun}を削除しました", section)
+            st.rerun()
+        if c2.button("いいえ", key=f"{key}_no"):
+            st.session_state.pop(pending, None)
+            st.rerun()
+        return
+    target = container if container is not None else st
+    if target.button(f"選択した行を削除（{len(selected_ids)}{noun}）",
+                     key=f"{key}_btn", disabled=not selected_ids,
+                     use_container_width=True):
+        st.session_state[pending] = list(selected_ids)
+        st.rerun()
 
 
 def page_header(title: str, subtitle: str = "", icon: str = ""):

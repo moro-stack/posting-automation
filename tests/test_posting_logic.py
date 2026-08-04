@@ -102,6 +102,114 @@ def test_qty_label_isshiki_ignores_quantity():
     assert L.qty_label(0, "手当") == "一式"
 
 
+# ---- 支払形態に応じた単位 ----
+def test_unit_for_without_pay_type_keeps_current_behavior():
+    """既存の呼び出し(pay_type なし)は今までと同じ。"""
+    assert L.unit_for("配布") == "枚"
+    assert L.unit_for("挟み込み") == "枚"
+    assert L.unit_for("交通費") == "一式"
+    assert L.unit_for("手当") == "一式"
+    assert L.unit_for("その他") == "一式"
+
+
+def test_unit_for_by_pay_type_on_delivery_rows():
+    assert L.unit_for("配布", "日当") == "日"
+    assert L.unit_for("配布", "時給") == "時間"
+    assert L.unit_for("配布", "月給") == "一式"
+    assert L.unit_for("配布", "歩合") == "枚"
+    assert L.unit_for("挟み込み", "日当") == "日"
+
+
+def test_unit_for_non_delivery_rows_ignore_pay_type():
+    """日当の人でも交通費・手当の行は「一式」。支払形態で一律に上書きしない。"""
+    for pt in ("日当", "時給", "月給", "歩合", None):
+        assert L.unit_for("交通費", pt) == "一式"
+        assert L.unit_for("手当", pt) == "一式"
+        assert L.unit_for("その他", pt) == "一式"
+
+
+def test_qty_label_with_pay_type():
+    assert L.qty_label(3, "配布", "日当") == "3 日"
+    assert L.qty_label(6.5, "配布", "時給") == "6.5 時間"
+    assert L.qty_label(1, "配布", "月給") == "一式"
+    assert L.qty_label(3713, "配布", "歩合") == "3,713 枚"
+
+
+def test_qty_label_without_pay_type_keeps_current_behavior():
+    assert L.qty_label(3713, "配布") == "3,713 枚"
+    assert L.qty_label(1, "交通費") == "一式"
+
+
+# ---- 配布部数 ----
+def test_line_copies_uses_qty_for_houbai_and_none():
+    line = {"report_qty": 3713, "copies": 999, "remark": "配布"}
+    assert L.line_copies(line, "歩合") == 3713
+    assert L.line_copies(line, None) == 3713
+
+
+def test_line_copies_uses_copies_column_for_other_pay_types():
+    line = {"report_qty": 3, "copies": 3713, "remark": "配布"}
+    assert L.line_copies(line, "日当") == 3713
+    assert L.line_copies(line, "時給") == 3713
+    assert L.line_copies(line, "月給") == 3713
+
+
+def test_line_copies_is_zero_when_copies_missing():
+    assert L.line_copies({"report_qty": 3, "remark": "配布"}, "日当") == 0
+    assert L.line_copies({"report_qty": 3, "copies": None, "remark": "配布"}, "日当") == 0
+
+
+def test_line_copies_is_zero_for_non_delivery_rows():
+    assert L.line_copies({"report_qty": 1, "copies": 500, "remark": "交通費"}, "日当") == 0
+    assert L.line_copies({"report_qty": 1, "remark": "手当"}, "歩合") == 0
+
+
+def test_delivered_copies_without_pay_type_keeps_current_behavior():
+    lines = [
+        {"report_qty": 3713, "remark": "配布"},
+        {"report_qty": 500, "remark": "挟み込み"},
+        {"report_qty": 1, "remark": "交通費"},
+    ]
+    assert L.delivered_copies(lines) == 3713 + 500
+
+
+def test_delivered_copies_for_nichito_uses_copies_column():
+    lines = [
+        {"report_qty": 3, "copies": 3713, "remark": "配布"},
+        {"report_qty": 1, "copies": 500, "remark": "挟み込み"},
+        {"report_qty": 1, "copies": 99, "remark": "交通費"},
+    ]
+    assert L.delivered_copies(lines, "日当") == 3713 + 500
+
+
+# ---- unit_for と line_copies で未知の pay_type の解釈を揃える(レビュー指摘の回帰防止) ----
+def test_line_copies_treats_unknown_pay_type_as_houbai():
+    """空文字・未知の文字列は歩合扱い(=report_qty をそのまま部数にする)。
+    unit_for 側も同じ未知の値で「枚」に倒れるので、ここが逆(copies列)に倒れると
+    画面表示(枚数)と報告部数が食い違う。"""
+    line = {"report_qty": 3713, "copies": 999, "remark": "配布"}
+    assert L.line_copies(line, "") == 3713
+    assert L.line_copies(line, "未知の形態") == 3713
+
+
+def test_unit_for_agrees_with_line_copies_on_unknown_pay_type():
+    """unit_for と line_copies が同じ pay_type に対して逆の解釈をしないことの確認。"""
+    line = {"report_qty": 3713, "copies": 999, "remark": "配布"}
+    for pay_type in ("", "未知の形態"):
+        assert L.unit_for("配布", pay_type) == "枚"
+        assert L.line_copies(line, pay_type) == 3713
+
+
+def test_delivered_copies_empty_string_pay_type_keeps_current_behavior():
+    """画面から来がちな空文字の pay_type でも delivered_copies は歩合(現行動作)のまま。"""
+    lines = [
+        {"report_qty": 3713, "copies": 999, "remark": "配布"},
+        {"report_qty": 500, "copies": 1, "remark": "挟み込み"},
+        {"report_qty": 1, "copies": 500, "remark": "交通費"},
+    ]
+    assert L.delivered_copies(lines, "") == 3713 + 500
+
+
 def test_invoice_total_handles_decimals():
     assert L.invoice_total([{"amount": 3.5}, {"amount": 2.25}]) == 5.75
 
@@ -159,3 +267,102 @@ def test_days_since_today_and_past_and_none():
     assert L.days_since("こわれた日付", today="2026-07-16") is None
 
 
+# ---- 買掛の原本区分オートセット ----
+_VENDORS = [
+    {"name": "関西電力株式会社", "default_original_status": "振込用紙"},
+    {"name": "株式会社スペースリーダー", "default_original_status": "クレジット"},
+    {"name": "既定なしの会社", "default_original_status": None},
+]
+
+
+def test_resolve_original_status_matches_by_name():
+    assert L.resolve_original_status("関西電力株式会社", _VENDORS) == "振込用紙"
+    assert L.resolve_original_status("株式会社スペースリーダー", _VENDORS) == "クレジット"
+
+
+def test_resolve_original_status_trims_whitespace():
+    assert L.resolve_original_status("  関西電力株式会社 ", _VENDORS) == "振込用紙"
+
+
+def test_resolve_original_status_returns_none_when_no_match():
+    assert L.resolve_original_status("知らない会社", _VENDORS) is None
+    assert L.resolve_original_status("", _VENDORS) is None
+    assert L.resolve_original_status(None, _VENDORS) is None
+
+
+def test_resolve_original_status_returns_none_when_master_has_no_default():
+    assert L.resolve_original_status("既定なしの会社", _VENDORS) is None
+
+
+# ---- マスタ削除 or 停止中 ----
+def test_master_delete_action_deletes_when_unused():
+    assert L.master_delete_action(0) == "delete"
+
+
+def test_master_delete_action_deactivates_when_used():
+    assert L.master_delete_action(1) == "deactivate"
+    assert L.master_delete_action(12) == "deactivate"
+
+
+def test_master_delete_action_deactivates_when_usage_count_is_none():
+    """使用件数が不明(None)なときに安易に0とみなして削除可にしてはいけない(安全側)。"""
+    assert L.master_delete_action(None) == "deactivate"
+
+
+def test_master_delete_action_deactivates_on_invalid_type():
+    """型不正の値も安全側(消さない)に倒す。"""
+    assert L.master_delete_action("abc") == "deactivate"
+
+
+def test_master_delete_action_deactivates_on_negative_value():
+    """ありえない負値も安全側(消さない)に倒す。"""
+    assert L.master_delete_action(-1) == "deactivate"
+
+
+def test_master_row_subtitle_distributor():
+    row = {"kind": "業務委託", "pay_type": "歩合"}
+    assert L.master_row_subtitle("distributor", row) == "業務委託・歩合"
+
+
+def test_master_row_subtitle_distributor_partial():
+    assert L.master_row_subtitle("distributor", {"kind": "自社社員", "pay_type": None}) == "自社社員"
+
+
+def test_master_row_subtitle_vendor():
+    row = {"default_category": "家賃", "default_original_status": "本社"}
+    assert L.master_row_subtitle("payables_vendor", row) == "家賃 / 本社"
+
+
+def test_master_row_subtitle_vendor_empty():
+    assert L.master_row_subtitle("payables_vendor", {"default_category": None, "default_original_status": None}) == ""
+
+
+def test_master_row_subtitle_other_master():
+    assert L.master_row_subtitle("project", {"name": "A社チラシ"}) == ""
+
+
+# ---- 選択行のid抽出・Excel用行 ----
+import pandas as pd
+
+
+def test_selected_ids_from_editor():
+    df = pd.DataFrame([
+        {"選択": True, "No.": 3, "金額": "¥1"},
+        {"選択": False, "No.": 2, "金額": "¥2"},
+        {"選択": True, "No.": 5, "金額": "¥3"},
+    ])
+    assert L.selected_ids_from_editor(df) == [3, 5]
+
+
+def test_selected_ids_empty_when_none_checked():
+    df = pd.DataFrame([{"選択": False, "No.": 1}])
+    assert L.selected_ids_from_editor(df) == []
+
+
+def test_rows_for_excel_drops_select_col():
+    df = pd.DataFrame([
+        {"選択": True, "No.": 3, "金額": "¥1"},
+        {"選択": False, "No.": 2, "金額": "¥2"},
+    ])
+    rows = L.rows_for_excel(df)
+    assert rows == [{"No.": 3, "金額": "¥1"}]

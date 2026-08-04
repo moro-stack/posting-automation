@@ -17,17 +17,27 @@ def is_delivery(remark) -> bool:
     return remark in _DELIVERY_REMARKS
 
 
-def unit_for(remark) -> str:
-    """種別に応じた数量の単位。配布・挟み込みは『枚』、それ以外は『一式』。"""
-    return "枚" if is_delivery(remark) else "一式"
+# 支払形態ごとの、配布・挟み込み行の数量の単位。
+# 歩合(と未設定)は数量がそのまま部数なので「枚」＝これまでの動き。
+# 月給は数量を数えない(月額×1)ので「一式」。
+_PAY_TYPE_UNITS = {"日当": "日", "時給": "時間", "月給": "一式", "歩合": "枚"}
 
 
-def qty_label(qty, remark) -> str:
-    """明細の数量表示。配布・挟み込みは『3,713 枚』。
-    交通費・手当・その他は数を数えないので『一式』だけを出す(「1 一式」とは出さない)。"""
-    if is_delivery(remark):
-        return f"{fmt_num(qty)} {unit_for(remark)}"
-    return unit_for(remark)
+def unit_for(remark, pay_type=None) -> str:
+    """数量の単位。交通費・手当・その他は数を数えないので『一式』(支払形態によらない)。
+    配布・挟み込みのときだけ支払形態で単位が変わる(日当=日 / 時給=時間 / 月給=一式 / 歩合=枚)。"""
+    if not is_delivery(remark):
+        return "一式"
+    return _PAY_TYPE_UNITS.get(pay_type, "枚")
+
+
+def qty_label(qty, remark, pay_type=None) -> str:
+    """明細の数量表示。歩合の配布なら『3,713 枚』、日当なら『3 日』。
+    単位が『一式』のものは数を数えないので『一式』だけを出す(「1 一式」とは出さない)。"""
+    unit = unit_for(remark, pay_type)
+    if unit == "一式":
+        return unit
+    return f"{fmt_num(qty)} {unit}"
 
 
 def fmt_num(value) -> str:
@@ -85,9 +95,22 @@ def filter_rows_by_period(rows, key, lo, hi):
     return [r for r in rows if in_period(r.get(key), lo, hi)]
 
 
-def delivered_copies(lines):
-    return sum(_num(l.get("report_qty"))
-               for l in lines if l.get("remark") in _DELIVERY_REMARKS)
+def line_copies(line, pay_type=None):
+    """その明細行の配布部数。歩合(と未設定・未知の値)は数量がそのまま部数＝これまでの動き。
+    日当・時給・月給は数量が日数/時間なので、別列の copies を使う。
+    配布・挟み込み以外の行は部数を数えない。
+
+    未知の pay_type を歩合に倒すのは unit_for と解釈を揃えるため。片方だけ非歩合に倒れると
+    「3,713 枚と表示しているのに報告数は0部」という静かな食い違いが起きる。"""
+    if not is_delivery((line or {}).get("remark")):
+        return 0
+    if pay_type not in ("日当", "時給", "月給"):
+        return _num((line or {}).get("report_qty"))
+    return _num((line or {}).get("copies"))
+
+
+def delivered_copies(lines, pay_type=None):
+    return sum(line_copies(l, pay_type) for l in lines)
 
 
 def invoice_total(lines):
@@ -124,6 +147,41 @@ def payment_method(kind, row) -> str:
     return "買掛"
 
 
+# 原本区分の選択肢。買掛の登録(pages/01)とマスタの既定値(pages/05)で同じものを使う。
+# 二重定義にすると、区分を足したときに片方だけ増えて「選べない値が既定になる」＝
+# 黙って先頭(原本あり)に落ちる、という壊れ方をするのでここに一本化する。
+ORIGINAL_STATUSES = ["原本あり", "本社", "クレジット", "振込用紙", "なし"]
+
+
+def resolve_original_status(vendor_name, vendors):
+    """取引先名(自由入力)が買掛先マスタと一致したら、その既定の原本区分を返す。
+    一致しない・マスタに既定が無い場合は None(＝画面は既定値のまま)。"""
+    key = str(vendor_name or "").strip()
+    if not key:
+        return None
+    for v in vendors or []:
+        if str(v.get("name") or "").strip() == key:
+            return v.get("default_original_status") or None
+    return None
+
+
+def master_delete_action(usage_count) -> str:
+    """マスタの行を消すときの動き。
+    使用実績が「非負整数として明確に0」であるときだけ物理削除("delete")。
+    それ以外(None・型不正・負値を含む)はすべて停止中("deactivate"、＝安全側)にする。
+
+    なぜ安全側に倒すか: 配布員は入れ替わりが激しく、使用中のマスタを物理削除すると
+    過去の号別明細・報告書からその配布員の名前が消えてしまう(それを防ぐのが停止中方式の
+    目的そのもの)。使用件数が不明(None)の値を安易に0とみなして「削除可」と判定するのは、
+    この目的の裏を突く挙動になるため避ける。判定できない入力に対しても例外は投げず、
+    消えない側(deactivate)を返すことで、画面が落ちるより実害を小さくする。"""
+    if isinstance(usage_count, bool):
+        return "deactivate"
+    if isinstance(usage_count, int) and usage_count == 0:
+        return "delete"
+    return "deactivate"
+
+
 def cost_groups(agg) -> dict:
     """aggregate_issue の結果を新レイアウトへ再編。
     配布員代=業務委託+直接入力(manual)、雑費=小口+買掛、配布原価=両者の和(=total)。"""
@@ -144,3 +202,72 @@ def days_since(iso_str, *, today=None):
     return (_today(today) - d).days
 
 
+def master_row_subtitle(master, row) -> str:
+    """一覧の各行で名前の右に薄字で出す補助情報。中身が空なら空文字。
+    業務委託=「区分・支払形態」、買掛先=「既定費目 / 原本区分」、他マスタは無し。"""
+    if master == "distributor":
+        parts = [p for p in [row.get("kind"), row.get("pay_type")] if p]
+        return "・".join(parts)
+    if master == "payables_vendor":
+        parts = [p for p in [row.get("default_category"), row.get("default_original_status")] if p]
+        return " / ".join(parts)
+    return ""
+
+
+def selected_ids_from_editor(edited_df, *, id_col="No.", select_col="選択"):
+    """data_editor の編集結果から、選択された行の id を int のリストで返す。"""
+    ids = []
+    for _, row in edited_df.iterrows():
+        if row.get(select_col):
+            ids.append(int(row[id_col]))
+    return ids
+
+
+def rows_for_excel(edited_df, *, select_col="選択"):
+    """選択された行から選択列を除いた dict のリスト（選択行のExcel出力用）。"""
+    out = []
+    for _, row in edited_df.iterrows():
+        if row.get(select_col):
+            out.append({k: v for k, v in row.items() if k != select_col})
+    return out
+
+
+def company_summary_totals(*, receivables, payables, petty, contract_lines, manual):
+    """全社の売上(売掛)・原価(買掛+小口+業務委託+直接入力)・利益。"""
+    s = sum(_num(r.get("amount")) for r in receivables)
+    c = (sum(_num(r.get("amount")) for r in payables)
+         + sum(_num(r.get("amount")) for r in petty)
+         + sum(_num(r.get("amount")) for r in contract_lines)
+         + sum(_num(r.get("amount")) for r in manual))
+    return {"sales": s, "cost": c, "profit": s - c}
+
+
+def company_summary_rows(*, receivables, payables, petty, contract_lines, manual,
+                         id2proj, id2vendor, id2cat, id2client, id2dist):
+    """区分・日付・項目・案件・金額 に正規化した明細行のリスト（原価・売上まとめ用）。"""
+    def _proj(pid):
+        return id2proj.get(pid, "") if pid is not None else ""
+    rows = []
+    for r in receivables:
+        rows.append({"区分": "売上", "日付": r.get("month") or "",
+                     "項目": id2client.get(r.get("client_id"), ""),
+                     "案件": _proj(r.get("project_id")), "金額": _num(r.get("amount"))})
+    for r in payables:
+        rows.append({"区分": "買掛", "日付": r.get("date") or r.get("month") or "",
+                     "項目": r.get("vendor_name") or id2vendor.get(r.get("vendor_id"), ""),
+                     "案件": _proj(r.get("project_id")), "金額": _num(r.get("amount"))})
+    for r in petty:
+        item = id2cat.get(r.get("category_id"), "")
+        if r.get("memo"):
+            item = f"{item}（{r['memo']}）" if item else r["memo"]
+        rows.append({"区分": "小口", "日付": r.get("date") or "", "項目": item or "小口",
+                     "案件": _proj(r.get("project_id")), "金額": _num(r.get("amount"))})
+    for r in contract_lines:
+        rows.append({"区分": "業務委託", "日付": r.get("issue_date") or "",
+                     "項目": id2dist.get(r.get("distributor_id"), ""),
+                     "案件": _proj(r.get("project_id")), "金額": _num(r.get("amount"))})
+    for r in manual:
+        rows.append({"区分": "直接入力", "日付": r.get("work_date") or "",
+                     "項目": r.get("content") or "",
+                     "案件": _proj(r.get("project_id")), "金額": _num(r.get("amount"))})
+    return rows

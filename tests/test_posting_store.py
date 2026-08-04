@@ -6,6 +6,7 @@ TABLES = {
     "receivables_clients", "distributors",
     "petty_cash", "payables", "receivables",
     "contract_invoices", "contract_invoice_lines", "issue_manual_costs",
+    "distributor_daily_rates",
 }
 
 
@@ -61,6 +62,14 @@ def test_seed_masters_is_idempotent(tmp_path):
     assert "株式会社アド・バリュー" in clients
     # 2回呼んでも重複しない
     assert len(store.list_receivables_clients(db_path=db)) == len(set(clients))
+
+
+def test_payables_vendor_default_original_status(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    vid = store.add_payables_vendor("関西電力株式会社", default_category="電気",
+                                    default_original_status="振込用紙", db_path=db)
+    row = next(r for r in store.list_payables_vendors(db_path=db) if r["id"] == vid)
+    assert row["default_original_status"] == "振込用紙"
 
 
 def test_petty_cash_roundtrip_and_filter(tmp_path):
@@ -240,6 +249,21 @@ def test_petty_cash_stores_other_label(tmp_path):
     assert rows[0]["other_label"] == "A社折込チラシ"
 
 
+def test_petty_cash_stores_distributor(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", db_path=db)
+    rid = store.add_petty_cash("2026-07-17", None, 1500, distributor_id=did, db_path=db)
+    row = next(r for r in store.list_petty_cash(db_path=db) if r["id"] == rid)
+    assert row["distributor_id"] == did
+
+
+def test_petty_cash_distributor_is_optional(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    rid = store.add_petty_cash("2026-07-17", None, 1500, db_path=db)
+    row = next(r for r in store.list_petty_cash(db_path=db) if r["id"] == rid)
+    assert row["distributor_id"] is None
+
+
 def test_payable_and_receivable_store_other_label(tmp_path):
     db = os.path.join(tmp_path, "t.db")
     store.add_payable(None, None, 12000, date="2026-07-08", vendor_name="配夢",
@@ -294,3 +318,207 @@ def test_contract_invoice_migrates_old_db_without_last_exported(tmp_path):
     store.mark_contract_invoice_exported(rows[0]["id"], db_path=db, now="2026-07-16T10:00:00")
     rows = store.list_contract_invoices(db_path=db)
     assert rows[0]["last_exported_at"] == "2026-07-16T10:00:00"
+
+
+def test_contract_invoice_stores_pay_type_snapshot(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", pay_type="日当", db_path=db)
+    pid = store.add_project("関西ぱど：京阪北版", db_path=db)
+    iid = store.add_contract_invoice(
+        did, "2026-07-17", "2026-07-01", "2026-07-15",
+        [{"project_id": pid, "report_qty": 3, "unit_price": 8000, "remark": "配布",
+          "copies": 3713}],
+        pay_type="日当", db_path=db)
+    detail = store.get_contract_invoice(iid, db_path=db)
+    assert detail["invoice"]["pay_type"] == "日当"
+    assert detail["lines"][0]["copies"] == 3713
+    assert detail["lines"][0]["amount"] == 3 * 8000
+
+
+def test_contract_invoice_pay_type_survives_master_change(tmp_path):
+    """登録後にマスタの支払形態を変えても、過去の請求の支払形態は変わらない。"""
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", pay_type="日当", db_path=db)
+    pid = store.add_project("案件", db_path=db)
+    iid = store.add_contract_invoice(
+        did, "2026-07-17", "2026-07-01", "2026-07-15",
+        [{"project_id": pid, "report_qty": 3, "unit_price": 8000, "remark": "配布"}],
+        pay_type="日当", db_path=db)
+    store.update_distributor(did, pay_type="歩合", db_path=db)
+    assert store.get_contract_invoice(iid, db_path=db)["invoice"]["pay_type"] == "日当"
+
+
+def test_contract_invoice_without_pay_type_is_null(tmp_path):
+    """pay_type を渡さない既存の呼び出しは NULL のまま(=歩合扱い・後方互換)。"""
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", db_path=db)
+    pid = store.add_project("案件", db_path=db)
+    iid = store.add_contract_invoice(
+        did, "2026-07-17", "2026-07-01", "2026-07-15",
+        [{"project_id": pid, "report_qty": 3713, "unit_price": 2.5, "remark": "配布"}],
+        db_path=db)
+    detail = store.get_contract_invoice(iid, db_path=db)
+    assert detail["invoice"]["pay_type"] is None
+    assert detail["lines"][0]["copies"] is None
+
+
+def test_distributor_stores_bank_and_pay_type(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor(
+        "山田太郎", kind="業務委託",
+        bank_info="三井住友銀行 梅田支店 普通 1234567 ヤマダ タロウ",
+        pay_type="日当", db_path=db)
+    row = next(r for r in store.list_distributors(db_path=db) if r["id"] == did)
+    assert row["bank_info"] == "三井住友銀行 梅田支店 普通 1234567 ヤマダ タロウ"
+    assert row["pay_type"] == "日当"
+    assert row["kind"] == "業務委託"
+
+
+def test_distributor_hourly_and_monthly_rate(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    h = store.add_distributor("時給の人", pay_type="時給", hourly_rate=1200, db_path=db)
+    m = store.add_distributor("月給の人", pay_type="月給", monthly_rate=250000, db_path=db)
+    rows = {r["id"]: r for r in store.list_distributors(db_path=db)}
+    assert rows[h]["hourly_rate"] == 1200
+    assert rows[m]["monthly_rate"] == 250000
+
+
+def test_update_distributor_changes_pay_type_and_bank(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", pay_type="日当", db_path=db)
+    store.update_distributor(did, pay_type="歩合", bank_info="ゆうちょ 12345", db_path=db)
+    row = next(r for r in store.list_distributors(db_path=db) if r["id"] == did)
+    assert row["pay_type"] == "歩合"
+    assert row["bank_info"] == "ゆうちょ 12345"
+
+
+def test_old_distributors_table_gets_new_columns(tmp_path):
+    """第2弾までの列しかない旧DBを開いても壊れず、新しい列が足されること。"""
+    import sqlite3
+    db = os.path.join(tmp_path, "old.db")
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE distributors (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                 " name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT '業務委託',"
+                 " active INTEGER NOT NULL DEFAULT 1)")
+    conn.execute("INSERT INTO distributors (name) VALUES ('既存の人')")
+    conn.commit()
+    conn.close()
+    rows = store.list_distributors(db_path=db)
+    assert rows[0]["name"] == "既存の人"
+    assert rows[0]["pay_type"] is None
+    assert rows[0]["bank_info"] is None
+    assert rows[0]["hourly_rate"] is None
+    assert rows[0]["monthly_rate"] is None
+
+
+def test_update_distributor_normalizes_hourly_and_monthly_rate(tmp_path):
+    """add_distributor 同様、update_distributor でも文字列の数値を int に正規化すること。"""
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", pay_type="時給", hourly_rate=1000, db_path=db)
+    store.update_distributor(did, hourly_rate="1500", db_path=db)
+    row = next(r for r in store.list_distributors(db_path=db) if r["id"] == did)
+    assert row["hourly_rate"] == 1500
+    assert isinstance(row["hourly_rate"], int)
+
+
+def test_update_distributor_leaves_rate_unchanged_when_not_passed(tmp_path):
+    """_UNSET の番兵が効いていること。他のフィールドだけ更新しても hourly_rate は変わらない。"""
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", pay_type="時給", hourly_rate=1200, db_path=db)
+    store.update_distributor(did, name="別名", db_path=db)
+    row = next(r for r in store.list_distributors(db_path=db) if r["id"] == did)
+    assert row["name"] == "別名"
+    assert row["hourly_rate"] == 1200
+
+
+def test_daily_rates_replace_and_list(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", pay_type="日当", db_path=db)
+    store.replace_daily_rates(did, [{"work_name": "丁合・配布", "amount": 8000},
+                                    {"work_name": "ポスティング", "amount": 7500}], db_path=db)
+    rows = store.list_daily_rates(did, db_path=db)
+    assert [(r["work_name"], r["amount"]) for r in rows] == [
+        ("丁合・配布", 8000), ("ポスティング", 7500)]
+
+
+def test_daily_rates_replace_overwrites_previous(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", pay_type="日当", db_path=db)
+    store.replace_daily_rates(did, [{"work_name": "丁合・配布", "amount": 8000}], db_path=db)
+    store.replace_daily_rates(did, [{"work_name": "丁合・配布", "amount": 9000}], db_path=db)
+    rows = store.list_daily_rates(did, db_path=db)
+    assert len(rows) == 1
+    assert rows[0]["amount"] == 9000
+
+
+def test_daily_rates_are_per_distributor(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    a = store.add_distributor("Aさん", pay_type="日当", db_path=db)
+    b = store.add_distributor("Bさん", pay_type="日当", db_path=db)
+    store.replace_daily_rates(a, [{"work_name": "配布", "amount": 8000}], db_path=db)
+    store.replace_daily_rates(b, [{"work_name": "配布", "amount": 6000}], db_path=db)
+    assert store.list_daily_rates(a, db_path=db)[0]["amount"] == 8000
+    assert store.list_daily_rates(b, db_path=db)[0]["amount"] == 6000
+
+
+def test_replace_daily_rates_with_empty_clears(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", pay_type="日当", db_path=db)
+    store.replace_daily_rates(did, [{"work_name": "配布", "amount": 8000}], db_path=db)
+    store.replace_daily_rates(did, [], db_path=db)
+    assert store.list_daily_rates(did, db_path=db) == []
+
+
+def test_count_master_usage_project_counts_all_sources(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    pid = store.add_project("案件", db_path=db)
+    did = store.add_distributor("山田太郎", db_path=db)
+    store.add_petty_cash("2026-07-17", None, 1500, project_id=pid, db_path=db)
+    store.add_payable(None, None, 8000, date="2026-07-17", project_id=pid, db_path=db)
+    store.add_receivable("2026-07", None, 90000, project_id=pid, db_path=db)
+    store.add_issue_manual_cost(pid, "配布", 50000, db_path=db)
+    store.add_contract_invoice(did, "2026-07-17", "2026-07-01", "2026-07-15",
+                               [{"project_id": pid, "report_qty": 1, "unit_price": 100,
+                                 "remark": "配布"}], db_path=db)
+    assert store.count_master_usage("project", pid, db_path=db) == 5
+
+
+def test_count_master_usage_zero_for_unused(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    pid = store.add_project("使っていない案件", db_path=db)
+    did = store.add_distributor("使っていない人", db_path=db)
+    cid = store.add_expense_category("使っていない費目", db_path=db)
+    assert store.count_master_usage("project", pid, db_path=db) == 0
+    assert store.count_master_usage("distributor", did, db_path=db) == 0
+    assert store.count_master_usage("expense_category", cid, db_path=db) == 0
+
+
+def test_count_master_usage_distributor_counts_invoices_and_petty(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田太郎", db_path=db)
+    pid = store.add_project("案件", db_path=db)
+    store.add_contract_invoice(did, "2026-07-17", "2026-07-01", "2026-07-15",
+                               [{"project_id": pid, "report_qty": 1, "unit_price": 100,
+                                 "remark": "配布"}], db_path=db)
+    store.add_petty_cash("2026-07-17", None, 1500, distributor_id=did, db_path=db)
+    assert store.count_master_usage("distributor", did, db_path=db) == 2
+
+
+def test_count_master_usage_category_and_client(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    cid = store.add_expense_category("駐車場代", db_path=db)
+    clid = store.add_receivables_client("株式会社アド・バリュー", db_path=db)
+    vid = store.add_payables_vendor("関西電力株式会社", db_path=db)
+    store.add_petty_cash("2026-07-17", cid, 1500, db_path=db)
+    store.add_receivable("2026-07", clid, 90000, db_path=db)
+    store.add_payable("2026-07", vid, 8000, db_path=db)
+    assert store.count_master_usage("expense_category", cid, db_path=db) == 1
+    assert store.count_master_usage("receivables_client", clid, db_path=db) == 1
+    assert store.count_master_usage("payables_vendor", vid, db_path=db) == 1
+
+
+def test_count_master_usage_rejects_unknown_master(tmp_path):
+    import pytest
+    db = os.path.join(tmp_path, "t.db")
+    with pytest.raises(ValueError):
+        store.count_master_usage("知らないマスタ", 1, db_path=db)
