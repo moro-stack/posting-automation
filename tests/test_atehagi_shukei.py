@@ -104,3 +104,16 @@ def test_build_shukei_daishi_print_area_scales_with_areas():
     tail = ws.print_area.split(":")[1]
     last = int("".join(ch for ch in tail if ch.isdigit()))
     assert last >= 23           # 6番目のエリア行(br+8+5=23)が印刷範囲に入る
+
+
+def test_shukei_overflow_types_empty_when_all_within_frame():
+    # 下部集計は 0〜11種の固定枠。枠内に収まっていれば警告対象は無い
+    data = {"type_dist": {0: [5, 100], 9: [1, 20], 11: [2, 30]}}
+    assert A.shukei_overflow_types(data) == []
+
+
+def test_shukei_overflow_types_reports_types_beyond_the_frame():
+    # 12種以上は下部集計の枠に載らない → 種類数の昇順で(種類数, 地区数, 部数)を返す。
+    # 挿入順を昇順(12→13)にしておくことで、並べ替えを外すと順序が崩れて落ちる。
+    data = {"type_dist": {0: [5, 100], 12: [2, 300], 13: [1, 500], 11: [2, 30]}}
+    assert A.shukei_overflow_types(data) == [(12, 2, 300), (13, 1, 500)]

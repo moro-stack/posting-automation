@@ -90,6 +90,14 @@ with tab_atehagi:
                 sdata = A.shukei_data(groups, version)
                 gou = next((r["gou"] for r in rows if r.get("gou")), None)
                 haifubi = next((r["haifubi"] for r in rows if r.get("haifubi")), "")
+                of = A.shukei_overflow_types(sdata)
+                if of:
+                    detail = "、".join(f"{t}種（{ku}地区・{bu:,}部）" for t, ku, bu in of)
+                    st.warning(
+                        f"⚠️ 集計表の下部集計は チラシ種類数 0〜{A.SHUKEI_TYPE_MAX}種 の枠しかありません。"
+                        f"枠を超える地区があります：{detail}。"
+                        "この分は表に載らないため、表を足し上げた数と総計が合いません。"
+                        "先に関西ぱどへご確認ください。")
                 st.session_state["keihan_out"] = (
                     f"集計表（総地区数 {sdata['total_chiku']} / "
                     f"総配布部数 {sdata['total_busuu']:,} / チラシ総数 {sdata['chirashi_sou']:,}）",

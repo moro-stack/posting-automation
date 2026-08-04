@@ -459,6 +459,9 @@ def jisseki_filename(version, rows) -> str:
     return "_".join(parts) + ".xlsx"
 
 
+SHUKEI_TYPE_MAX = 11   # 集計表 下部集計のチラシ種類数の枠(実物帳票が 0〜11 の固定)
+
+
 def shukei_data(groups, version):
     """集計表の集計。逆算で確定したロジック:
     - エリア = 担当地区コード先頭1桁 / リーダー = ぱどんな
@@ -584,7 +587,7 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
     br = r + 1
     td = data["type_dist"]
     rr = br
-    for t in range(11, -1, -1):
+    for t in range(SHUKEI_TYPE_MAX, -1, -1):
         ku, bu = td.get(t, [0, 0])
         for cc, val in [(2, t), (3, "-"), (4, ku), (6, bu)]:
             ws.cell(rr, cc, val).alignment = center
@@ -626,6 +629,17 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
     buf = io.BytesIO()
     wb.save(buf)
     return freeze_xlsx_bytes(buf.getvalue())
+
+
+def shukei_overflow_types(data):
+    """下部集計の枠(チラシ種類数 0〜SHUKEI_TYPE_MAX)に載らない種類数を返す。
+
+    実物帳票の枠が固定なので行は増やさない。代わりに枠外を検出して画面で知らせ、
+    表の合計と総計が合わない状態を黙って出さないようにする。
+    戻り値は (種類数, 地区数, 部数) の種類数昇順リスト。
+    """
+    return [(t, ku, bu) for t, (ku, bu) in sorted(data["type_dist"].items())
+            if t > SHUKEI_TYPE_MAX]
 
 
 def _shukei_layout(data):
