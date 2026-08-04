@@ -122,14 +122,18 @@ def test_atehagi_header_uses_pado_row_not_first_row():
     assert [ws[f"J{r}"].value for r in (5, 6, 7)] == [999, 224, 888]
 
 
-def test_jisseki_uses_pado_row_for_leader_and_busuu():
-    """実績表のリーダー・部数もぱど行基準（あて紙と食い違わないように）。"""
+def test_jisseki_courses_excludes_pado_row_and_uses_per_flyer_busuu():
+    """台紙のコースは ぱど行(サイズ無し)を挟み込みチラシに含めず、
+    各チラシの枚数はその行の部数（あて紙上部のぱど基準部数とは別物）。"""
     groups = A.group_by_chiku(A.rows_from_table(_shuffled_table()))
-    rows = A.jisseki_rows(groups, A.KEIHAN_KITA)
-    assert len(rows) == 1
-    assert rows[0]["リーダー"] == "ぱど担当"
-    assert rows[0]["部数"] == 224
-    assert rows[0]["担当地区"] == "010101"       # あて紙と同じ6桁ゼロ埋め
+    courses = A.jisseki_courses(groups, A.KEIHAN_KITA)
+    assert len(courses) == 1
+    c = courses[0]
+    assert c["course_name"] == "010101 枚方・交野"
+    assert c["flyers"] == [
+        {"name": "サンプル生協", "count": 999},
+        {"name": "別のチラシ", "count": 888},
+    ]
 
 
 def test_shukei_uses_pado_row_for_leader_and_busuu():

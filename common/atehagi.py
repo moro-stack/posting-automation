@@ -332,57 +332,115 @@ def atehagi_filename(version, rows, chiku=None) -> str:
     return "_".join(parts) + ".xlsx"
 
 
-_JISSEKI_HEADERS = ["No.", "エリア", "担当地区", "リーダー",
-                    "チラシ種類数", "チラシ内容", "部数", "サイン"]
-
-
-def jisseki_rows(groups, version):
-    """挟み込み実績表(サイン台紙)の行を作る。1地区=1行。挟み込みチラシ(サイズ有り)が
-    無い地区(ぱどのみ)は飛ばして詰める。"""
+def jisseki_courses(groups, version):
+    """実績表台紙の1コース分データ。挟み込みチラシ(size非空)が1つ以上ある
+    コースのみ。ぱどのみ地区は除外。flyers は元の並び順。"""
     out = []
-    n = 0
     for chiku, rows in groups.items():
-        chirashi = [r for r in rows if _s(r.get("size")) != ""]
-        if not chirashi:
-            continue                      # ぱどのみ地区はスキップ
-        n += 1
-        base = pado_row(rows)             # あて紙と同じ「ぱど行」基準
+        flyers = [
+            {"name": r["haisoubutsu"], "count": r["busuu"]}
+            for r in rows if _s(r.get("size")) != ""
+        ]
+        if not flyers:
+            continue
+        name = chiku_name(version, chiku)
+        code = area_code6(chiku)
         out.append({
-            "No.": n,
-            "エリア": chiku_name(version, chiku),
-            "担当地区": area_code6(chiku),
-            "リーダー": base["padonna"],
-            "チラシ種類数": len(chirashi),
-            "チラシ内容": "、".join(r["haisoubutsu"] for r in chirashi),
-            "部数": base["busuu"],
-            "サイン": "",
+            "code": code,
+            "chiku_name": name,
+            "course_name": f"{code} {name}",
+            "flyers": flyers,
         })
     return out
 
 
-def build_jisseki_workbook(rows, title="京阪 挟み込み実績表") -> bytes:
-    """実績表(サイン台紙)の印刷用Excelを bytes で返す。"""
-    from openpyxl.styles import Alignment, Font
+def _md_from(haifubi) -> str:
+    """配布日から "M/D"（例 6/26）。datetime/文字列どちらも可。"""
+    import datetime
+    if isinstance(haifubi, (datetime.date, datetime.datetime)):
+        return f"{haifubi.month}/{haifubi.day}"
+    s = str(haifubi or "")
+    m = re.search(r"(\d{4})\D(\d{1,2})\D(\d{1,2})", s)
+    if m:
+        return f"{int(m.group(2))}/{int(m.group(3))}"
+    return ""
+
+
+def build_jisseki_daishi_workbook(courses, version, gou, haifubi, per_row=4) -> bytes:
+    """実績表を実物台紙スタイルで出力。1コース=ヘッダー行(コース名)+本文行
+    (案件名/枚数を1チラシ1行)+サイン行(横線付き)。per_row コース/行で折り返す。"""
+    from openpyxl.styles import Alignment, Font, Border, Side
+    from openpyxl.worksheet.properties import PageSetupProperties
 
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "実績表"
-    ws.append([title])
-    ws["A1"].font = Font(bold=True, size=14)
-    ws.append(_JISSEKI_HEADERS)
-    for r in rows:
-        ws.append([r.get(h) for h in _JISSEKI_HEADERS])
-    for c in range(1, len(_JISSEKI_HEADERS) + 1):
-        ws.cell(row=2, column=c).font = Font(bold=True)
-        ws.cell(row=2, column=c).alignment = Alignment(horizontal="center")
-    widths = [5, 12, 10, 14, 11, 40, 8, 12]
-    for i, w in enumerate(widths, start=1):
-        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
-    ws.print_area = f"A1:H{len(rows) + 2}"
+    ncol = per_row * 2
+
+    label = _VERSION_LABEL.get(version, "京阪")
+    md = _md_from(haifubi)
+    gou_part = f"{gou}号" if gou else "号"
+    title = f"{md} ／ {gou_part}　{label}"
+    ws.cell(row=1, column=1, value=title)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncol)
+    t = ws.cell(row=1, column=1)
+    t.font = Font(bold=True, size=16)
+    t.alignment = Alignment(horizontal="left", vertical="center")
+    ws.row_dimensions[1].height = 28
+
+    thin = Side(style="thin")
+    thick = Side(style="medium")
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    topleft = Alignment(horizontal="left", vertical="top", wrap_text=True)
+    topright = Alignment(horizontal="right", vertical="top", wrap_text=True)
+    signalign = Alignment(horizontal="left", vertical="bottom")
+
+    ROWS_PER = 3  # ヘッダー・本文・サイン
+
+    for i, c in enumerate(courses):
+        grp, col = divmod(i, per_row)
+        top = 2 + grp * ROWS_PER
+        rh, rb, rs = top, top + 1, top + 2
+        c0 = 1 + col * 2
+        c1 = c0 + 1
+        ws.merge_cells(start_row=rh, start_column=c0, end_row=rh, end_column=c1)
+        h = ws.cell(row=rh, column=c0, value=c["course_name"])
+        h.font = Font(bold=True, size=11)
+        h.alignment = center
+        names = "\n".join(f["name"] for f in c["flyers"])
+        counts = "\n".join(str(f["count"]) for f in c["flyers"])
+        ws.cell(row=rb, column=c0, value=names).alignment = topleft
+        ws.cell(row=rb, column=c1, value=counts).alignment = topright
+        ws.merge_cells(start_row=rs, start_column=c0, end_row=rs, end_column=c1)
+        s = ws.cell(row=rs, column=c0, value="サイン：")
+        s.alignment = signalign
+        for (r, cc) in [(rh, c0), (rh, c1), (rb, c0), (rb, c1), (rs, c0), (rs, c1)]:
+            ws.cell(row=r, column=cc).border = Border(
+                left=thick if cc == c0 else thin,
+                right=thick if cc == c1 else thin,
+                top=thick if r == rh else thin,
+                bottom=thick if r == rs else thin,
+            )
+
+    ngrp = (len(courses) + per_row - 1) // per_row
+    for grp in range(ngrp):
+        block = courses[grp * per_row:(grp + 1) * per_row]
+        max_lines = max(len(c["flyers"]) for c in block)
+        top = 2 + grp * ROWS_PER
+        ws.row_dimensions[top].height = 20
+        ws.row_dimensions[top + 1].height = max(36, max_lines * 18)
+        ws.row_dimensions[top + 2].height = 28
+    for col in range(per_row):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(1 + col * 2)].width = 24
+        ws.column_dimensions[openpyxl.utils.get_column_letter(2 + col * 2)].width = 6
+
+    last_row = 1 + ngrp * ROWS_PER if ngrp else 1
+    last_col = openpyxl.utils.get_column_letter(ncol)
+    ws.print_area = f"A1:{last_col}{last_row}"
     ws.page_setup.orientation = "landscape"
     ws.page_setup.fitToWidth = 1
-    from openpyxl.worksheet.properties import PageSetupProperties
     ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+
     buf = io.BytesIO()
     wb.save(buf)
     return freeze_xlsx_bytes(buf.getvalue())
@@ -455,60 +513,136 @@ def shukei_data(groups, version):
     }
 
 
-def build_shukei_workbook(data, version, title="京阪 集計表") -> bytes:
-    """集計表Excel（リーダー別×チラシ種類数の明細＋エリア別＋総計）を bytes で返す。"""
-    from openpyxl.styles import Font
+def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
+    """集計表を実物帳票レイアウトで出力。上部=エリア×リーダー×チラシ種類数
+    マトリクス(6/行折返し・縦結合・右端に配布部数計/地区数計)、下部=チラシ種類数別・
+    集計指標(折チラシは手入力"—")・エリア別部数。"""
+    from openpyxl.styles import Alignment, Font, Border, Side
+    from openpyxl.worksheet.properties import PageSetupProperties
+    from openpyxl.utils import get_column_letter as gl
 
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "集計表"
-    ws.append([title])
-    ws["A1"].font = Font(bold=True, size=14)
-    ws.append([])
-    ws.append(["エリア", "リーダー", "チラシ種類数", "地区数(コース数)", "配布部数"])
-    hdr = ws.max_row
-    for c in range(1, 6):
-        ws.cell(row=hdr, column=c).font = Font(bold=True)
-    for (area, leader) in sorted(data["per"].keys()):
-        p = data["per"][(area, leader)]
-        for ctype in sorted(p["by_type"].keys()):
-            ku, bu = p["by_type"][ctype]
-            ws.append([area, leader, ctype, ku, bu])
-        row = ws.append(["", f"　{leader} 計", "", p["chiku"], p["busuu"]])
-        ws.cell(row=ws.max_row, column=2).font = Font(bold=True)
-        ws.cell(row=ws.max_row, column=4).font = Font(bold=True)
-        ws.cell(row=ws.max_row, column=5).font = Font(bold=True)
+    thin = Side(style="thin")
+    box = Border(left=thin, right=thin, top=thin, bottom=thin)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    bold = Font(bold=True)
 
-    ws.append([])
-    ws.append(["エリア別", "地区数", "配布部数"])
-    for c in range(1, 4):
-        ws.cell(row=ws.max_row, column=c).font = Font(bold=True)
-    for area in sorted(data["area_busuu"].keys()):
-        ws.append([f"エリア{area}", data["area_chiku"][area], data["area_busuu"][area]])
+    label = _VERSION_LABEL.get(version, "京阪")
+    md = _md_from(haifubi)
+    ws.cell(1, 1, label).font = Font(bold=True, size=14, color="FFFF0000")
+    ws.merge_cells("A1:E1")
+    _tparts = [p for p in [md, (f"{gou}号" if gou else None)] if p]
+    g = ws.cell(1, 7, "　".join(_tparts) if _tparts else "号")
+    g.font = bold
+    ws.merge_cells(start_row=1, start_column=7, end_row=1, end_column=31)
 
-    ws.append([])
-    ws.append(["チラシ種類数分布", "地区数", "部数"])
-    for c in range(1, 4):
-        ws.cell(row=ws.max_row, column=c).font = Font(bold=True)
-    for t in sorted(data["type_dist"].keys(), reverse=True):
-        ku, bu = data["type_dist"][t]
-        ws.append([f"{t}種", ku, bu])
+    for c, txt in [(1, "エリア"), (2, "リーダー"), (3, "チラシ種類"),
+                   (5, "コース数"), (33, "配布部数"), (34, "地区数")]:
+        cell = ws.cell(3, c, txt)
+        cell.font = bold
+        cell.alignment = center
+        cell.border = box
 
-    ws.append([])
-    ws.append(["総計", ""])
-    ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
-    ws.append(["総地区数", data["total_chiku"]])
-    ws.append(["総配布部数", data["total_busuu"]])
-    ws.append(["チラシ総数(全チラシ部数)", data["chirashi_sou"]])
-    ws.append(["帳合(チラシ2種以上の地区の部数)", data["choai_busuu"]])
-    ws.append(["挿込(チラシがある地区の部数)", data["sashikomi_busuu"]])
-    ws.append(["ぱどのみ部数(チラシ無し)", data["pado_only_busuu"]])
+    PER_ROW = 6
+    r = 4
+    for area_block in _shukei_layout(data):
+        area_top = r
+        for leader in area_block["leaders"]:
+            ltop = r
+            for i, (t, ku, bu) in enumerate(leader["types"]):
+                if i and i % PER_ROW == 0:
+                    r += 1
+                col = 3 + (i % PER_ROW) * 5
+                for cc, val in [(col, t), (col + 1, "-"), (col + 2, ku), (col + 3, bu)]:
+                    cell = ws.cell(r, cc, val)
+                    cell.alignment = center
+                    cell.border = box
+                    if cc == col:
+                        cell.font = Font(color="FFFF0000")
+            lbot = r
+            bcell = ws.cell(ltop, 2, leader["name"])
+            bcell.alignment = center
+            bcell.border = box
+            ag = ws.cell(ltop, 33, leader["busuu"]); ag.alignment = center; ag.border = box
+            ah = ws.cell(ltop, 34, leader["chiku"]); ah.alignment = center; ah.border = box
+            if lbot > ltop:
+                ws.merge_cells(start_row=ltop, start_column=2, end_row=lbot, end_column=2)
+                ws.merge_cells(start_row=ltop, start_column=33, end_row=lbot, end_column=33)
+                ws.merge_cells(start_row=ltop, start_column=34, end_row=lbot, end_column=34)
+            r += 1
+        area_bot = r - 1
+        acell = ws.cell(area_top, 1, int(area_block["area"]))
+        acell.alignment = center
+        acell.border = box
+        if area_bot > area_top:
+            ws.merge_cells(start_row=area_top, start_column=1, end_row=area_bot, end_column=1)
+        r += 1  # エリア区切りの空行
 
-    for col, w in zip("ABCDE", [12, 18, 14, 16, 12]):
-        ws.column_dimensions[col].width = w
+    # ---- 下部集計 ----
+    br = r + 1
+    td = data["type_dist"]
+    rr = br
+    for t in range(11, -1, -1):
+        ku, bu = td.get(t, [0, 0])
+        for cc, val in [(2, t), (3, "-"), (4, ku), (6, bu)]:
+            ws.cell(rr, cc, val).alignment = center
+        rr += 1
+    ws.cell(rr, 2, data["total_chiku"]).font = bold
+    ws.cell(rr, 6, data["total_busuu"]).font = bold
+    total_row = rr
+
+    indicators = [
+        ("帳合", data["choai_busuu"]),
+        ("挿み込み", data["sashikomi_busuu"]),
+        ("ぱどのみ", data["pado_only_busuu"]),
+        ("折チラシ（B3,B4）", "—"),
+        ("チラシ総数", data["chirashi_sou"]),
+    ]
+    for k, (lab, val) in enumerate(indicators):
+        ws.cell(br + k, 13, lab).font = bold
+        ws.cell(br + k, 17, val)
+
+    for k, area in enumerate(sorted(data["area_busuu"], key=lambda a: int(a))):
+        ws.cell(br + 8 + k, 13, f"エリア{area}").font = bold
+        ws.cell(br + 8 + k, 15, "部")
+        ws.cell(br + 8 + k, 16, data["area_busuu"][area])
+
+    base_w = [3.6, 2.6, 4.7, 9.2, 3.7]
+    for col in range(3, 33):
+        ws.column_dimensions[gl(col)].width = base_w[(col - 3) % 5]
+    ws.column_dimensions["A"].width = 6.2
+    ws.column_dimensions["B"].width = 10.7
+    ws.column_dimensions["AG"].width = 10.6
+    ws.column_dimensions["AH"].width = 8.6
+
+    last_row = max(total_row, br + 8 + len(data["area_busuu"]) - 1)
+    ws.print_area = f"A1:AH{last_row}"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToWidth = 1
+    ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+
     buf = io.BytesIO()
     wb.save(buf)
     return freeze_xlsx_bytes(buf.getvalue())
+
+
+def _shukei_layout(data):
+    """集計表 上部マトリクスの並び。エリア昇順→リーダー(部数降順)→
+    チラシ種類数昇順の (種類数, コース数, 部数)。"""
+    areas = {}
+    for (area, leader), p in data["per"].items():
+        types = [(t, p["by_type"][t][0], p["by_type"][t][1])
+                 for t in sorted(p["by_type"])]
+        areas.setdefault(area, []).append({
+            "name": leader, "chiku": p["chiku"], "busuu": p["busuu"], "types": types,
+        })
+    out = []
+    for area in sorted(areas, key=lambda a: int(a)):
+        leaders = sorted(areas[area], key=lambda l: (-l["busuu"], l["name"]))
+        out.append({"area": area, "leaders": leaders})
+    return out
 
 
 def shukei_filename(version, rows) -> str:

@@ -79,17 +79,21 @@ with tab_atehagi:
                     A.build_atehagi_workbook(groups, version),
                     A.atehagi_filename(version, rows))
             if c2.button("挟み込み実績表を生成", key="keihan_jisseki"):
-                jrows = A.jisseki_rows(groups, version)
+                courses = A.jisseki_courses(groups, version)
+                gou = next((r["gou"] for r in rows if r.get("gou")), None)
+                haifubi = next((r["haifubi"] for r in rows if r.get("haifubi")), "")
                 st.session_state["keihan_out"] = (
-                    f"挟み込み実績表（{len(jrows)}地区・ぱどのみ地区は除外）",
-                    A.build_jisseki_workbook(jrows),
+                    f"挟み込み実績表（{len(courses)}コース）",
+                    A.build_jisseki_daishi_workbook(courses, version, gou, haifubi),
                     A.jisseki_filename(version, rows))
             if c3.button("集計表を生成", key="keihan_shukei"):
                 sdata = A.shukei_data(groups, version)
+                gou = next((r["gou"] for r in rows if r.get("gou")), None)
+                haifubi = next((r["haifubi"] for r in rows if r.get("haifubi")), "")
                 st.session_state["keihan_out"] = (
                     f"集計表（総地区数 {sdata['total_chiku']} / "
                     f"総配布部数 {sdata['total_busuu']:,} / チラシ総数 {sdata['chirashi_sou']:,}）",
-                    A.build_shukei_workbook(sdata, version),
+                    A.build_shukei_daishi_workbook(sdata, version, gou, haifubi),
                     A.shukei_filename(version, rows))
 
             # ダウンロードは生成ボタンの外に出す（押した瞬間に消えないように）
