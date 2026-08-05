@@ -242,3 +242,53 @@ def test_freeze_xlsx_bytes_stabilises_pandas_output():
     ws = _load(first)
     assert ws["A1"].value == "日付"
     assert ws["B2"].value == "¥400"
+
+
+def test_build_invoice_print_area_includes_bikou_column():
+    """🔴 依頼①。備考(G列)が印刷範囲に入っていること。
+
+    テンプレートの print_area は 'Sheet1'!$A$1:$F$27 で、G列が印刷範囲の外にあった。
+    そのためA4印刷すると備考だけ紙に載らない(幅不足ではない)。
+    """
+    data = invoice_excel.build_invoice_xlsx(
+        distributor_name="時野", issue_date="2026-08-05",
+        period_from="2026-08-01", period_to="2026-08-04",
+        lines=[{"project_name": "案件A", "report_qty": 100, "unit_price": 4,
+                "amount": 400, "remark": "配布"}])
+    ws = _load(data)
+    assert ws.print_area == "'Sheet1'!$A$1:$G$27"
+
+
+def test_build_invoice_fits_to_one_page_wide():
+    """横は必ず1ページに収める。列を増やしても切れないようにするため。"""
+    data = invoice_excel.build_invoice_xlsx(
+        distributor_name="時野", issue_date="2026-08-05",
+        period_from="", period_to="",
+        lines=[{"project_name": "案件A", "report_qty": 100, "unit_price": 4,
+                "amount": 400, "remark": "配布"}])
+    ws = _load(data)
+    assert ws.page_setup.fitToWidth == 1
+    assert ws.sheet_properties.pageSetUpPr.fitToPage is True
+
+
+def test_build_invoice_all_written_bikou_rows_are_inside_print_area():
+    """🔴 列だけでなく行も見る。備考を書いた明細行が全部 print_area の内側にあること。
+    明細は13〜18行なので、print_area の下端が12行などに退行したら落ちる。"""
+    lines = [{"project_name": f"案件{i}", "report_qty": 1, "unit_price": 1,
+              "amount": 1, "remark": "配布"} for i in range(6)]
+    data = invoice_excel.build_invoice_xlsx(
+        distributor_name="時野", issue_date="2026-08-05",
+        period_from="", period_to="", lines=lines)
+    ws = _load(data)
+
+    from openpyxl.utils.cell import range_boundaries
+    min_col, min_row, max_col, max_row = range_boundaries(
+        ws.print_area.split("!")[-1].replace("$", ""))
+
+    written = [(c, r) for r in range(1, ws.max_row + 1)
+               for c in range(1, ws.max_column + 1)
+               if ws.cell(r, c).value not in (None, "", " ", "\u3000")]
+    assert written, "セルに何も書かれていない＝テストが空振りしている"
+    outside = [(c, r) for c, r in written
+               if not (min_col <= c <= max_col and min_row <= r <= max_row)]
+    assert outside == [], f"印刷範囲の外に中身がある: {outside}"
