@@ -285,6 +285,12 @@ div[data-baseweb="popover"]:has([data-baseweb="calendar"]) label{ display:none !
 }
 [class*="st-key-mtrash-"] .stButton>button:hover{ background:#fdecea !important; }
 
+/* segmented_control(入力の種類・版): ●ではなくボタン全体を押せるように大きく */
+[data-testid="stSegmentedControl"] button{
+  min-height:44px !important; padding:.45rem 1.1rem !important;
+  font-weight:700 !important;
+}
+
 /* ===== 印刷ビュー(選択した行だけを紙に載せる) ===== */
 .printable{ background:#fff; border:1px solid var(--line); border-radius:14px;
             padding:1.2rem 1.4rem; margin:.4rem 0 1rem; }

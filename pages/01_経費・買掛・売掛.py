@@ -13,7 +13,12 @@ from common.ui import (apply_app_style, nice_table, period_picker,
 apply_app_style()
 st.title("小口／買掛／売掛の登録")
 
-mode = st.radio("入力の種類", ["小口", "買掛", "売掛"], horizontal=True)
+# 🔴 segmented_control は選択を解除でき、そのとき None を返す。None のまま下の
+# if/elif/else に流すと else に落ちて「売掛」の画面が開いてしまうため、
+# 明示的に既定へ戻す。
+_MODES = ["小口", "買掛", "売掛"]
+mode = st.segmented_control("入力の種類", _MODES, default=_MODES[0],
+                            key="entry_mode") or _MODES[0]
 
 _UPLOAD_TYPES = ["pdf", "jpg", "jpeg", "png"]
 _REG_TAB = "✒️ 登録"

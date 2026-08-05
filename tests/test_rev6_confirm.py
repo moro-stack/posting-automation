@@ -73,7 +73,7 @@ def test_pay_pending_confirm_uses_hai_iie(tmp_path, monkeypatch):
     _seed(db, monkeypatch)
     at = AppTest.from_file(PAGE01, default_timeout=30)
     at.run()
-    at.radio[0].set_value("買掛").run()
+    at.segmented_control[0].set_value("買掛").run()
     at.session_state["pay_pending"] = {
         "date": "2026-07-01", "vendor_name": "テスト商事", "amount": 1000,
         "original_status": "原本あり", "note": None, "source": "manual",
@@ -91,7 +91,7 @@ def test_recv_pending_confirm_uses_hai_iie(tmp_path, monkeypatch):
     _seed(db, monkeypatch)
     at = AppTest.from_file(PAGE01, default_timeout=30)
     at.run()
-    at.radio[0].set_value("売掛").run()
+    at.segmented_control[0].set_value("売掛").run()
     at.session_state["recv_pending"] = {
         "month": "2026-07", "client_id": None, "amount": 2000,
         "note": None, "project_id": None, "other_label": None,

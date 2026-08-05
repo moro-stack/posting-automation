@@ -839,7 +839,7 @@ def test_petty_list_has_unified_download_button(db):
 def _payable_page(db):
     at = AppTest.from_file(os.path.join(ROOT, "pages", _EXPENSE_PAGE), default_timeout=30)
     at.run()
-    at.radio[0].set_value("買掛").run()
+    at.segmented_control[0].set_value("買掛").run()
     return at
 
 
@@ -850,7 +850,7 @@ def test_payable_original_status_autoset_from_vendor_master(db):
     at.session_state["pay_draft"] = {"vendor": "ABC商事", "amount": 5000,
                                      "date": "2026-07-17", "note": None}
     at.run()
-    at.radio[0].set_value("買掛").run()
+    at.segmented_control[0].set_value("買掛").run()
 
     assert not at.exception
     assert _sel(at, "原本区分").value == "本社"
@@ -864,7 +864,7 @@ def test_payable_original_status_autoset_works_for_inactive_vendor(db):
     at.session_state["pay_draft"] = {"vendor": "旧商事", "amount": 5000,
                                      "date": "2026-07-17", "note": None}
     at.run()
-    at.radio[0].set_value("買掛").run()
+    at.segmented_control[0].set_value("買掛").run()
 
     assert not at.exception
     assert _sel(at, "原本区分").value == "クレジット"
@@ -906,7 +906,7 @@ def test_payable_no_caption_when_master_default_is_not_selectable(db):
     at.session_state["pay_draft"] = {"vendor": "謎商事", "amount": 5000,
                                      "date": "2026-07-17", "note": None}
     at.run()
-    at.radio[0].set_value("買掛").run()
+    at.segmented_control[0].set_value("買掛").run()
 
     assert not at.exception
     # 選択肢に無いので先頭に落ちる。そのときは「反映しました」と言ってはいけない。
@@ -943,7 +943,7 @@ def test_receivable_list_deletes_the_right_row_and_announces(db):
     b = store.add_receivable("2026-07", cid, 2000, db_path=db)
     at = AppTest.from_file(os.path.join(ROOT, "pages", _EXPENSE_PAGE), default_timeout=30)
     at.run()
-    at.radio[0].set_value("売掛").run()
+    at.segmented_control[0].set_value("売掛").run()
     keys = {btn.key for btn in at.button}
     assert not any(k and k.startswith("del_recv_") for k in keys)
 
@@ -1666,3 +1666,49 @@ def test_issue_page_renders_with_action_bars(db):
     keys = {b.key for b in at.button}
     assert "issue_labor_print" in keys
     assert at.button(key="issue_labor_bulk_del_btn").disabled is True
+
+
+# ===== ラジオ → segmented_control(依頼②) =====
+
+
+def test_expense_page_mode_is_segmented_control(db):
+    at = _run(_EXPENSE_PAGE)
+    assert not at.exception
+    assert [s.key for s in at.segmented_control] == ["entry_mode"]
+    assert at.segmented_control[0].options == ["小口", "買掛", "売掛"]
+    assert not at.radio
+
+
+def test_expense_page_falls_back_to_petty_when_deselected(db):
+    """🔴 segmented_control は選択解除で None を返す。
+    None のまま else に落ちると売掛の画面が開いてしまう。既定へ戻ること。"""
+    at = AppTest.from_file(os.path.join(ROOT, "pages", _EXPENSE_PAGE), default_timeout=30)
+    at.session_state["entry_mode"] = None
+    at.run()
+    assert not at.exception
+    # ⚠️ st.subheader は _rendered_text の収集対象外なので、一覧側の文言で見分ける。
+    # ガードが外れると else に落ちて売掛の画面になり、下の2つが入れ替わる。
+    text = _rendered_text(at)
+    assert "小口の登録はまだありません" in text
+    assert "売掛の登録はまだありません" not in text
+
+
+def test_shiryo_page_version_is_segmented_control(db):
+    at = _run("07_資料作成・変換表.py")
+    assert not at.exception
+    keys = {s.key for s in at.segmented_control}
+    assert "keihan_version" in keys
+    assert not at.radio
+
+
+def test_shiryo_page_version_falls_back_to_kita_when_deselected(db):
+    """🔴 版が None のまま else に落ちると南版になり、全枚数の地区名が誤る。"""
+    from common import atehagi as A
+
+    at = AppTest.from_file(os.path.join(ROOT, "pages", "07_資料作成・変換表.py"),
+                           default_timeout=30)
+    at.session_state["keihan_version"] = None
+    at.run()
+    assert not at.exception
+    # 版の判定結果をページが session_state に残す
+    assert at.session_state["_resolved_version"] == A.KEIHAN_KITA
