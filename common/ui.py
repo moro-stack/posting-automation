@@ -500,6 +500,86 @@ def selectable_list(rows, *, key, select_col="選択", id_col="No."):
     return edited, ids
 
 
+def _print_view(*, key, title):
+    """印刷ビューを描いたら True。Task 4 で本実装する。"""
+    return False
+
+
+def list_action_bar(edited_df, *, key, title, filename, section=None,
+                    select_col="選択", id_col="No.",
+                    delete_fn=None, delete_note=None, extra=None):
+    """選択した行に対する「印刷・ダウンロード・削除」を、全ページで同じ順・同じ見た目で出す。
+
+    delete_fn=None のときは削除だけ無効(灰色)にし、delete_note をホバーで出す。
+    03 号別明細・06 まとめは集計を見るだけの画面で、ここから消しても元データは
+    消えないため、この形にしている(見た目は揃えつつ、事故は起こさない)。
+
+    extra は右端に足すページ固有のボタン。extra(container, rows, ids) で呼ばれる。
+    """
+    from common import posting_logic
+    from common.excel_io import freeze_xlsx_bytes
+    import pandas as pd
+
+    if delete_fn is not None and id_col is None:
+        # 削除できるのに行を特定できない＝「削除したのに消えない」を無言で作らないため
+        raise ValueError("delete_fn を渡すときは id_col が必要です（削除対象を特定できません）")
+
+    if edited_df is None or getattr(edited_df, "empty", True):
+        return
+
+    # 印刷ビューが開いていれば、そちらだけを描いて操作バーは出さない
+    if _print_view(key=key, title=title):
+        return
+
+    rows = posting_logic.rows_for_excel(edited_df, select_col=select_col)
+    ids = ([] if id_col is None
+           else _selected_ids(edited_df, id_col=id_col, select_col=select_col))
+
+    # 削除の確認待ちは、ボタンの並びより先に全幅で出す(狭い列に潰さない)
+    pending = f"_bulkdel_pending_{key}"
+    waiting = st.session_state.get(pending)
+    if waiting:
+        st.warning(f"⚠️ 選択した{len(waiting)}件を削除しますか？")
+        c1, c2, _ = st.columns([1, 1, 4])
+        if c1.button("はい", type="primary", key=f"{key}_bulk_del_ok"):
+            for i in waiting:
+                delete_fn(i)
+            st.session_state.pop(pending, None)
+            flash(f"{len(waiting)}件を削除しました", section)
+            st.rerun()
+        if c2.button("いいえ", key=f"{key}_bulk_del_no"):
+            st.session_state.pop(pending, None)
+            st.rerun()
+        return
+
+    cols = st.columns(4 if extra else 3)
+
+    if cols[0].button("印刷", icon=":material/print:", key=f"{key}_print",
+                      disabled=not rows, use_container_width=True):
+        st.session_state[f"_print_{key}"] = rows
+        st.rerun()
+
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        pd.DataFrame(rows or [{}]).to_excel(w, index=False, sheet_name="選択した行")
+    cols[1].download_button(
+        "ダウンロード", data=freeze_xlsx_bytes(buf.getvalue()),
+        file_name=f"{filename}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        icon=":material/download:", disabled=not rows, key=f"{key}_dl",
+        use_container_width=True)
+
+    if cols[2].button("削除", icon=":material/delete:", key=f"{key}_bulk_del_btn",
+                      disabled=(delete_fn is None or not ids),
+                      help=delete_note if delete_fn is None else None,
+                      use_container_width=True):
+        st.session_state[pending] = list(ids)
+        st.rerun()
+
+    if extra:
+        extra(cols[3], rows, ids)
+
+
 def _selected_ids(edited, *, id_col, select_col):
     """posting_logic への依存を関数内 import に閉じ込めるための薄い包み
     (common/ui.py はモジュール先頭で posting_logic を import していないため)。"""
