@@ -1151,7 +1151,7 @@ def test_contract_zip_export_uses_saved_pay_type(db, monkeypatch):
     store.update_distributor(did, pay_type="歩合", db_path=db)   # マスタを後から変更
 
     at = AppTest.from_file(os.path.join(ROOT, "pages", _CONTRACT_PAGE), default_timeout=30)
-    at.session_state["contract_list_editor"] = {
+    at.session_state["contract_select_0"] = {
         "edited_rows": {0: {"選択": True}}, "added_rows": [], "deleted_rows": []}
     at.run()
 
@@ -1210,12 +1210,12 @@ def test_contract_list_deletes_the_right_row(db):
     at = _run(_CONTRACT_PAGE)
     keys = {btn.key for btn in at.button}
     assert not any(k and k.startswith("del_inv_") for k in keys)  # 行ごと削除は無い
-    assert "invoice_bulk_del_btn" in keys
+    assert "contract_bulk_del_btn" in keys
 
-    at.session_state["contract_list_editor"] = {
+    at.session_state["contract_select_0"] = {
         "edited_rows": {1: {"選択": True}}, "added_rows": [], "deleted_rows": []}
-    at.button(key="invoice_bulk_del_btn").click().run()
-    at.button(key="invoice_bulk_del_ok").click().run()
+    at.button(key="contract_bulk_del_btn").click().run()
+    at.button(key="contract_bulk_del_ok").click().run()
 
     assert not at.exception
     assert [i["id"] for i in store.list_contract_invoices(db_path=db)] == [a]
@@ -1225,10 +1225,10 @@ def test_contract_delete_announces_in_the_list_tab(db):
     """削除のアナウンスは一覧タブに出て、先に描画される登録タブに奪われないこと。"""
     _, _, iid = _seed_invoice(db, pay_type="歩合")
     at = _run(_CONTRACT_PAGE)
-    at.session_state["contract_list_editor"] = {
+    at.session_state["contract_select_0"] = {
         "edited_rows": {0: {"選択": True}}, "added_rows": [], "deleted_rows": []}
-    at.button(key="invoice_bulk_del_btn").click().run()
-    at.button(key="invoice_bulk_del_ok").click().run()
+    at.button(key="contract_bulk_del_btn").click().run()
+    at.button(key="contract_bulk_del_ok").click().run()
 
     assert not at.exception
     assert [s.value for s in at.tabs[1].success] == ["1件を削除しました"]
@@ -1612,15 +1612,36 @@ def test_contract_per_row_delete_gone(db):
     at.run()
     keys = [b.key for b in at.button]
     assert not any(k and k.startswith("del_inv_") for k in keys)   # 行ごと削除は無い
-    assert "invoice_bulk_del_btn" in keys                          # 選択削除がある
+    assert "contract_bulk_del_btn" in keys                          # 選択削除がある
 
 
 def test_contract_bulk_delete_removes_selected(db):
     _seed_contract(db)
     at = AppTest.from_file(os.path.join(ROOT, "pages", "02_業務委託登録.py"), default_timeout=30)
     at.run()
-    at.session_state["contract_list_editor"] = {
+    at.session_state["contract_select_0"] = {
         "edited_rows": {0: {"選択": True}}, "added_rows": [], "deleted_rows": []}
-    at.button(key="invoice_bulk_del_btn").click().run()
-    at.button(key="invoice_bulk_del_ok").click().run()
+    at.button(key="contract_bulk_del_btn").click().run()
+    at.button(key="contract_bulk_del_ok").click().run()
     assert len(store.list_contract_invoices(db_path=db)) == 1
+
+
+def test_contract_list_uses_unified_action_bar(db):
+    """🔴 業務委託の一覧も統一バーになっていること(選択するまでボタンが無い状態の解消)。"""
+    _seed_invoice(db)
+    at = _run(_CONTRACT_PAGE)
+    keys = {b.key for b in at.button}
+    assert "contract_print" in keys
+    assert "contract_bulk_del_btn" in keys
+    ids = [b.id for b in at.get("download_button")]
+    assert any("contract_dl" in i for i in ids)
+    # 何も選んでいなくてもボタンは存在する(灰色なだけ)
+    assert at.button(key="contract_bulk_del_btn").disabled is True
+
+
+def test_contract_zip_button_exists_without_selection(db):
+    """報告書ZIPも、選択が無くても存在すること(押せないだけ)。"""
+    _seed_invoice(db)
+    at = _run(_CONTRACT_PAGE)
+    ids = [b.id for b in at.get("download_button")]
+    assert any("dl_zip" in i for i in ids)

@@ -8,9 +8,8 @@ import streamlit as st
 from common import invoice_excel
 from common import posting_logic
 from common import posting_store as store
-from common.ui import (apply_app_style, section_export, nice_table, period_picker,
-                       flash, show_flash, bulk_delete_action)
-from common.excel_io import freeze_xlsx_bytes
+from common.ui import (apply_app_style, nice_table, period_picker,
+                       flash, show_flash, selectable_list, list_action_bar)
 
 apply_app_style()
 st.title("業務委託登録")
@@ -220,7 +219,7 @@ with tab_list:
         # マスタの現在値を使うと、配布員が日当→歩合に変わった瞬間に過去の「3 日」が
         # 「3 枚」に化けてしまう。
         disp_rows.append({
-            "選択": False,
+            # 「選択」列は selectable_list が付けるので、ここでは持たせない
             "No.": inv["id"],
             "配布員": id2name.get(inv["distributor_id"], "?"),
             "発行日": inv.get("issue_date") or "",
@@ -232,21 +231,17 @@ with tab_list:
         })
 
     st.caption("チェックを付けた請求を、下のボタンでまとめて出力できます。")
-    edited = st.data_editor(
-        pd.DataFrame(disp_rows), hide_index=True, use_container_width=True,
-        column_config={"選択": st.column_config.CheckboxColumn("選択", default=False)},
-        disabled=["No.", "配布員", "発行日", "配布業務期間", "数量", "請求額", "出力状況"],
-        key="contract_list_editor")
-    selected_ids = [int(r["No."]) for _, r in edited.iterrows() if r["選択"]]
+    edited, selected_ids = selectable_list(disp_rows, key="contract")
 
-    st.caption(f"選択中：{len(selected_ids)}件")
-    b1, b2 = st.columns(2)
+    def _zip_button(container, rows, ids):
+        """報告書をまとめてZIPで出す(このページ固有)。
 
-    # --- 報告書をまとめてZIP ---
-    zip_buf, skipped = io.BytesIO(), []
-    if selected_ids:
+        ⚠️ 押した時だけ作る。以前は毎回の再描画で選択分の報告書を全部作り直していたため、
+        選択が多いほど画面操作のたびに重くなっていた。
+        """
+        zip_buf, skipped = io.BytesIO(), []
         with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            for iid in selected_ids:
+            for iid in ids:
                 detail = detail_by_id.get(iid) or store.get_contract_invoice(iid)
                 head = detail["invoice"]
                 out_lines = _invoice_out_lines(detail, id2proj)
@@ -254,44 +249,32 @@ with tab_list:
                     skipped.append(iid)
                     continue
                 name = id2name.get(head["distributor_id"], "")
-                xlsx = invoice_excel.build_invoice_xlsx(
-                    distributor_name=name, issue_date=head["issue_date"],
-                    period_from=head["period_from"], period_to=head["period_to"],
-                    lines=out_lines,
-                    # マスタの現在値ではなく請求に焼き付けた支払形態を使う。現在値を使うと
-                    # 支払形態を変えた瞬間に過去の報告書の単位が化ける。
-                    pay_type=head.get("pay_type"))
-                zf.writestr(f'業務完了報告書兼請求書_{name}_{head["issue_date"]}.xlsx', xlsx)
-    exported_ids = [i for i in selected_ids if i not in skipped]
-    if skipped:
-        st.warning("次の請求は明細が6行を超えるためスキップしました（案件ごとに集約してください）："
-                   + "、".join(f"No.{i}" for i in skipped))
+                zf.writestr(
+                    f'業務完了報告書兼請求書_{name}_{head["issue_date"]}.xlsx',
+                    invoice_excel.build_invoice_xlsx(
+                        distributor_name=name, issue_date=head["issue_date"],
+                        period_from=head["period_from"], period_to=head["period_to"],
+                        lines=out_lines,
+                        # マスタの現在値ではなく請求に焼き付けた支払形態を使う。現在値を使うと
+                        # 支払形態を変えた瞬間に過去の報告書の単位が化ける。
+                        pay_type=head.get("pay_type")))
+        exported = [i for i in ids if i not in skipped]
+        if skipped:
+            st.warning("次の請求は明細が6行を超えるためスキップしました（案件ごとに集約してください）："
+                       + "、".join(f"No.{i}" for i in skipped))
+        if container.download_button(
+                f"報告書ZIP（{len(exported)}件）", data=zip_buf.getvalue(),
+                file_name=f"業務完了報告書_選択{len(exported)}件.zip",
+                mime="application/zip", icon=":material/folder_zip:",
+                disabled=not exported, key="dl_zip", use_container_width=True):
+            for iid in exported:
+                store.mark_contract_invoice_exported(iid)
+            st.rerun()
 
-    if b1.download_button(
-            f"選択した請求の報告書をまとめてダウンロード（ZIP・{len(exported_ids)}件）",
-            data=zip_buf.getvalue(),
-            file_name=f"業務完了報告書_選択{len(exported_ids)}件.zip",
-            mime="application/zip", disabled=not exported_ids, key="dl_zip"):
-        for iid in exported_ids:
-            store.mark_contract_invoice_exported(iid)
-        st.rerun()
-
-    # --- 選択した行を一覧Excelで ---
-    if selected_ids:
-        sel_rows = [{k: v for k, v in r.items() if k != "選択"}
-                    for _, r in edited.iterrows() if r["選択"]]
-        _buf = io.BytesIO()
-        with pd.ExcelWriter(_buf, engine="openpyxl") as w:
-            pd.DataFrame(sel_rows).to_excel(w, index=False, sheet_name="選択した請求")
-        b2.download_button(
-            f"選択した行を一覧Excelで保存（{len(selected_ids)}件）",
-            data=freeze_xlsx_bytes(_buf.getvalue()),
-            file_name=f"業務委託_選択一覧_{len(selected_ids)}件.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            icon=":material/download:", key="dl_sel_list")
-
-    bulk_delete_action(selected_ids, delete_fn=store.delete_contract_invoice,
-                       section="invoice_list", key="invoice_bulk_del")
+    list_action_bar(edited, key="contract", title="業務委託 請求一覧",
+                    filename=f"業務委託_選択一覧_{len(selected_ids)}件",
+                    section="invoice_list",
+                    delete_fn=store.delete_contract_invoice, extra=_zip_button)
 
     # --- 配布員別 報酬合計（表示期間内） ---
     st.divider()
