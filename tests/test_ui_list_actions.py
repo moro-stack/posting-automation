@@ -374,3 +374,15 @@ def test_print_view_close_returns_to_the_list():
     at.button(key="t_print_close").click().run()
     assert "_print_t" not in at.session_state
     assert any(b.key == "t_bulk_del_btn" for b in at.button)
+
+
+def test_old_list_helpers_are_removed():
+    """🔴 統一の目的は「作りが2通りある状態をなくす」こと。
+    旧部品が残っていると新しいページがまた旧部品を使い、同じ散らばりが再発する。"""
+    from common import ui
+
+    for name in ("section_export", "checkbox_list_editor",
+                 "selected_rows_excel_button", "bulk_delete_action"):
+        assert not hasattr(ui, name), f"{name} が残っている"
+    # 行ごと削除(05 マスタ管理)で使うので confirm_delete は残す
+    assert hasattr(ui, "confirm_delete")

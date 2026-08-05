@@ -1558,41 +1558,11 @@ def test_no_readonly_table_header(db):
     assert "停止中（" not in text  # 折りたたみの見出しが無い
 
 
-def test_bulk_delete_action_confirms_then_deletes():
-    def _page():
-        import streamlit as st
-        from common.ui import bulk_delete_action, apply_app_style
-        apply_app_style()
-        # 削除された id を session_state に記録（AppTest.from_function はクロージャ不可のため）
-        st.session_state.setdefault("_deleted", [])
-        bulk_delete_action(
-            [10, 20], delete_fn=lambda i: st.session_state["_deleted"].append(i),
-            section="t", key="bd")
-
-    from streamlit.testing.v1 import AppTest
-    at = AppTest.from_function(_page).run()
-    # 最初は削除ボタンのみ・まだ消えていない
-    assert at.session_state["_deleted"] == []
-    at.button(key="bd_btn").click().run()          # 削除ボタン→確認待ち
-    assert at.session_state["_deleted"] == []      # 確認前は消えない
-    at.button(key="bd_ok").click().run()           # はい
-    assert at.session_state["_deleted"] == [10, 20]
-
-
-def test_bulk_delete_action_cancel_does_not_delete():
-    def _page():
-        import streamlit as st
-        from common.ui import bulk_delete_action, apply_app_style
-        apply_app_style()
-        st.session_state.setdefault("_deleted", [])
-        bulk_delete_action([10], delete_fn=lambda i: st.session_state["_deleted"].append(i),
-                           section="t", key="bd")
-
-    from streamlit.testing.v1 import AppTest
-    at = AppTest.from_function(_page).run()
-    at.button(key="bd_btn").click().run()
-    at.button(key="bd_no").click().run()           # やめる
-    assert at.session_state["_deleted"] == []
+# 旧 bulk_delete_action の「確認してから消す/やめると消さない」テストは、
+# 統一部品 list_action_bar 側の
+#   test_action_bar_delete_removes_selected_and_flashes /
+#   test_action_bar_delete_cancel_keeps_rows
+# に移った(tests/test_ui_list_actions.py)。旧部品の撤去に伴いここからは削除。
 
 
 def _seed_contract(db):

@@ -25,16 +25,19 @@ def test_confirm_delete_uses_hai_iie():
 
 def _bulk_page():
     import streamlit as st
-    from common.ui import bulk_delete_action, apply_app_style
+    from common.ui import selectable_list, list_action_bar, apply_app_style
     apply_app_style()
     st.session_state.setdefault("_d", [])
-    bulk_delete_action([1], delete_fn=lambda i: st.session_state["_d"].append(i),
-                       section="t", key="bd")
+    edited, _ = selectable_list([{"No.": 1, "金額": "¥100"}], key="bd")
+    list_action_bar(edited, key="bd", title="一覧", filename="一覧", section="t",
+                    delete_fn=lambda i: st.session_state["_d"].append(i))
 
 
 def test_bulk_delete_uses_hai_iie():
+    """まとめて削除の確認も「はい/いいえ」で揃えること(統一部品 list_action_bar 側)。"""
     at = AppTest.from_function(_bulk_page).run()
-    at.button(key="bd_btn").click().run()
+    at.checkbox(key="bd_all").check().run()
+    at.button(key="bd_bulk_del_btn").click().run()
     labels = [b.label for b in at.button]
     assert "はい" in labels and "いいえ" in labels
 
