@@ -278,12 +278,17 @@ div[data-baseweb="popover"]:has([data-baseweb="calendar"]) label{ display:none !
   box-shadow:none !important;
 }
 [class*="st-key-mstat-off-"] .stButton>button:hover{ background:#e4e8ee !important; color:#67788a !important; }
-/* 削除(ゴミ箱)は控えめなアイコンボタンに */
+/* 削除(ゴミ箱)は他ページの削除ボタンと同じ見え方に揃える(白地・赤字・薄い枠・角丸10px)。
+   05 マスタ管理は行ごとの削除のまま残す方針(まとめて削除の経路は作らない)なので、
+   揃えるのは見た目だけ。 */
 [class*="st-key-mtrash-"] .stButton>button{
-  background:#fff !important; color:#c0392b !important; border:1px solid var(--line) !important;
-  box-shadow:none !important; padding:.35rem .6rem !important;
+  background:#fff !important; color:#c0392b !important;
+  border:1.5px solid #f0c8c2 !important; border-radius:10px !important;
+  box-shadow:none !important; padding:.42rem .7rem !important; min-height:40px;
 }
-[class*="st-key-mtrash-"] .stButton>button:hover{ background:#fdecea !important; }
+[class*="st-key-mtrash-"] .stButton>button:hover{
+  background:#fdecea !important; border-color:#c0392b !important;
+}
 
 /* segmented_control(入力の種類・版): ●ではなくボタン全体を押せるように大きく */
 [data-testid="stSegmentedControl"] button{

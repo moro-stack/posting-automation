@@ -1712,3 +1712,15 @@ def test_shiryo_page_version_falls_back_to_kita_when_deselected(db):
     assert not at.exception
     # 版の判定結果をページが session_state に残す
     assert at.session_state["_resolved_version"] == A.KEIHAN_KITA
+
+
+def test_master_page_keeps_per_row_delete(db):
+    """🔴 05 マスタ管理は行ごとの削除のまま。全選択→まとめて削除は作らない。
+    マスタの削除は他の一覧と意味が違い(費目・配布員そのものが消える)、
+    まとめて消せる経路を作るとチェック全部入り＋削除で全滅する。"""
+    did = store.add_distributor("行ごとの人", db_path=db)
+    at = _run("05_マスタ管理.py")
+    keys = {b.key for b in at.button}
+    assert f"del_distributor_{did}_btn" in keys          # 行ごとの削除は残っている
+    assert not any(k and k.endswith("_bulk_del_btn") for k in keys)   # 一括削除は無い
+    assert not any(c.key and c.key.endswith("_all") for c in at.checkbox)  # 全選択も無い
