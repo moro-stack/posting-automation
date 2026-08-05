@@ -461,6 +461,53 @@ def checkbox_list_editor(disp_rows, *, key, select_col="選択"):
         disabled=other, key=key)
 
 
+def selectable_list(rows, *, key, select_col="選択", id_col="No."):
+    """「すべて選択」チェック＋チェック列付きの一覧を描いて (編集後DataFrame, 選択id) を返す。
+
+    全ページの一覧をこの1つに揃えるための部品。`list_action_bar` と対で使う。
+
+    id_col=None は「id列を持たない一覧」(03 号別明細・06 まとめの集計行)。
+    このとき選択idは常に空リストになる。印刷とダウンロードは選択列だけ見れば足り、
+    idが要るのは削除だけなので、削除を出さない画面では問題にならない。
+
+    全選択の反映は data_editor の key を切り替えて再初期化することで行う。
+    Streamlit の data_editor は外から選択状態を書き換えるのが不安定なため、
+    「チェックボックスを表より前に置き、その値で選択列の初期値を決める」形にしている。
+    同じ key の中では個別編集が保持されるので、全選択してから数件だけ外せる。
+    """
+    import pandas as pd
+
+    df = rows if isinstance(rows, pd.DataFrame) else pd.DataFrame(rows)
+    if df is None or df.empty:
+        st.caption("表示できる行がありません。")
+        return pd.DataFrame(), []
+
+    all_sel = bool(st.checkbox("すべて選択", key=f"{key}_all"))
+    df = df.copy()
+    df[select_col] = all_sel
+    df = df[[select_col] + [c for c in df.columns if c != select_col]]
+    other = [c for c in df.columns if c != select_col]
+
+    edited = st.data_editor(
+        df, hide_index=True, use_container_width=True,
+        column_config={select_col: st.column_config.CheckboxColumn(select_col, default=False)},
+        disabled=other, key=f"{key}_select_{int(all_sel)}")
+
+    ids = ([] if id_col is None
+           else _selected_ids(edited, id_col=id_col, select_col=select_col))
+    n = sum(1 for _, r in edited.iterrows() if r.get(select_col))
+    st.caption(f"選択中：{n}件")
+    return edited, ids
+
+
+def _selected_ids(edited, *, id_col, select_col):
+    """posting_logic への依存を関数内 import に閉じ込めるための薄い包み
+    (common/ui.py はモジュール先頭で posting_logic を import していないため)。"""
+    from common import posting_logic
+
+    return posting_logic.selected_ids_from_editor(edited, id_col=id_col, select_col=select_col)
+
+
 def selected_rows_excel_button(edited_df, *, key, filename, select_col="選択",
                                label=None, container=None):
     """選択された行だけを（選択列を除いて）Excel化する download_button。0件は無効。"""
