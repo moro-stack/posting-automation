@@ -4,7 +4,8 @@ import streamlit as st
 
 from common import posting_logic
 from common import posting_store as store
-from common.ui import apply_app_style, section_export, nice_table, period_picker, show_flash
+from common.ui import (apply_app_style, nice_table, period_picker, show_flash,
+                       selectable_list, list_action_bar)
 
 apply_app_style()
 show_flash()
@@ -69,5 +70,10 @@ st.markdown("**明細（原価・売上）**")
 disp = sorted(rows, key=lambda r: (r["日付"] == "", r["日付"]))
 disp = [{"日付": r["日付"], "区分": r["区分"], "項目": r["項目"],
          "案件": r["案件"], "金額": _yen(r["金額"])} for r in disp]
-nice_table(disp, "この期間の原価・売上はありません。")
-section_export(disp, "原価売上まとめ", key="summary")
+# 集計を見るだけの画面。行は 01・02 のデータのコピーなので、ここから消しても元は消えない。
+# 見た目は他ページと揃えつつ、削除だけ無効(灰色)にしている。
+_edited, _ = selectable_list(disp, key="summary", id_col=None)
+list_action_bar(_edited, key="summary", title="原価・売上まとめ",
+                filename="原価売上まとめ", id_col=None, delete_fn=None,
+                delete_note="この画面は集計を見るためのものです。"
+                            "元のデータは『小口／買掛／売掛』『業務委託登録』から削除してください。")

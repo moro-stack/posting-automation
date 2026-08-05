@@ -8,7 +8,8 @@ import streamlit as st
 from common import posting_logic
 from common import posting_store as store
 from common.excel_io import freeze_xlsx_bytes
-from common.ui import apply_app_style, section_export, nice_table, period_picker, flash, show_flash
+from common.ui import (apply_app_style, nice_table, period_picker, flash, show_flash,
+                       selectable_list, list_action_bar)
 
 apply_app_style()
 show_flash()
@@ -195,7 +196,10 @@ with st.expander(f":material/groups: 配布員代の内訳（業務委託＋直�
                 flash("削除しました")
                 st.rerun()
 
-    section_export(_man_disp, f"配布員代直接入力_{sel}", key="issue_labor")
+    _lab_edited, _ = selectable_list(_man_disp, key="issue_labor", id_col=None)
+    list_action_bar(_lab_edited, key="issue_labor", title=f"配布員代 直接入力（{sel}）",
+                    filename=f"配布員代直接入力_{sel}", id_col=None, delete_fn=None,
+                    delete_note="この一覧の削除は上の編集フォームから行ってください。")
 
 # ===== 雑費（詳細は折りたたみ） =====
 _cats = {c["id"]: c["name"] for c in store.list_expense_categories()}
@@ -213,8 +217,10 @@ for r in petty:
 with st.expander(f":material/receipt_long: 雑費の内訳（小口）　—　小計 {_yen(groups['misc'])}",
                  expanded=False):
     st.caption(f"雑費 ＝ 小口 {_yen(petty_total)}")
-    nice_table(_misc, "この号の雑費（小口）はありません。")
-    section_export(_misc, f"雑費_{sel}", key="issue_misc")
+    _misc_edited, _ = selectable_list(_misc, key="issue_misc", id_col=None)
+    list_action_bar(_misc_edited, key="issue_misc", title=f"雑費（{sel}）",
+                    filename=f"雑費_{sel}", id_col=None, delete_fn=None,
+                    delete_note="雑費の元データは『小口／買掛／売掛』の小口から削除してください。")
 
 # ===== 号原価まとめ 出力 =====
 _buf = io.BytesIO()

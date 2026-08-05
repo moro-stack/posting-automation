@@ -1645,3 +1645,54 @@ def test_contract_zip_button_exists_without_selection(db):
     at = _run(_CONTRACT_PAGE)
     ids = [b.id for b in at.get("download_button")]
     assert any("dl_zip" in i for i in ids)
+
+
+# ===== 見るだけの画面(03・06)にも同じバーを置く。削除だけ無効 =====
+
+
+def test_summary_page_has_action_bar_with_delete_disabled(db):
+    """🔴 06 まとめ。印刷・DLは使えるが、削除は押せないこと。
+    ここの行は 01・02 のデータのコピーで、消しても元は消えないため。"""
+    cid = store.add_receivables_client("得意先", db_path=db)
+    store.add_receivable("2026-08", cid, 1000, db_path=db)
+    at = _run("06_原価・売上まとめ.py")
+    assert not at.exception
+    keys = {b.key for b in at.button}
+    assert "summary_print" in keys
+    assert "summary_bulk_del_btn" in keys
+    assert at.button(key="summary_bulk_del_btn").disabled is True
+
+
+def test_summary_page_delete_stays_disabled_even_when_all_selected(db):
+    """🔴 全選択しても削除は押せないままであること(集計元が消える事故をゼロにする)。"""
+    cid = store.add_receivables_client("得意先", db_path=db)
+    store.add_receivable("2026-08", cid, 1000, db_path=db)
+    at = _run("06_原価・売上まとめ.py")
+    at.checkbox(key="summary_all").check().run()
+    assert not at.exception
+    assert at.button(key="summary_bulk_del_btn").disabled is True
+    assert at.button(key="summary_print").disabled is False
+
+
+def test_summary_page_old_section_export_is_gone(db):
+    cid = store.add_receivables_client("得意先", db_path=db)
+    store.add_receivable("2026-08", cid, 1000, db_path=db)
+    at = _run("06_原価・売上まとめ.py")
+    ids = [b.id for b in at.get("download_button")]
+    assert not any("summary_xlsx" in i for i in ids)
+    assert any("summary_dl" in i for i in ids)
+
+
+def test_issue_page_renders_with_action_bars(db):
+    """03 号別明細も例外なく描けて、削除は押せないこと。
+
+    ⚠️ 号は st.pills の既定＝一覧の先頭が選ばれる。新しく案件を足しても先頭にはならず
+    明細が空のままになるので、**既存の先頭の案件**に直接入力を足して見る。
+    """
+    pid = store.list_projects(db_path=db)[0]["id"]
+    store.add_issue_manual_cost(pid, "配布", 5000, work_date="2026-08-01", db_path=db)
+    at = _run("03_号別明細.py")
+    assert not at.exception
+    keys = {b.key for b in at.button}
+    assert "issue_labor_print" in keys
+    assert at.button(key="issue_labor_bulk_del_btn").disabled is True
