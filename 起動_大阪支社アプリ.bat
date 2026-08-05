@@ -18,7 +18,8 @@ if %errorlevel%==0 (
 
 REM --- サーバーを起動（バックグラウンド・ウィンドウ非表示） ---
 echo サーバーを起動中です。しばらくお待ちください...
-powershell -NoProfile -Command "Start-Process -WindowStyle Hidden -FilePath '%STREAMLIT%' -ArgumentList 'run','app.py','--server.port','8502','--server.headless','true' -WorkingDirectory 'C:\Users\moro\posting-automation'"
+REM --server.address 0.0.0.0 = 同じWi-Fiのスマホ・他PCからも開けるようにする
+powershell -NoProfile -Command "Start-Process -WindowStyle Hidden -FilePath '%STREAMLIT%' -ArgumentList 'run','app.py','--server.port','8502','--server.address','0.0.0.0','--server.headless','true' -WorkingDirectory 'C:\Users\moro\posting-automation'"
 
 REM --- 起動完了(health=ok)まで最大30秒待つ ---
 set /a tries=0
@@ -32,8 +33,17 @@ goto waitloop
 
 :ready
 echo 起動しました。ブラウザを開きます。
+echo.
+echo ---------------------------------------------
+echo  スマホから使う場合（同じWi-Fiに繋いでください）
+for /f "usebackq delims=" %%I in (`powershell -NoProfile -Command "(Get-NetIPAddress -AddressFamily IPv4 ^| Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } ^| Select-Object -First 1 -ExpandProperty IPAddress)"`) do echo   http://%%I:8502/
+echo.
+echo  ※ 初回はWindowsのファイアウォールの確認が出ることがあります。
+echo    「アクセスを許可する」を押してください。
+echo ---------------------------------------------
+echo.
 start "" "%URL%"
-timeout /t 2 >nul
+timeout /t 5 >nul
 exit /b 0
 
 :timeout_err
