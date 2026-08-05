@@ -232,6 +232,34 @@ def rows_for_excel(edited_df, *, select_col="選択"):
     return out
 
 
+_PRINT_AMOUNT_KEYS = ("金額", "請求額", "合計")
+
+
+def print_total(rows):
+    """印刷用の合計。金額らしき列があり、全行が数値として読めるときだけ (列名, 合計) を返す。
+
+    一覧の値は表示用に整形済みの文字列(「¥1,234」)。1行でも読めない値(「—」など)が
+    混ざったまま合計すると、その行を無かったことにした嘘の合計を紙に載せてしまう。
+    そのため「全行読めるとき以外は合計を出さない」を明示的な仕様にしている。
+    """
+    if not rows:
+        return None
+    col = next((c for c in rows[0] if any(k in str(c) for k in _PRINT_AMOUNT_KEYS)), None)
+    if col is None:
+        return None
+    total = 0.0
+    for r in rows:
+        raw = (str(r.get(col, "")).replace("¥", "").replace(",", "")
+               .replace("円", "").strip())
+        if not raw:
+            return None
+        try:
+            total += float(raw)
+        except ValueError:
+            return None
+    return (col, total)
+
+
 def company_summary_totals(*, receivables, payables, petty, contract_lines, manual):
     """全社の売上(売掛)・原価(買掛+小口+業務委託+直接入力)・利益。"""
     s = sum(_num(r.get("amount")) for r in receivables)

@@ -289,3 +289,88 @@ def test_action_bar_print_button_stores_selected_rows():
     stored = at.session_state["_print_t"]
     assert [r["No."] for r in stored] == [11, 12, 13]
     assert "選択" not in stored[0]
+
+
+# ===== 印刷ビュー =====
+
+
+def test_print_view_opens_after_pressing_print():
+    """🔴 印刷を押すと、選択行だけの印刷ビューに切り替わること。"""
+    at = AppTest.from_function(_bar_page, default_timeout=30)
+    at.run()
+    at.checkbox(key="t_all").check().run()
+    at.button(key="t_print").click().run()
+    assert not at.exception
+    body = " ".join(m.value for m in at.markdown)
+    assert 'class="printable"' in body
+    assert "消耗品" in body and "交通費" in body
+    # 印刷ビューでは操作バーは出さない(印刷対象に混ざらないように)
+    assert not any(b.key == "t_bulk_del_btn" for b in at.button)
+
+
+def test_print_view_shows_title_and_count():
+    at = AppTest.from_function(_bar_page, default_timeout=30)
+    at.run()
+    at.checkbox(key="t_all").check().run()
+    at.button(key="t_print").click().run()
+    body = " ".join(m.value for m in at.markdown)
+    assert "小口一覧" in body
+    assert "3件" in body
+
+
+def test_print_view_shows_total_when_all_amounts_parse():
+    at = AppTest.from_function(_bar_page, default_timeout=30)
+    at.run()
+    at.checkbox(key="t_all").check().run()
+    at.button(key="t_print").click().run()
+    body = " ".join(m.value for m in at.markdown)
+    assert "5,680" in body      # 3200 + 980 + 1500
+
+
+def test_print_view_omits_total_when_a_value_is_unparsable():
+    """🔴 読めない値があるときは合計行そのものを出さない。"""
+
+    def _page():
+        import streamlit as st  # noqa: F401
+        from common import ui
+
+        rows = [{"No.": 1, "金額": "¥100"}, {"No.": 2, "金額": "—"}]
+        edited, _ = ui.selectable_list(rows, key="u")
+        ui.list_action_bar(edited, key="u", title="一覧", filename="一覧")
+
+    at = AppTest.from_function(_page, default_timeout=30)
+    at.run()
+    at.checkbox(key="u_all").check().run()
+    at.button(key="u_print").click().run()
+    body = " ".join(m.value for m in at.markdown)
+    assert "の合計" not in body
+
+
+def test_print_view_escapes_html_in_values():
+    """🔴 値をそのままHTMLに入れない(社名に < > が入っていても表が壊れない)。"""
+
+    def _page():
+        import streamlit as st  # noqa: F401
+        from common import ui
+
+        rows = [{"No.": 1, "取引先": "<b>タグ入り</b>"}]
+        edited, _ = ui.selectable_list(rows, key="h")
+        ui.list_action_bar(edited, key="h", title="一覧", filename="一覧")
+
+    at = AppTest.from_function(_page, default_timeout=30)
+    at.run()
+    at.checkbox(key="h_all").check().run()
+    at.button(key="h_print").click().run()
+    body = " ".join(m.value for m in at.markdown)
+    assert "&lt;b&gt;タグ入り&lt;/b&gt;" in body
+    assert "<b>タグ入り</b>" not in body
+
+
+def test_print_view_close_returns_to_the_list():
+    at = AppTest.from_function(_bar_page, default_timeout=30)
+    at.run()
+    at.checkbox(key="t_all").check().run()
+    at.button(key="t_print").click().run()
+    at.button(key="t_print_close").click().run()
+    assert "_print_t" not in at.session_state
+    assert any(b.key == "t_bulk_del_btn" for b in at.button)

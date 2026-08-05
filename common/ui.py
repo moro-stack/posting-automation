@@ -1,5 +1,7 @@
 """アプリ共通のUIスタイル(モダン・水色ワンポイント・暗色サイドバー・Noto Sans JP)。各ページ先頭で apply_app_style()。"""
+import html as _html
 import io
+from datetime import date as _date
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -282,6 +284,31 @@ div[data-baseweb="popover"]:has([data-baseweb="calendar"]) label{ display:none !
   box-shadow:none !important; padding:.35rem .6rem !important;
 }
 [class*="st-key-mtrash-"] .stButton>button:hover{ background:#fdecea !important; }
+
+/* ===== 印刷ビュー(選択した行だけを紙に載せる) ===== */
+.printable{ background:#fff; border:1px solid var(--line); border-radius:14px;
+            padding:1.2rem 1.4rem; margin:.4rem 0 1rem; }
+.printable .ptitle{ font-size:1.2rem; font-weight:800; margin:0 0 .2rem; }
+.printable .pmeta{ color:var(--muted); font-size:.85rem; margin-bottom:.7rem; }
+.printable table{ width:100%; border-collapse:collapse; font-size:.9rem; }
+.printable th, .printable td{ border:1px solid #cfd8e3; padding:.4rem .6rem; text-align:left; }
+.printable thead th{ background:#eef3f8; font-weight:700; }
+.printable .ptotal{ margin-top:.7rem; font-weight:800; text-align:right; font-size:1rem; }
+
+@media print{
+  /* 紙に載せるのは .printable だけ。操作用のUIは全部消す */
+  [data-testid="stSidebar"], [data-testid="stHeader"], [data-testid="stToolbar"],
+  [data-testid="stDataFrame"], [data-testid="stDataEditor"], [data-testid="stCheckbox"],
+  [data-testid="stExpander"], [data-testid="stAlert"], [data-testid="stMetric"],
+  .stButton, [data-testid="stDownloadButton"], [data-testid="stCaptionContainer"],
+  iframe{ display:none !important; }
+  .stApp{ background:#fff !important; }
+  .block-container{ padding:0 !important; max-width:100% !important; }
+  .printable{ border:none !important; padding:0 !important; }
+  .printable thead th{ background:#eee !important; -webkit-print-color-adjust:exact;
+                       print-color-adjust:exact; }
+  @page{ size:A4 portrait; margin:12mm; }
+}
 </style>
 """
 
@@ -500,9 +527,61 @@ def selectable_list(rows, *, key, select_col="選択", id_col="No."):
     return edited, ids
 
 
+def _print_table_html(rows, *, title, subtitle, total):
+    """選択行だけの印刷用HTML。値は必ずエスケープする(社名に < > が入っても壊れない)。"""
+    from common import posting_logic
+
+    heads = list(rows[0].keys())
+    thead = "".join(f"<th>{_html.escape(str(h))}</th>" for h in heads)
+    body = "".join(
+        "<tr>" + "".join(
+            f"<td>{_html.escape('' if r.get(h) is None else str(r.get(h)))}</td>"
+            for h in heads) + "</tr>"
+        for r in rows)
+    tfoot = ""
+    if total is not None:
+        col, value = total
+        tfoot = (f'<div class="ptotal">{_html.escape(str(col))}の合計：'
+                 f'¥{posting_logic.fmt_num(value)}</div>')
+    return (f'<div class="printable">'
+            f'<h2 class="ptitle">{_html.escape(title)}</h2>'
+            f'<div class="pmeta">{_html.escape(subtitle)}</div>'
+            f'<table><thead><tr>{thead}</tr></thead><tbody>{body}</tbody></table>'
+            f'{tfoot}</div>')
+
+
 def _print_view(*, key, title):
-    """印刷ビューを描いたら True。Task 4 で本実装する。"""
-    return False
+    """印刷ビューが開いていれば描いて True。閉じていれば False。
+
+    印刷は「選択行だけのきれいな表を出して、その状態でブラウザ印刷する」方式。
+    ページ全体を print すると、サイドバーもボタンも紙に載ってしまうため、
+    表示を切り替えたうえで @media print で残りを隠している。
+    """
+    from common import posting_logic
+
+    slot = f"_print_{key}"
+    rows = st.session_state.get(slot)
+    if not rows:
+        return False
+
+    subtitle = f"出力日 {_date.today().isoformat()}　／　{len(rows)}件"
+    st.markdown(
+        _print_table_html(rows, title=title, subtitle=subtitle,
+                          total=posting_logic.print_total(rows)),
+        unsafe_allow_html=True)
+
+    c1, c2, _ = st.columns([1, 1, 4])
+    with c1:
+        components.html(
+            """<button onclick="window.parent.print()"
+                style="width:100%;padding:.5rem .6rem;border:none;border-radius:10px;
+                       background:#14a4dc;color:#fff;font-weight:700;cursor:pointer;
+                       font-family:'Noto Sans JP',sans-serif;">印刷する</button>""",
+            height=46)
+    if c2.button("閉じる", key=f"{key}_print_close"):
+        st.session_state.pop(slot, None)
+        st.rerun()
+    return True
 
 
 def list_action_bar(edited_df, *, key, title, filename, section=None,
