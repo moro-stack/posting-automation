@@ -6,9 +6,9 @@ import streamlit as st
 from common import ocr
 from common import posting_logic
 from common import posting_store as store
-from common.ui import (apply_app_style, section_export, nice_table, period_picker,
-                       flash, show_flash, confirm_delete,
-                       checkbox_list_editor, selected_rows_excel_button, bulk_delete_action)
+from common.ui import (apply_app_style, nice_table, period_picker,
+                       flash, show_flash,
+                       selectable_list, list_action_bar)
 
 apply_app_style()
 st.title("小口／買掛／売掛の登録")
@@ -207,15 +207,10 @@ if mode == "小口":
         if not _disp:
             st.caption("小口の登録はまだありません。")
         else:
-            section_export(_disp, "小口一覧", key="petty")   # 全件Excel/印刷（残す）
-            edited = checkbox_list_editor(_disp, key="petty_select")
-            selected_ids = posting_logic.selected_ids_from_editor(edited)
-            st.caption(f"選択中：{len(selected_ids)}件")
-            b1, b2 = st.columns(2)
-            selected_rows_excel_button(edited, key="petty_sel_xlsx",
-                                       filename="小口_選択一覧", container=b1)
-            bulk_delete_action(selected_ids, delete_fn=store.delete_petty_cash,
-                               section="petty", key="petty_bulk_del", container=b2)
+            edited, selected_ids = selectable_list(_disp, key="petty")
+            list_action_bar(edited, key="petty", title="小口一覧",
+                            filename="小口_選択一覧", section="petty",
+                            delete_fn=store.delete_petty_cash)
 
 elif mode == "買掛":
     st.subheader("買掛（固定費・法人業者）")
@@ -347,15 +342,10 @@ elif mode == "買掛":
         if not _disp:
             st.caption("買掛の登録はまだありません。")
         else:
-            section_export(_disp, "買掛一覧", key="pay")
-            edited = checkbox_list_editor(_disp, key="pay_select")
-            selected_ids = posting_logic.selected_ids_from_editor(edited)
-            st.caption(f"選択中：{len(selected_ids)}件")
-            b1, b2 = st.columns(2)
-            selected_rows_excel_button(edited, key="pay_sel_xlsx",
-                                       filename="買掛_選択一覧", container=b1)
-            bulk_delete_action(selected_ids, delete_fn=store.delete_payable,
-                               section="payable", key="pay_bulk_del", container=b2)
+            edited, selected_ids = selectable_list(_disp, key="pay")
+            list_action_bar(edited, key="pay", title="買掛一覧",
+                            filename="買掛_選択一覧", section="payable",
+                            delete_fn=store.delete_payable)
 
 else:  # 売掛
     st.subheader("売掛（売上）")
@@ -416,12 +406,7 @@ else:  # 売掛
         if not _disp:
             st.caption("売掛の登録はまだありません。")
         else:
-            section_export(_disp, "売掛一覧", key="recv")
-            edited = checkbox_list_editor(_disp, key="recv_select")
-            selected_ids = posting_logic.selected_ids_from_editor(edited)
-            st.caption(f"選択中：{len(selected_ids)}件")
-            b1, b2 = st.columns(2)
-            selected_rows_excel_button(edited, key="recv_sel_xlsx",
-                                       filename="売掛_選択一覧", container=b1)
-            bulk_delete_action(selected_ids, delete_fn=store.delete_receivable,
-                               section="receivable", key="recv_bulk_del", container=b2)
+            edited, selected_ids = selectable_list(_disp, key="recv")
+            list_action_bar(edited, key="recv", title="売掛一覧",
+                            filename="売掛_選択一覧", section="receivable",
+                            delete_fn=store.delete_receivable)

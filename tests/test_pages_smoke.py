@@ -763,7 +763,7 @@ def test_petty_list_has_delete_button_and_deletes_the_right_row(db):
     idx_b = next(i for i, r in enumerate(rows) if r["id"] == b)
     # AppTest の data_editor は edited_rows を渡した直後の1回の run() でしか反映されない
     # ため、選択のセットとボタンのクリック予約を同じ run() にまとめて渡す。
-    at.session_state["petty_select"] = {
+    at.session_state["petty_select_0"] = {
         "edited_rows": {idx_b: {"選択": True}}, "added_rows": [], "deleted_rows": []}
     at.button(key="petty_bulk_del_btn").click()
     at.run()
@@ -780,7 +780,7 @@ def test_petty_delete_announces_in_the_list_tab(db):
      登録タブの show_flash() がメッセージを消費してしまう)"""
     rid = store.add_petty_cash("2026-07-10", None, 1000, db_path=db)
     at = _run(_EXPENSE_PAGE)
-    at.session_state["petty_select"] = {
+    at.session_state["petty_select_0"] = {
         "edited_rows": {0: {"選択": True}}, "added_rows": [], "deleted_rows": []}
     at.button(key="petty_bulk_del_btn").click()
     at.run()
@@ -806,7 +806,7 @@ def test_petty_bulk_delete_removes_only_selected(db):
     at.run()
     # 先頭行(index 0)だけ選択。AppTest の data_editor は edited_rows を渡した直後の1回の
     # run() でしか反映されないため、選択のセットとボタンのクリック予約を同じ run() にまとめる。
-    at.session_state["petty_select"] = {
+    at.session_state["petty_select_0"] = {
         "edited_rows": {0: {"選択": True}}, "added_rows": [], "deleted_rows": []}
     at.button(key="petty_bulk_del_btn").click()
     at.run()
@@ -823,14 +823,17 @@ def test_petty_per_row_delete_gone(db):
     assert not any(k and k.startswith("del_petty_") for k in keys)  # 行ごと削除は無い
 
 
-def test_petty_whole_list_export_kept(db):
+def test_petty_list_has_unified_download_button(db):
+    """section_export の全件Excelは撤去し、統一バーのダウンロードに集約した。
+    「すべて選択」を押せば全件をダウンロードできる。"""
     _seed_petty(db)
     at = AppTest.from_file(os.path.join(ROOT, "pages", "01_経費・買掛・売掛.py"), default_timeout=30)
     at.run()
     # このstreamlitバージョンのAppTestには download_button ショートカットが無いため get() で拾う。
     # また download_button ノードは .key が None を返すため .id（key を含む内部ID）で見る。
     ids = [b.id for b in at.get("download_button")]
-    assert any("petty_xlsx" in i for i in ids)  # section_export の全件Excelが残る
+    assert any("petty_dl" in i for i in ids)
+    assert not any("petty_xlsx" in i for i in ids)   # 旧 section_export は無い
 
 
 def _payable_page(db):
@@ -921,7 +924,7 @@ def test_payable_list_deletes_the_right_row_and_announces(db):
 
     rows = store.list_payables(db_path=db)
     idx_b = next(i for i, r in enumerate(rows) if r["id"] == b)
-    at.session_state["pay_select"] = {
+    at.session_state["pay_select_0"] = {
         "edited_rows": {idx_b: {"選択": True}}, "added_rows": [], "deleted_rows": []}
     at.button(key="pay_bulk_del_btn").click()
     at.run()
@@ -946,7 +949,7 @@ def test_receivable_list_deletes_the_right_row_and_announces(db):
 
     rows = store.list_receivables(db_path=db)
     idx_b = next(i for i, r in enumerate(rows) if r["id"] == b)
-    at.session_state["recv_select"] = {
+    at.session_state["recv_select_0"] = {
         "edited_rows": {idx_b: {"選択": True}}, "added_rows": [], "deleted_rows": []}
     at.button(key="recv_bulk_del_btn").click()
     at.run()
