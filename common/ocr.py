@@ -33,6 +33,29 @@ def media_type_for(filename: str) -> str:
     return "image/jpeg"
 
 
+_KNOWN_MEDIA_TYPES = ("application/pdf", "image/png", "image/jpeg")
+
+
+def media_type_for_upload(upload, *, default="image/jpeg") -> str:
+    """アップロード/撮影されたファイルのメディア種別。
+
+    Streamlit の UploadedFile が持つ `type` を最優先で使う。
+    カメラ撮影(st.camera_input)はファイル名から拡張子を取れないことがあり、
+    かつ実体がPNGのこともあるため、ファイル名だけで決めると
+    「PNGのデータを image/jpeg と偽って送る」ことになりかねない。
+    type が取れなければファイル名の拡張子、それも無ければ default。
+    """
+    t = (getattr(upload, "type", "") or "").strip().lower()
+    if t == "image/jpg":
+        return "image/jpeg"
+    if t in _KNOWN_MEDIA_TYPES:
+        return t
+    name = getattr(upload, "name", "") or ""
+    if "." in name:
+        return media_type_for(name)
+    return default
+
+
 def _parse_json(text):
     m = re.search(r"\{.*\}", text, re.DOTALL)
     if not m:

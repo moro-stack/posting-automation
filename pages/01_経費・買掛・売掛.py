@@ -69,16 +69,22 @@ def _period_filter(rows, date_key, key, label):
     return rows
 
 
-def _ocr_files(files, reader):
-    """複数ファイルをAIで読み取り、下書きリストを返す。失敗しても止めない(#7の保険)。"""
+def _ocr_files(files, reader, media_type=None):
+    """複数ファイルをAIで読み取り、下書きリストを返す。失敗しても止めない(#7の保険)。
+
+    media_type を渡すと拡張子からの判定を使わない。カメラ撮影(st.camera_input)は
+    戻り値のファイル名が固定で拡張子を持たないため、image/jpeg を明示して渡す。
+    """
     drafts = []
     prog = st.progress(0.0)
     for i, f in enumerate(files):
+        name = getattr(f, "name", "") or "camera.jpg"
         try:
-            d = reader(f.getvalue(), ocr.media_type_for(f.name), client=None)
+            mt = media_type or ocr.media_type_for(name)
+            d = reader(f.getvalue(), mt, client=None)
         except Exception as e:  # noqa: BLE001
             d = {"amount": None, "_error": str(e)}
-        d["_file"] = f.name
+        d["_file"] = name
         drafts.append(d)
         prog.progress((i + 1) / len(files))
     prog.empty()
@@ -101,6 +107,22 @@ if mode == "小口":
                                type=_UPLOAD_TYPES, accept_multiple_files=True)
         if ups and st.button("画像/PDFをAIで読み取る"):
             drafts = _ocr_files(ups, ocr.extract_receipt)
+            st.session_state.pop("petty_draft", None)
+            st.session_state.pop("petty_bulk", None)
+            if len(drafts) == 1 and drafts[0].get("amount"):
+                st.session_state["petty_draft"] = {"date": drafts[0].get("date"),
+                                                   "amount": drafts[0].get("amount"),
+                                                   "item": drafts[0].get("item")}
+            else:
+                st.session_state["petty_bulk"] = drafts
+
+        # スマホからその場で撮って登録できるようにする(社内Wi-Fiで 8502 を開いた場合)
+        shot = st.camera_input("その場で撮る（スマホ向け）", key="petty_camera")
+        if shot is not None and st.button("撮った写真をAIで読み取る", key="petty_camera_ocr"):
+            # camera_input はファイル名から拡張子を取れず、実体がPNGのこともある。
+            # 撮影データ自身が持つ type を優先して決める(嘘のMIMEで送らないため)。
+            drafts = _ocr_files([shot], ocr.extract_receipt,
+                                media_type=ocr.media_type_for_upload(shot))
             st.session_state.pop("petty_draft", None)
             st.session_state.pop("petty_bulk", None)
             if len(drafts) == 1 and drafts[0].get("amount"):

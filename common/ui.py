@@ -320,6 +320,23 @@ div[data-baseweb="popover"]:has([data-baseweb="calendar"]) label{ display:none !
                        print-color-adjust:exact; }
   @page{ size:A4 portrait; margin:12mm; }
 }
+
+/* ===== スマホ幅(社内Wi-Fiからスマホで開いたとき) ===== */
+@media (max-width: 640px){
+  .block-container{ padding:1rem .8rem 2.4rem !important; }
+  [data-testid="stSidebar"]{ width:180px !important; min-width:180px !important; }
+  /* 横並びの列は縦積みにする(操作バーのボタンが潰れないように) */
+  [data-testid="stHorizontalBlock"]{ flex-direction:column !important; gap:.45rem !important; }
+  [data-testid="stHorizontalBlock"] > div{ width:100% !important; }
+  .stButton>button, [data-testid="stDownloadButton"]>button{
+    width:100% !important; min-height:44px;
+  }
+  /* 表は画面からはみ出さず、中で横スクロールさせる */
+  [data-testid="stDataFrame"], [data-testid="stDataEditor"], .printable{
+    overflow-x:auto !important;
+  }
+  [data-testid="stHeading"] h1, .stMarkdown h1{ font-size:1.15rem !important; }
+}
 </style>
 """
 

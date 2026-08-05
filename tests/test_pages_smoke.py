@@ -1724,3 +1724,19 @@ def test_master_page_keeps_per_row_delete(db):
     assert f"del_distributor_{did}_btn" in keys          # 行ごとの削除は残っている
     assert not any(k and k.endswith("_bulk_del_btn") for k in keys)   # 一括削除は無い
     assert not any(c.key and c.key.endswith("_all") for c in at.checkbox)  # 全選択も無い
+
+
+# ===== スマホ対応(依頼⑤) =====
+
+
+def test_petty_registration_has_camera_input(db):
+    """🔴 依頼⑤。スマホでその場で撮って登録できること。
+    ⚠️ camera_input ノードは download_button と同じく .key が None を返すため .id で見る。"""
+    at = _run(_EXPENSE_PAGE)
+    assert not at.exception
+    ids = [c.id for c in at.get("camera_input")]
+    assert any("petty_camera" in i for i in ids)
+
+
+# 撮った写真のメディア種別の決め方は ocr.media_type_for_upload の
+# テスト(tests/test_ocr.py)で見る。AppTest は camera_input に値を注入できないため。
