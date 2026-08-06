@@ -64,7 +64,9 @@ def chiku_name(version: str, chiku) -> str:
             return "寝屋川・枚方"
         return ""
     if version == KEIHAN_MINAMI:
-        return "守口・門真"          # 南版は担当地区によらず共通（関西ぱど 2026-07-23）
+        # 南版は担当地区によらず共通。関西ぱど 2026-07-23 の指摘では「守口・門真」だったが、
+        # 2026-08-06 に大橋さんの依頼で版名表記「京阪南」へ変更した。
+        return "京阪南"
     raise ValueError(f"未知の版: {version!r}")
 
 
@@ -459,7 +461,21 @@ def jisseki_filename(version, rows) -> str:
     return "_".join(parts) + ".xlsx"
 
 
-SHUKEI_TYPE_MAX = 11   # 集計表 下部集計のチラシ種類数の枠(実物帳票が 0〜11 の固定)
+SHUKEI_TYPE_MAX = 11   # 集計表 下部集計で扱えるチラシ種類数の上限(これを超える分は overflow 警告)
+SHUKEI_TYPE_MIN_TOP = 5  # 実物帳票の枠は 5〜0 の6行。データが少なくてもここまでは出す
+
+
+def _shukei_type_top(type_dist):
+    """下部集計に出すチラシ種類数の最大値。
+
+    実物帳票に合わせて最低でも 5〜0 の6行を出し、5種を超えるデータがあれば
+    そこまで枠を伸ばす（詰めたせいで数字が消えないように）。ただし
+    SHUKEI_TYPE_MAX を超える分は枠に載せず shukei_overflow_types() が警告する。
+    2026-08-06 大橋さんの「もう少し見やすく」への対応で、使われない空枠を出さなくした。
+    """
+    used = [t for t, v in (type_dist or {}).items() if (v[0] or v[1])]
+    top = max(used) if used else 0
+    return min(SHUKEI_TYPE_MAX, max(SHUKEI_TYPE_MIN_TOP, top))
 
 
 def shukei_data(groups, version):
@@ -587,7 +603,7 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
     br = r + 1
     td = data["type_dist"]
     rr = br
-    for t in range(SHUKEI_TYPE_MAX, -1, -1):
+    for t in range(_shukei_type_top(td), -1, -1):
         ku, bu = td.get(t, [0, 0])
         for cc, val in [(2, t), (3, "-"), (4, ku), (6, bu)]:
             ws.cell(rr, cc, val).alignment = center

@@ -35,10 +35,14 @@ def _minami_groups():
     return A.group_by_chiku(A.rows_from_table(_minami_table()))
 
 
-def test_chiku_name_minami_is_moriguchi_kadoma():
-    """南版の見出し地区名は担当地区コードによらず常に「守口・門真」。"""
-    assert A.chiku_name(A.KEIHAN_MINAMI, "911001") == "守口・門真"
-    assert A.chiku_name(A.KEIHAN_MINAMI, 921203) == "守口・門真"
+def test_chiku_name_minami_is_keihan_minami():
+    """南版の見出しは担当地区コードによらず常に「京阪南」。
+
+    2026-07-23（関西ぱど指摘）では「守口・門真」だったが、
+    2026-08-06 に大橋さんの依頼で版名表記「京阪南」に変更した。
+    """
+    assert A.chiku_name(A.KEIHAN_MINAMI, "911001") == "京阪南"
+    assert A.chiku_name(A.KEIHAN_MINAMI, 921203) == "京阪南"
 
 
 def test_area_code_keeps_six_digit_minami_code():
@@ -72,14 +76,14 @@ def test_atehagi_prints_six_digit_chiku_and_clears_fixed_zero():
 
 
 def test_minami_atehagi_keeps_six_digit_code_and_fixed_area_name():
-    """南版は先頭の9を落とさず、見出しは「守口・門真」。"""
+    """南版は先頭の9を落とさず、見出しは「京阪南」。"""
     groups = _minami_groups()
     assert list(groups.keys()) == ["911001", "921203"]     # 従来は 11001/21203 になっていた
     data = A.build_atehagi_workbook(groups, A.KEIHAN_MINAMI)
     wb = openpyxl.load_workbook(io.BytesIO(data))
     assert wb.sheetnames == ["911001", "921203"]
     ws = wb["911001"]
-    assert ws["A1"].value == "守口・門真"
+    assert ws["A1"].value == "京阪南"
     assert ws["D4"].value == "911001"            # 6桁のまま・0は足さない
     assert ws["C4"].value in (None, "")
 
