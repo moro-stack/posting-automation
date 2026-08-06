@@ -4,6 +4,7 @@ import io
 import os
 
 import openpyxl
+from openpyxl.worksheet.properties import PageSetupProperties
 
 from common import posting_logic
 from common.excel_io import freeze_xlsx_bytes
@@ -56,6 +57,16 @@ def build_invoice_xlsx(*, distributor_name, issue_date, period_from, period_to, 
     # 配布部数(F20)= 配布/挟み込みの報告数合計。ラベルE20は「報告数」に寄せる
     _set(ws, "E20", "報告数")
     _set(ws, "F20", f"{posting_logic.fmt_num(posting_logic.delivered_copies(lines, pay_type))}部")
+
+    # 🔴 テンプレートの印刷範囲は A1:F27 で、備考(G列)が範囲の外にあった。
+    # そのままA4印刷すると備考だけ紙に載らない(幅不足ではない。A〜G合計 約99.6文字幅で
+    # A4縦の使用可能幅に収まる)。ここで毎回設定し直すことで、テンプレートを
+    # 差し替えても効くようにする。
+    # fitToWidth=1 にすると横は必ず1ページに収まる(このとき page_setup.scale は無視される)。
+    ws.print_area = "A1:G27"
+    ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0     # 縦は成り行き(明細が増えても縮めすぎない)
 
     # 作成日時を固定(更新日時は openpyxl が save 内で「今」に上書きするため freeze 側で潰す)
     wb.properties.created = _FIXED_DT

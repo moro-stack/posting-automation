@@ -19,9 +19,16 @@ tab_atehagi, tab_proceed, tab_advalue, tab_other = st.tabs(
 with tab_atehagi:
     st.caption("関西ぱどの配送管理表（CSV / Excel）をアップロードすると、"
                "担当地区ごとのあて紙をまとめたExcelを作成します。")
-    version_label = st.radio("版", ["京阪北版", "京阪南版"], horizontal=True,
-                             key="keihan_version")
-    version = A.KEIHAN_KITA if version_label == "京阪北版" else A.KEIHAN_MINAMI
+    # 🔴 segmented_control は選択を解除でき、そのとき None を返す。
+    # `A.KEIHAN_KITA if label == "京阪北版" else A.KEIHAN_MINAMI` のような書き方だと
+    # None が黙って南版に落ち、全枚数のあて紙で地区名が誤る。
+    # 既定へ戻したうえで、対応表で引く。
+    _VERSIONS = {"京阪北版": A.KEIHAN_KITA, "京阪南版": A.KEIHAN_MINAMI}
+    version_label = st.segmented_control("版", list(_VERSIONS), default="京阪北版",
+                                         key="keihan_version") or "京阪北版"
+    version = _VERSIONS[version_label]
+    # 版の取り違えは全枚数に影響するため、テストで固定できるよう解決結果を残す
+    st.session_state["_resolved_version"] = version
 
     up = st.file_uploader("配送管理表をアップロード", type=["csv", "xlsx", "xlsm"],
                           key="keihan_upload")

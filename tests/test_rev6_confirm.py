@@ -25,16 +25,19 @@ def test_confirm_delete_uses_hai_iie():
 
 def _bulk_page():
     import streamlit as st
-    from common.ui import bulk_delete_action, apply_app_style
+    from common.ui import selectable_list, list_action_bar, apply_app_style
     apply_app_style()
     st.session_state.setdefault("_d", [])
-    bulk_delete_action([1], delete_fn=lambda i: st.session_state["_d"].append(i),
-                       section="t", key="bd")
+    edited, _ = selectable_list([{"No.": 1, "金額": "¥100"}], key="bd")
+    list_action_bar(edited, key="bd", title="一覧", filename="一覧", section="t",
+                    delete_fn=lambda i: st.session_state["_d"].append(i))
 
 
 def test_bulk_delete_uses_hai_iie():
+    """まとめて削除の確認も「はい/いいえ」で揃えること(統一部品 list_action_bar 側)。"""
     at = AppTest.from_function(_bulk_page).run()
-    at.button(key="bd_btn").click().run()
+    at.checkbox(key="bd_all").check().run()
+    at.button(key="bd_bulk_del_btn").click().run()
     labels = [b.label for b in at.button]
     assert "はい" in labels and "いいえ" in labels
 
@@ -70,7 +73,7 @@ def test_pay_pending_confirm_uses_hai_iie(tmp_path, monkeypatch):
     _seed(db, monkeypatch)
     at = AppTest.from_file(PAGE01, default_timeout=30)
     at.run()
-    at.radio[0].set_value("買掛").run()
+    at.segmented_control[0].set_value("買掛").run()
     at.session_state["pay_pending"] = {
         "date": "2026-07-01", "vendor_name": "テスト商事", "amount": 1000,
         "original_status": "原本あり", "note": None, "source": "manual",
@@ -88,7 +91,7 @@ def test_recv_pending_confirm_uses_hai_iie(tmp_path, monkeypatch):
     _seed(db, monkeypatch)
     at = AppTest.from_file(PAGE01, default_timeout=30)
     at.run()
-    at.radio[0].set_value("売掛").run()
+    at.segmented_control[0].set_value("売掛").run()
     at.session_state["recv_pending"] = {
         "month": "2026-07", "client_id": None, "amount": 2000,
         "note": None, "project_id": None, "other_label": None,

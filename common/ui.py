@@ -1,5 +1,7 @@
 """アプリ共通のUIスタイル(モダン・水色ワンポイント・暗色サイドバー・Noto Sans JP)。各ページ先頭で apply_app_style()。"""
+import html as _html
 import io
+from datetime import date as _date
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -276,12 +278,65 @@ div[data-baseweb="popover"]:has([data-baseweb="calendar"]) label{ display:none !
   box-shadow:none !important;
 }
 [class*="st-key-mstat-off-"] .stButton>button:hover{ background:#e4e8ee !important; color:#67788a !important; }
-/* 削除(ゴミ箱)は控えめなアイコンボタンに */
+/* 削除(ゴミ箱)は他ページの削除ボタンと同じ見え方に揃える(白地・赤字・薄い枠・角丸10px)。
+   05 マスタ管理は行ごとの削除のまま残す方針(まとめて削除の経路は作らない)なので、
+   揃えるのは見た目だけ。 */
 [class*="st-key-mtrash-"] .stButton>button{
-  background:#fff !important; color:#c0392b !important; border:1px solid var(--line) !important;
-  box-shadow:none !important; padding:.35rem .6rem !important;
+  background:#fff !important; color:#c0392b !important;
+  border:1.5px solid #f0c8c2 !important; border-radius:10px !important;
+  box-shadow:none !important; padding:.42rem .7rem !important; min-height:40px;
 }
-[class*="st-key-mtrash-"] .stButton>button:hover{ background:#fdecea !important; }
+[class*="st-key-mtrash-"] .stButton>button:hover{
+  background:#fdecea !important; border-color:#c0392b !important;
+}
+
+/* segmented_control(入力の種類・版): ●ではなくボタン全体を押せるように大きく */
+[data-testid="stSegmentedControl"] button{
+  min-height:44px !important; padding:.45rem 1.1rem !important;
+  font-weight:700 !important;
+}
+
+/* ===== 印刷ビュー(選択した行だけを紙に載せる) ===== */
+.printable{ background:#fff; border:1px solid var(--line); border-radius:14px;
+            padding:1.2rem 1.4rem; margin:.4rem 0 1rem; }
+.printable .ptitle{ font-size:1.2rem; font-weight:800; margin:0 0 .2rem; }
+.printable .pmeta{ color:var(--muted); font-size:.85rem; margin-bottom:.7rem; }
+.printable table{ width:100%; border-collapse:collapse; font-size:.9rem; }
+.printable th, .printable td{ border:1px solid #cfd8e3; padding:.4rem .6rem; text-align:left; }
+.printable thead th{ background:#eef3f8; font-weight:700; }
+.printable .ptotal{ margin-top:.7rem; font-weight:800; text-align:right; font-size:1rem; }
+
+@media print{
+  /* 紙に載せるのは .printable だけ。操作用のUIは全部消す */
+  [data-testid="stSidebar"], [data-testid="stHeader"], [data-testid="stToolbar"],
+  [data-testid="stDataFrame"], [data-testid="stDataEditor"], [data-testid="stCheckbox"],
+  [data-testid="stExpander"], [data-testid="stAlert"], [data-testid="stMetric"],
+  .stButton, [data-testid="stDownloadButton"], [data-testid="stCaptionContainer"],
+  iframe{ display:none !important; }
+  .stApp{ background:#fff !important; }
+  .block-container{ padding:0 !important; max-width:100% !important; }
+  .printable{ border:none !important; padding:0 !important; }
+  .printable thead th{ background:#eee !important; -webkit-print-color-adjust:exact;
+                       print-color-adjust:exact; }
+  @page{ size:A4 portrait; margin:12mm; }
+}
+
+/* ===== スマホ幅(社内Wi-Fiからスマホで開いたとき) ===== */
+@media (max-width: 640px){
+  .block-container{ padding:1rem .8rem 2.4rem !important; }
+  [data-testid="stSidebar"]{ width:180px !important; min-width:180px !important; }
+  /* 横並びの列は縦積みにする(操作バーのボタンが潰れないように) */
+  [data-testid="stHorizontalBlock"]{ flex-direction:column !important; gap:.45rem !important; }
+  [data-testid="stHorizontalBlock"] > div{ width:100% !important; }
+  .stButton>button, [data-testid="stDownloadButton"]>button{
+    width:100% !important; min-height:44px;
+  }
+  /* 表は画面からはみ出さず、中で横スクロールさせる */
+  [data-testid="stDataFrame"], [data-testid="stDataEditor"], .printable{
+    overflow-x:auto !important;
+  }
+  [data-testid="stHeading"] h1, .stMarkdown h1{ font-size:1.15rem !important; }
+}
 </style>
 """
 
@@ -441,70 +496,183 @@ def confirm_delete(*, key: str, detail: str, on_confirm, label: str = "削除",
         st.rerun()
 
 
-def checkbox_list_editor(disp_rows, *, key, select_col="選択"):
-    """一覧を『選択チェック列＋他列は読み取り専用』の data_editor で描画して返す。
-    disp_rows は list[dict] か DataFrame（表示用に整形済み・id列も含めておく）。"""
+def selectable_list(rows, *, key, select_col="選択", id_col="No."):
+    """「すべて選択」チェック＋チェック列付きの一覧を描いて (編集後DataFrame, 選択id) を返す。
+
+    全ページの一覧をこの1つに揃えるための部品。`list_action_bar` と対で使う。
+
+    id_col=None は「id列を持たない一覧」(03 号別明細・06 まとめの集計行)。
+    このとき選択idは常に空リストになる。印刷とダウンロードは選択列だけ見れば足り、
+    idが要るのは削除だけなので、削除を出さない画面では問題にならない。
+
+    全選択の反映は data_editor の key を切り替えて再初期化することで行う。
+    Streamlit の data_editor は外から選択状態を書き換えるのが不安定なため、
+    「チェックボックスを表より前に置き、その値で選択列の初期値を決める」形にしている。
+    同じ key の中では個別編集が保持されるので、全選択してから数件だけ外せる。
+    """
     import pandas as pd
 
-    df = disp_rows if isinstance(disp_rows, pd.DataFrame) else pd.DataFrame(disp_rows)
-    if df.empty:
+    df = rows if isinstance(rows, pd.DataFrame) else pd.DataFrame(rows)
+    if df is None or df.empty:
         st.caption("表示できる行がありません。")
-        return df
-    other = [c for c in df.columns if c != select_col]
-    if select_col not in df.columns:
-        df = df.copy()
-        df.insert(0, select_col, False)
+        return pd.DataFrame(), []
+
+    all_sel = bool(st.checkbox("すべて選択", key=f"{key}_all"))
+    df = df.copy()
+    df[select_col] = all_sel
     df = df[[select_col] + [c for c in df.columns if c != select_col]]
-    return st.data_editor(
+    other = [c for c in df.columns if c != select_col]
+
+    edited = st.data_editor(
         df, hide_index=True, use_container_width=True,
         column_config={select_col: st.column_config.CheckboxColumn(select_col, default=False)},
-        disabled=other, key=key)
+        disabled=other, key=f"{key}_select_{int(all_sel)}")
+
+    ids = ([] if id_col is None
+           else _selected_ids(edited, id_col=id_col, select_col=select_col))
+    n = sum(1 for _, r in edited.iterrows() if r.get(select_col))
+    st.caption(f"選択中：{n}件")
+    return edited, ids
 
 
-def selected_rows_excel_button(edited_df, *, key, filename, select_col="選択",
-                               label=None, container=None):
-    """選択された行だけを（選択列を除いて）Excel化する download_button。0件は無効。"""
+def _print_table_html(rows, *, title, subtitle, total):
+    """選択行だけの印刷用HTML。値は必ずエスケープする(社名に < > が入っても壊れない)。"""
+    from common import posting_logic
+
+    heads = list(rows[0].keys())
+    thead = "".join(f"<th>{_html.escape(str(h))}</th>" for h in heads)
+    body = "".join(
+        "<tr>" + "".join(
+            f"<td>{_html.escape('' if r.get(h) is None else str(r.get(h)))}</td>"
+            for h in heads) + "</tr>"
+        for r in rows)
+    tfoot = ""
+    if total is not None:
+        col, value = total
+        tfoot = (f'<div class="ptotal">{_html.escape(str(col))}の合計：'
+                 f'¥{posting_logic.fmt_num(value)}</div>')
+    return (f'<div class="printable">'
+            f'<h2 class="ptitle">{_html.escape(title)}</h2>'
+            f'<div class="pmeta">{_html.escape(subtitle)}</div>'
+            f'<table><thead><tr>{thead}</tr></thead><tbody>{body}</tbody></table>'
+            f'{tfoot}</div>')
+
+
+def _print_view(*, key, title):
+    """印刷ビューが開いていれば描いて True。閉じていれば False。
+
+    印刷は「選択行だけのきれいな表を出して、その状態でブラウザ印刷する」方式。
+    ページ全体を print すると、サイドバーもボタンも紙に載ってしまうため、
+    表示を切り替えたうえで @media print で残りを隠している。
+    """
+    from common import posting_logic
+
+    slot = f"_print_{key}"
+    rows = st.session_state.get(slot)
+    if not rows:
+        return False
+
+    subtitle = f"出力日 {_date.today().isoformat()}　／　{len(rows)}件"
+    st.markdown(
+        _print_table_html(rows, title=title, subtitle=subtitle,
+                          total=posting_logic.print_total(rows)),
+        unsafe_allow_html=True)
+
+    c1, c2, _ = st.columns([1, 1, 4])
+    with c1:
+        components.html(
+            """<button onclick="window.parent.print()"
+                style="width:100%;padding:.5rem .6rem;border:none;border-radius:10px;
+                       background:#14a4dc;color:#fff;font-weight:700;cursor:pointer;
+                       font-family:'Noto Sans JP',sans-serif;">印刷する</button>""",
+            height=46)
+    if c2.button("閉じる", key=f"{key}_print_close"):
+        st.session_state.pop(slot, None)
+        st.rerun()
+    return True
+
+
+def list_action_bar(edited_df, *, key, title, filename, section=None,
+                    select_col="選択", id_col="No.",
+                    delete_fn=None, delete_note=None, extra=None):
+    """選択した行に対する「印刷・ダウンロード・削除」を、全ページで同じ順・同じ見た目で出す。
+
+    delete_fn=None のときは削除だけ無効(灰色)にし、delete_note をホバーで出す。
+    03 号別明細・06 まとめは集計を見るだけの画面で、ここから消しても元データは
+    消えないため、この形にしている(見た目は揃えつつ、事故は起こさない)。
+
+    extra は右端に足すページ固有のボタン。extra(container, rows, ids) で呼ばれる。
+    """
     from common import posting_logic
     from common.excel_io import freeze_xlsx_bytes
     import pandas as pd
 
+    if delete_fn is not None and id_col is None:
+        # 削除できるのに行を特定できない＝「削除したのに消えない」を無言で作らないため
+        raise ValueError("delete_fn を渡すときは id_col が必要です（削除対象を特定できません）")
+
+    if edited_df is None or getattr(edited_df, "empty", True):
+        return
+
+    # 印刷ビューが開いていれば、そちらだけを描いて操作バーは出さない
+    if _print_view(key=key, title=title):
+        return
+
     rows = posting_logic.rows_for_excel(edited_df, select_col=select_col)
-    target = container if container is not None else st
-    buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as w:
-        pd.DataFrame(rows or [{}]).to_excel(w, index=False, sheet_name="選択した行")
-    target.download_button(
-        label or f"選択した行をExcelで保存（{len(rows)}件）",
-        data=freeze_xlsx_bytes(buf.getvalue()), file_name=f"{filename}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        icon=":material/download:", disabled=not rows, key=key,
-        use_container_width=True)
+    ids = ([] if id_col is None
+           else _selected_ids(edited_df, id_col=id_col, select_col=select_col))
 
-
-def bulk_delete_action(selected_ids, *, delete_fn, section, key, noun="件", container=None):
-    """選択した行をまとめて削除する。確認を挟み、押した時点の選択idを固定してから消す。
-    ボタンだけ container(列)に置くと、確認UIは呼び出し位置＝全幅に出る。"""
+    # 削除の確認待ちは、ボタンの並びより先に全幅で出す(狭い列に潰さない)
     pending = f"_bulkdel_pending_{key}"
-    ids = st.session_state.get(pending)
-    if ids:  # 確認待ち
-        st.warning(f"⚠️ 選択した{len(ids)}{noun}を削除しますか？")
+    waiting = st.session_state.get(pending)
+    if waiting:
+        st.warning(f"⚠️ 選択した{len(waiting)}件を削除しますか？")
         c1, c2, _ = st.columns([1, 1, 4])
-        if c1.button("はい", type="primary", key=f"{key}_ok"):
-            for i in ids:
+        if c1.button("はい", type="primary", key=f"{key}_bulk_del_ok"):
+            for i in waiting:
                 delete_fn(i)
             st.session_state.pop(pending, None)
-            flash(f"{len(ids)}{noun}を削除しました", section)
+            flash(f"{len(waiting)}件を削除しました", section)
             st.rerun()
-        if c2.button("いいえ", key=f"{key}_no"):
+        if c2.button("いいえ", key=f"{key}_bulk_del_no"):
             st.session_state.pop(pending, None)
             st.rerun()
         return
-    target = container if container is not None else st
-    if target.button(f"選択した行を削除（{len(selected_ids)}{noun}）",
-                     key=f"{key}_btn", disabled=not selected_ids,
-                     use_container_width=True):
-        st.session_state[pending] = list(selected_ids)
+
+    cols = st.columns(4 if extra else 3)
+
+    if cols[0].button("印刷", icon=":material/print:", key=f"{key}_print",
+                      disabled=not rows, use_container_width=True):
+        st.session_state[f"_print_{key}"] = rows
         st.rerun()
+
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        pd.DataFrame(rows or [{}]).to_excel(w, index=False, sheet_name="選択した行")
+    cols[1].download_button(
+        "ダウンロード", data=freeze_xlsx_bytes(buf.getvalue()),
+        file_name=f"{filename}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        icon=":material/download:", disabled=not rows, key=f"{key}_dl",
+        use_container_width=True)
+
+    if cols[2].button("削除", icon=":material/delete:", key=f"{key}_bulk_del_btn",
+                      disabled=(delete_fn is None or not ids),
+                      help=delete_note if delete_fn is None else None,
+                      use_container_width=True):
+        st.session_state[pending] = list(ids)
+        st.rerun()
+
+    if extra:
+        extra(cols[3], rows, ids)
+
+
+def _selected_ids(edited, *, id_col, select_col):
+    """posting_logic への依存を関数内 import に閉じ込めるための薄い包み
+    (common/ui.py はモジュール先頭で posting_logic を import していないため)。"""
+    from common import posting_logic
+
+    return posting_logic.selected_ids_from_editor(edited, id_col=id_col, select_col=select_col)
 
 
 def page_header(title: str, subtitle: str = "", icon: str = ""):
@@ -528,31 +696,3 @@ def nice_table(rows, empty_msg: str = "データはまだありません。"):
         st.table(df.style.hide(axis="index"))
     except Exception:  # noqa: BLE001 - 古いpandas等の保険
         st.table(df.reset_index(drop=True))
-
-
-def section_export(rows, filename: str, key: str):
-    """一覧(rows: list[dict] か DataFrame)を CSV / Excel でダウンロード & 印刷できるボタン列を出す。
-    経理提出用の出力を各セクションに分散させるための共通部品。"""
-    import pandas as pd
-
-    df = rows if isinstance(rows, pd.DataFrame) else pd.DataFrame(rows)
-    if df is None or df.empty:
-        return
-    from common.excel_io import freeze_xlsx_bytes
-
-    c1, c2, _ = st.columns([1, 1, 6])
-    buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as w:
-        df.to_excel(w, index=False, sheet_name="data")
-    # 内容が同じなら毎回同じバイト列に(＝ダウンロードURLが変わらず404にならない)
-    c1.download_button(
-        "Excelで保存", data=freeze_xlsx_bytes(buf.getvalue()), file_name=f"{filename}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        key=f"{key}_xlsx", use_container_width=True)
-    with c2:
-        components.html(
-            """<button onclick="window.parent.print()"
-                style="width:100%;padding:.5rem .6rem;border:1.5px solid #14a4dc;border-radius:10px;
-                       background:#fff;color:#0f87b8;font-weight:700;cursor:pointer;
-                       font-family:'Noto Sans JP',sans-serif;">印刷する</button>""",
-            height=46)

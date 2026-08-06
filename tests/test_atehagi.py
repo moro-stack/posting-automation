@@ -19,8 +19,9 @@ def test_chiku_name_kita_rule():
 
 
 def test_chiku_name_minami_is_fixed():
-    # 南版は担当地区コードによらず「守口・門真」で固定（関西ぱど 2026-07-23）
-    assert A.chiku_name(A.KEIHAN_MINAMI, "911001") == "守口・門真"
+    # 南版は担当地区コードによらず「京阪南」で固定
+    # （関西ぱど 2026-07-23 は「守口・門真」だったが、2026-08-06 大橋さんの依頼で版名表記に戻した）
+    assert A.chiku_name(A.KEIHAN_MINAMI, "911001") == "京阪南"
 
 
 def test_chiku_name_unknown_version_raises():

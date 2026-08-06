@@ -77,10 +77,11 @@ def test_build_shukei_daishi_layout():
     # fs(row5), area2 x(row7・区切り空行あり)
     assert ws["B5"].value == "fs" and ws["C5"].value == 0 and ws["F5"].value == 50
     assert ws["A7"].value == 2 and ws["B7"].value == "x" and ws["C7"].value == 3 and ws["F7"].value == 150
-    # 下部: チラシ種類数別(11→0)＋総計。br = 上部末尾+2 = 10
-    assert ws["B10"].value == 11 and ws["D10"].value == 0            # 種類数11=データ無し→0
-    assert ws["B21"].value == 0 and ws["D21"].value == 1 and ws["F21"].value == 50   # 種類数0
-    assert ws["B22"].value == 6 and ws["F22"].value == 500          # 総計
+    # 下部: チラシ種類数別(5→0)＋総計。br = 上部末尾+2 = 10
+    # 実物帳票の枠は 5〜0 の6行。使われていない 11〜6 の空枠は出さない（2026-08-06 大橋さん要望）
+    assert ws["B10"].value == 5 and ws["D10"].value == 0             # 種類数5=データ無し→0
+    assert ws["B15"].value == 0 and ws["D15"].value == 1 and ws["F15"].value == 50   # 種類数0
+    assert ws["B16"].value == 6 and ws["F16"].value == 500          # 総計
     # 集計指標(M列ラベル/Q列値)・折チラシ空
     assert ws["M10"].value == "帳合" and ws["Q10"].value == 200
     assert ws["M13"].value == "折チラシ（B3,B4）" and ws["Q13"].value == "—"
@@ -104,6 +105,42 @@ def test_build_shukei_daishi_print_area_scales_with_areas():
     tail = ws.print_area.split(":")[1]
     last = int("".join(ch for ch in tail if ch.isdigit()))
     assert last >= 23           # 6番目のエリア行(br+8+5=23)が印刷範囲に入る
+
+
+def _shukei_ws(type_dist):
+    data = dict(_sample_shukei_data())
+    data["type_dist"] = type_dist
+    out = A.build_shukei_daishi_workbook(data, A.KEIHAN_KITA, gou=1, haifubi="2026-06-26")
+    return openpyxl.load_workbook(io.BytesIO(out)).active
+
+
+def _type_rows(ws, br=10):
+    """下部集計の「チラシ種類数」列(B)を上から読む。総計行の手前まで。"""
+    out = []
+    r = br
+    while ws.cell(r, 3).value == "-":      # C列が "-" の行が種類数行
+        out.append(ws.cell(r, 2).value)
+        r += 1
+    return out
+
+
+def test_shukei_type_frame_is_six_rows_when_types_are_few():
+    """使われていない空枠は出さない。実物帳票と同じ 5〜0 の6行にする（2026-08-06 大橋さん要望）。"""
+    ws = _shukei_ws({0: [1, 50], 1: [1, 100], 2: [2, 200], 3: [2, 150]})
+    assert _type_rows(ws) == [5, 4, 3, 2, 1, 0]
+
+
+def test_shukei_type_frame_extends_so_data_is_never_dropped():
+    """5種を超えるデータがあるときは枠を伸ばす（詰めたせいで数字が消えないこと）。"""
+    ws = _shukei_ws({0: [1, 50], 7: [3, 900]})
+    assert _type_rows(ws) == [7, 6, 5, 4, 3, 2, 1, 0]
+    assert ws.cell(10, 2).value == 7 and ws.cell(10, 4).value == 3 and ws.cell(10, 6).value == 900
+
+
+def test_shukei_type_frame_never_exceeds_the_fixed_max():
+    """枠は SHUKEI_TYPE_MAX(11) まで. それを超える種類は overflow 警告側で拾う。"""
+    ws = _shukei_ws({0: [1, 50], 13: [1, 500]})
+    assert _type_rows(ws)[0] == A.SHUKEI_TYPE_MAX
 
 
 def test_shukei_overflow_types_empty_when_all_within_frame():

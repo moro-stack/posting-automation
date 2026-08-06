@@ -6,14 +6,19 @@ import streamlit as st
 from common import ocr
 from common import posting_logic
 from common import posting_store as store
-from common.ui import (apply_app_style, section_export, nice_table, period_picker,
-                       flash, show_flash, confirm_delete,
-                       checkbox_list_editor, selected_rows_excel_button, bulk_delete_action)
+from common.ui import (apply_app_style, nice_table, period_picker,
+                       flash, show_flash,
+                       selectable_list, list_action_bar)
 
 apply_app_style()
 st.title("小口／買掛／売掛の登録")
 
-mode = st.radio("入力の種類", ["小口", "買掛", "売掛"], horizontal=True)
+# 🔴 segmented_control は選択を解除でき、そのとき None を返す。None のまま下の
+# if/elif/else に流すと else に落ちて「売掛」の画面が開いてしまうため、
+# 明示的に既定へ戻す。
+_MODES = ["小口", "買掛", "売掛"]
+mode = st.segmented_control("入力の種類", _MODES, default=_MODES[0],
+                            key="entry_mode") or _MODES[0]
 
 _UPLOAD_TYPES = ["pdf", "jpg", "jpeg", "png"]
 _REG_TAB = "✒️ 登録"
@@ -64,16 +69,22 @@ def _period_filter(rows, date_key, key, label):
     return rows
 
 
-def _ocr_files(files, reader):
-    """複数ファイルをAIで読み取り、下書きリストを返す。失敗しても止めない(#7の保険)。"""
+def _ocr_files(files, reader, media_type=None):
+    """複数ファイルをAIで読み取り、下書きリストを返す。失敗しても止めない(#7の保険)。
+
+    media_type を渡すと拡張子からの判定を使わない。カメラ撮影(st.camera_input)は
+    戻り値のファイル名が固定で拡張子を持たないため、image/jpeg を明示して渡す。
+    """
     drafts = []
     prog = st.progress(0.0)
     for i, f in enumerate(files):
+        name = getattr(f, "name", "") or "camera.jpg"
         try:
-            d = reader(f.getvalue(), ocr.media_type_for(f.name), client=None)
+            mt = media_type or ocr.media_type_for(name)
+            d = reader(f.getvalue(), mt, client=None)
         except Exception as e:  # noqa: BLE001
             d = {"amount": None, "_error": str(e)}
-        d["_file"] = f.name
+        d["_file"] = name
         drafts.append(d)
         prog.progress((i + 1) / len(files))
     prog.empty()
@@ -96,6 +107,22 @@ if mode == "小口":
                                type=_UPLOAD_TYPES, accept_multiple_files=True)
         if ups and st.button("画像/PDFをAIで読み取る"):
             drafts = _ocr_files(ups, ocr.extract_receipt)
+            st.session_state.pop("petty_draft", None)
+            st.session_state.pop("petty_bulk", None)
+            if len(drafts) == 1 and drafts[0].get("amount"):
+                st.session_state["petty_draft"] = {"date": drafts[0].get("date"),
+                                                   "amount": drafts[0].get("amount"),
+                                                   "item": drafts[0].get("item")}
+            else:
+                st.session_state["petty_bulk"] = drafts
+
+        # スマホからその場で撮って登録できるようにする(社内Wi-Fiで 8502 を開いた場合)
+        shot = st.camera_input("その場で撮る（スマホ向け）", key="petty_camera")
+        if shot is not None and st.button("撮った写真をAIで読み取る", key="petty_camera_ocr"):
+            # camera_input はファイル名から拡張子を取れず、実体がPNGのこともある。
+            # 撮影データ自身が持つ type を優先して決める(嘘のMIMEで送らないため)。
+            drafts = _ocr_files([shot], ocr.extract_receipt,
+                                media_type=ocr.media_type_for_upload(shot))
             st.session_state.pop("petty_draft", None)
             st.session_state.pop("petty_bulk", None)
             if len(drafts) == 1 and drafts[0].get("amount"):
@@ -207,15 +234,10 @@ if mode == "小口":
         if not _disp:
             st.caption("小口の登録はまだありません。")
         else:
-            section_export(_disp, "小口一覧", key="petty")   # 全件Excel/印刷（残す）
-            edited = checkbox_list_editor(_disp, key="petty_select")
-            selected_ids = posting_logic.selected_ids_from_editor(edited)
-            st.caption(f"選択中：{len(selected_ids)}件")
-            b1, b2 = st.columns(2)
-            selected_rows_excel_button(edited, key="petty_sel_xlsx",
-                                       filename="小口_選択一覧", container=b1)
-            bulk_delete_action(selected_ids, delete_fn=store.delete_petty_cash,
-                               section="petty", key="petty_bulk_del", container=b2)
+            edited, selected_ids = selectable_list(_disp, key="petty")
+            list_action_bar(edited, key="petty", title="小口一覧",
+                            filename="小口_選択一覧", section="petty",
+                            delete_fn=store.delete_petty_cash)
 
 elif mode == "買掛":
     st.subheader("買掛（固定費・法人業者）")
@@ -347,15 +369,10 @@ elif mode == "買掛":
         if not _disp:
             st.caption("買掛の登録はまだありません。")
         else:
-            section_export(_disp, "買掛一覧", key="pay")
-            edited = checkbox_list_editor(_disp, key="pay_select")
-            selected_ids = posting_logic.selected_ids_from_editor(edited)
-            st.caption(f"選択中：{len(selected_ids)}件")
-            b1, b2 = st.columns(2)
-            selected_rows_excel_button(edited, key="pay_sel_xlsx",
-                                       filename="買掛_選択一覧", container=b1)
-            bulk_delete_action(selected_ids, delete_fn=store.delete_payable,
-                               section="payable", key="pay_bulk_del", container=b2)
+            edited, selected_ids = selectable_list(_disp, key="pay")
+            list_action_bar(edited, key="pay", title="買掛一覧",
+                            filename="買掛_選択一覧", section="payable",
+                            delete_fn=store.delete_payable)
 
 else:  # 売掛
     st.subheader("売掛（売上）")
@@ -416,12 +433,7 @@ else:  # 売掛
         if not _disp:
             st.caption("売掛の登録はまだありません。")
         else:
-            section_export(_disp, "売掛一覧", key="recv")
-            edited = checkbox_list_editor(_disp, key="recv_select")
-            selected_ids = posting_logic.selected_ids_from_editor(edited)
-            st.caption(f"選択中：{len(selected_ids)}件")
-            b1, b2 = st.columns(2)
-            selected_rows_excel_button(edited, key="recv_sel_xlsx",
-                                       filename="売掛_選択一覧", container=b1)
-            bulk_delete_action(selected_ids, delete_fn=store.delete_receivable,
-                               section="receivable", key="recv_bulk_del", container=b2)
+            edited, selected_ids = selectable_list(_disp, key="recv")
+            list_action_bar(edited, key="recv", title="売掛一覧",
+                            filename="売掛_選択一覧", section="receivable",
+                            delete_fn=store.delete_receivable)

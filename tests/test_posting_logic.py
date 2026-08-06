@@ -366,3 +366,28 @@ def test_rows_for_excel_drops_select_col():
     ])
     rows = L.rows_for_excel(df)
     assert rows == [{"No.": 3, "金額": "¥1"}]
+
+
+def test_print_total_sums_yen_formatted_amounts():
+    """印刷の合計。表示用の「¥1,234」形式をパースして合計する。"""
+    rows = [{"No.": 1, "金額": "¥3,200"}, {"No.": 2, "金額": "¥980"}]
+    assert L.print_total(rows) == ("金額", 4180)
+
+
+def test_print_total_uses_seikyugaku_column_too():
+    rows = [{"No.": 1, "請求額": "¥1,000"}, {"No.": 2, "請求額": "¥2,000"}]
+    assert L.print_total(rows) == ("請求額", 3000)
+
+
+def test_print_total_returns_none_without_amount_column():
+    assert L.print_total([{"No.": 1, "日付": "2026-08-01"}]) is None
+
+
+def test_print_total_returns_none_if_any_row_is_unparsable():
+    """🔴 1行でも読めなければ合計を出さない。嘘の数字を紙に載せないため。"""
+    rows = [{"金額": "¥1,000"}, {"金額": "—"}, {"金額": "¥2,000"}]
+    assert L.print_total(rows) is None
+
+
+def test_print_total_returns_none_for_empty_rows():
+    assert L.print_total([]) is None

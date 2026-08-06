@@ -763,7 +763,7 @@ def test_petty_list_has_delete_button_and_deletes_the_right_row(db):
     idx_b = next(i for i, r in enumerate(rows) if r["id"] == b)
     # AppTest の data_editor は edited_rows を渡した直後の1回の run() でしか反映されない
     # ため、選択のセットとボタンのクリック予約を同じ run() にまとめて渡す。
-    at.session_state["petty_select"] = {
+    at.session_state["petty_select_0"] = {
         "edited_rows": {idx_b: {"選択": True}}, "added_rows": [], "deleted_rows": []}
     at.button(key="petty_bulk_del_btn").click()
     at.run()
@@ -780,7 +780,7 @@ def test_petty_delete_announces_in_the_list_tab(db):
      登録タブの show_flash() がメッセージを消費してしまう)"""
     rid = store.add_petty_cash("2026-07-10", None, 1000, db_path=db)
     at = _run(_EXPENSE_PAGE)
-    at.session_state["petty_select"] = {
+    at.session_state["petty_select_0"] = {
         "edited_rows": {0: {"選択": True}}, "added_rows": [], "deleted_rows": []}
     at.button(key="petty_bulk_del_btn").click()
     at.run()
@@ -806,7 +806,7 @@ def test_petty_bulk_delete_removes_only_selected(db):
     at.run()
     # 先頭行(index 0)だけ選択。AppTest の data_editor は edited_rows を渡した直後の1回の
     # run() でしか反映されないため、選択のセットとボタンのクリック予約を同じ run() にまとめる。
-    at.session_state["petty_select"] = {
+    at.session_state["petty_select_0"] = {
         "edited_rows": {0: {"選択": True}}, "added_rows": [], "deleted_rows": []}
     at.button(key="petty_bulk_del_btn").click()
     at.run()
@@ -823,20 +823,23 @@ def test_petty_per_row_delete_gone(db):
     assert not any(k and k.startswith("del_petty_") for k in keys)  # 行ごと削除は無い
 
 
-def test_petty_whole_list_export_kept(db):
+def test_petty_list_has_unified_download_button(db):
+    """section_export の全件Excelは撤去し、統一バーのダウンロードに集約した。
+    「すべて選択」を押せば全件をダウンロードできる。"""
     _seed_petty(db)
     at = AppTest.from_file(os.path.join(ROOT, "pages", "01_経費・買掛・売掛.py"), default_timeout=30)
     at.run()
     # このstreamlitバージョンのAppTestには download_button ショートカットが無いため get() で拾う。
     # また download_button ノードは .key が None を返すため .id（key を含む内部ID）で見る。
     ids = [b.id for b in at.get("download_button")]
-    assert any("petty_xlsx" in i for i in ids)  # section_export の全件Excelが残る
+    assert any("petty_dl" in i for i in ids)
+    assert not any("petty_xlsx" in i for i in ids)   # 旧 section_export は無い
 
 
 def _payable_page(db):
     at = AppTest.from_file(os.path.join(ROOT, "pages", _EXPENSE_PAGE), default_timeout=30)
     at.run()
-    at.radio[0].set_value("買掛").run()
+    at.segmented_control[0].set_value("買掛").run()
     return at
 
 
@@ -847,7 +850,7 @@ def test_payable_original_status_autoset_from_vendor_master(db):
     at.session_state["pay_draft"] = {"vendor": "ABC商事", "amount": 5000,
                                      "date": "2026-07-17", "note": None}
     at.run()
-    at.radio[0].set_value("買掛").run()
+    at.segmented_control[0].set_value("買掛").run()
 
     assert not at.exception
     assert _sel(at, "原本区分").value == "本社"
@@ -861,7 +864,7 @@ def test_payable_original_status_autoset_works_for_inactive_vendor(db):
     at.session_state["pay_draft"] = {"vendor": "旧商事", "amount": 5000,
                                      "date": "2026-07-17", "note": None}
     at.run()
-    at.radio[0].set_value("買掛").run()
+    at.segmented_control[0].set_value("買掛").run()
 
     assert not at.exception
     assert _sel(at, "原本区分").value == "クレジット"
@@ -903,7 +906,7 @@ def test_payable_no_caption_when_master_default_is_not_selectable(db):
     at.session_state["pay_draft"] = {"vendor": "謎商事", "amount": 5000,
                                      "date": "2026-07-17", "note": None}
     at.run()
-    at.radio[0].set_value("買掛").run()
+    at.segmented_control[0].set_value("買掛").run()
 
     assert not at.exception
     # 選択肢に無いので先頭に落ちる。そのときは「反映しました」と言ってはいけない。
@@ -921,7 +924,7 @@ def test_payable_list_deletes_the_right_row_and_announces(db):
 
     rows = store.list_payables(db_path=db)
     idx_b = next(i for i, r in enumerate(rows) if r["id"] == b)
-    at.session_state["pay_select"] = {
+    at.session_state["pay_select_0"] = {
         "edited_rows": {idx_b: {"選択": True}}, "added_rows": [], "deleted_rows": []}
     at.button(key="pay_bulk_del_btn").click()
     at.run()
@@ -940,13 +943,13 @@ def test_receivable_list_deletes_the_right_row_and_announces(db):
     b = store.add_receivable("2026-07", cid, 2000, db_path=db)
     at = AppTest.from_file(os.path.join(ROOT, "pages", _EXPENSE_PAGE), default_timeout=30)
     at.run()
-    at.radio[0].set_value("売掛").run()
+    at.segmented_control[0].set_value("売掛").run()
     keys = {btn.key for btn in at.button}
     assert not any(k and k.startswith("del_recv_") for k in keys)
 
     rows = store.list_receivables(db_path=db)
     idx_b = next(i for i, r in enumerate(rows) if r["id"] == b)
-    at.session_state["recv_select"] = {
+    at.session_state["recv_select_0"] = {
         "edited_rows": {idx_b: {"選択": True}}, "added_rows": [], "deleted_rows": []}
     at.button(key="recv_bulk_del_btn").click()
     at.run()
@@ -1148,7 +1151,7 @@ def test_contract_zip_export_uses_saved_pay_type(db, monkeypatch):
     store.update_distributor(did, pay_type="歩合", db_path=db)   # マスタを後から変更
 
     at = AppTest.from_file(os.path.join(ROOT, "pages", _CONTRACT_PAGE), default_timeout=30)
-    at.session_state["contract_list_editor"] = {
+    at.session_state["contract_select_0"] = {
         "edited_rows": {0: {"選択": True}}, "added_rows": [], "deleted_rows": []}
     at.run()
 
@@ -1207,12 +1210,12 @@ def test_contract_list_deletes_the_right_row(db):
     at = _run(_CONTRACT_PAGE)
     keys = {btn.key for btn in at.button}
     assert not any(k and k.startswith("del_inv_") for k in keys)  # 行ごと削除は無い
-    assert "invoice_bulk_del_btn" in keys
+    assert "contract_bulk_del_btn" in keys
 
-    at.session_state["contract_list_editor"] = {
+    at.session_state["contract_select_0"] = {
         "edited_rows": {1: {"選択": True}}, "added_rows": [], "deleted_rows": []}
-    at.button(key="invoice_bulk_del_btn").click().run()
-    at.button(key="invoice_bulk_del_ok").click().run()
+    at.button(key="contract_bulk_del_btn").click().run()
+    at.button(key="contract_bulk_del_ok").click().run()
 
     assert not at.exception
     assert [i["id"] for i in store.list_contract_invoices(db_path=db)] == [a]
@@ -1222,10 +1225,10 @@ def test_contract_delete_announces_in_the_list_tab(db):
     """削除のアナウンスは一覧タブに出て、先に描画される登録タブに奪われないこと。"""
     _, _, iid = _seed_invoice(db, pay_type="歩合")
     at = _run(_CONTRACT_PAGE)
-    at.session_state["contract_list_editor"] = {
+    at.session_state["contract_select_0"] = {
         "edited_rows": {0: {"選択": True}}, "added_rows": [], "deleted_rows": []}
-    at.button(key="invoice_bulk_del_btn").click().run()
-    at.button(key="invoice_bulk_del_ok").click().run()
+    at.button(key="contract_bulk_del_btn").click().run()
+    at.button(key="contract_bulk_del_ok").click().run()
 
     assert not at.exception
     assert [s.value for s in at.tabs[1].success] == ["1件を削除しました"]
@@ -1555,41 +1558,11 @@ def test_no_readonly_table_header(db):
     assert "停止中（" not in text  # 折りたたみの見出しが無い
 
 
-def test_bulk_delete_action_confirms_then_deletes():
-    def _page():
-        import streamlit as st
-        from common.ui import bulk_delete_action, apply_app_style
-        apply_app_style()
-        # 削除された id を session_state に記録（AppTest.from_function はクロージャ不可のため）
-        st.session_state.setdefault("_deleted", [])
-        bulk_delete_action(
-            [10, 20], delete_fn=lambda i: st.session_state["_deleted"].append(i),
-            section="t", key="bd")
-
-    from streamlit.testing.v1 import AppTest
-    at = AppTest.from_function(_page).run()
-    # 最初は削除ボタンのみ・まだ消えていない
-    assert at.session_state["_deleted"] == []
-    at.button(key="bd_btn").click().run()          # 削除ボタン→確認待ち
-    assert at.session_state["_deleted"] == []      # 確認前は消えない
-    at.button(key="bd_ok").click().run()           # はい
-    assert at.session_state["_deleted"] == [10, 20]
-
-
-def test_bulk_delete_action_cancel_does_not_delete():
-    def _page():
-        import streamlit as st
-        from common.ui import bulk_delete_action, apply_app_style
-        apply_app_style()
-        st.session_state.setdefault("_deleted", [])
-        bulk_delete_action([10], delete_fn=lambda i: st.session_state["_deleted"].append(i),
-                           section="t", key="bd")
-
-    from streamlit.testing.v1 import AppTest
-    at = AppTest.from_function(_page).run()
-    at.button(key="bd_btn").click().run()
-    at.button(key="bd_no").click().run()           # やめる
-    assert at.session_state["_deleted"] == []
+# 旧 bulk_delete_action の「確認してから消す/やめると消さない」テストは、
+# 統一部品 list_action_bar 側の
+#   test_action_bar_delete_removes_selected_and_flashes /
+#   test_action_bar_delete_cancel_keeps_rows
+# に移った(tests/test_ui_list_actions.py)。旧部品の撤去に伴いここからは削除。
 
 
 def _seed_contract(db):
@@ -1609,15 +1582,161 @@ def test_contract_per_row_delete_gone(db):
     at.run()
     keys = [b.key for b in at.button]
     assert not any(k and k.startswith("del_inv_") for k in keys)   # 行ごと削除は無い
-    assert "invoice_bulk_del_btn" in keys                          # 選択削除がある
+    assert "contract_bulk_del_btn" in keys                          # 選択削除がある
 
 
 def test_contract_bulk_delete_removes_selected(db):
     _seed_contract(db)
     at = AppTest.from_file(os.path.join(ROOT, "pages", "02_業務委託登録.py"), default_timeout=30)
     at.run()
-    at.session_state["contract_list_editor"] = {
+    at.session_state["contract_select_0"] = {
         "edited_rows": {0: {"選択": True}}, "added_rows": [], "deleted_rows": []}
-    at.button(key="invoice_bulk_del_btn").click().run()
-    at.button(key="invoice_bulk_del_ok").click().run()
+    at.button(key="contract_bulk_del_btn").click().run()
+    at.button(key="contract_bulk_del_ok").click().run()
     assert len(store.list_contract_invoices(db_path=db)) == 1
+
+
+def test_contract_list_uses_unified_action_bar(db):
+    """🔴 業務委託の一覧も統一バーになっていること(選択するまでボタンが無い状態の解消)。"""
+    _seed_invoice(db)
+    at = _run(_CONTRACT_PAGE)
+    keys = {b.key for b in at.button}
+    assert "contract_print" in keys
+    assert "contract_bulk_del_btn" in keys
+    ids = [b.id for b in at.get("download_button")]
+    assert any("contract_dl" in i for i in ids)
+    # 何も選んでいなくてもボタンは存在する(灰色なだけ)
+    assert at.button(key="contract_bulk_del_btn").disabled is True
+
+
+def test_contract_zip_button_exists_without_selection(db):
+    """報告書ZIPも、選択が無くても存在すること(押せないだけ)。"""
+    _seed_invoice(db)
+    at = _run(_CONTRACT_PAGE)
+    ids = [b.id for b in at.get("download_button")]
+    assert any("dl_zip" in i for i in ids)
+
+
+# ===== 見るだけの画面(03・06)にも同じバーを置く。削除だけ無効 =====
+
+
+def test_summary_page_has_action_bar_with_delete_disabled(db):
+    """🔴 06 まとめ。印刷・DLは使えるが、削除は押せないこと。
+    ここの行は 01・02 のデータのコピーで、消しても元は消えないため。"""
+    cid = store.add_receivables_client("得意先", db_path=db)
+    store.add_receivable("2026-08", cid, 1000, db_path=db)
+    at = _run("06_原価・売上まとめ.py")
+    assert not at.exception
+    keys = {b.key for b in at.button}
+    assert "summary_print" in keys
+    assert "summary_bulk_del_btn" in keys
+    assert at.button(key="summary_bulk_del_btn").disabled is True
+
+
+def test_summary_page_delete_stays_disabled_even_when_all_selected(db):
+    """🔴 全選択しても削除は押せないままであること(集計元が消える事故をゼロにする)。"""
+    cid = store.add_receivables_client("得意先", db_path=db)
+    store.add_receivable("2026-08", cid, 1000, db_path=db)
+    at = _run("06_原価・売上まとめ.py")
+    at.checkbox(key="summary_all").check().run()
+    assert not at.exception
+    assert at.button(key="summary_bulk_del_btn").disabled is True
+    assert at.button(key="summary_print").disabled is False
+
+
+def test_summary_page_old_section_export_is_gone(db):
+    cid = store.add_receivables_client("得意先", db_path=db)
+    store.add_receivable("2026-08", cid, 1000, db_path=db)
+    at = _run("06_原価・売上まとめ.py")
+    ids = [b.id for b in at.get("download_button")]
+    assert not any("summary_xlsx" in i for i in ids)
+    assert any("summary_dl" in i for i in ids)
+
+
+def test_issue_page_renders_with_action_bars(db):
+    """03 号別明細も例外なく描けて、削除は押せないこと。
+
+    ⚠️ 号は st.pills の既定＝一覧の先頭が選ばれる。新しく案件を足しても先頭にはならず
+    明細が空のままになるので、**既存の先頭の案件**に直接入力を足して見る。
+    """
+    pid = store.list_projects(db_path=db)[0]["id"]
+    store.add_issue_manual_cost(pid, "配布", 5000, work_date="2026-08-01", db_path=db)
+    at = _run("03_号別明細.py")
+    assert not at.exception
+    keys = {b.key for b in at.button}
+    assert "issue_labor_print" in keys
+    assert at.button(key="issue_labor_bulk_del_btn").disabled is True
+
+
+# ===== ラジオ → segmented_control(依頼②) =====
+
+
+def test_expense_page_mode_is_segmented_control(db):
+    at = _run(_EXPENSE_PAGE)
+    assert not at.exception
+    assert [s.key for s in at.segmented_control] == ["entry_mode"]
+    assert at.segmented_control[0].options == ["小口", "買掛", "売掛"]
+    assert not at.radio
+
+
+def test_expense_page_falls_back_to_petty_when_deselected(db):
+    """🔴 segmented_control は選択解除で None を返す。
+    None のまま else に落ちると売掛の画面が開いてしまう。既定へ戻ること。"""
+    at = AppTest.from_file(os.path.join(ROOT, "pages", _EXPENSE_PAGE), default_timeout=30)
+    at.session_state["entry_mode"] = None
+    at.run()
+    assert not at.exception
+    # ⚠️ st.subheader は _rendered_text の収集対象外なので、一覧側の文言で見分ける。
+    # ガードが外れると else に落ちて売掛の画面になり、下の2つが入れ替わる。
+    text = _rendered_text(at)
+    assert "小口の登録はまだありません" in text
+    assert "売掛の登録はまだありません" not in text
+
+
+def test_shiryo_page_version_is_segmented_control(db):
+    at = _run("07_資料作成・変換表.py")
+    assert not at.exception
+    keys = {s.key for s in at.segmented_control}
+    assert "keihan_version" in keys
+    assert not at.radio
+
+
+def test_shiryo_page_version_falls_back_to_kita_when_deselected(db):
+    """🔴 版が None のまま else に落ちると南版になり、全枚数の地区名が誤る。"""
+    from common import atehagi as A
+
+    at = AppTest.from_file(os.path.join(ROOT, "pages", "07_資料作成・変換表.py"),
+                           default_timeout=30)
+    at.session_state["keihan_version"] = None
+    at.run()
+    assert not at.exception
+    # 版の判定結果をページが session_state に残す
+    assert at.session_state["_resolved_version"] == A.KEIHAN_KITA
+
+
+def test_master_page_keeps_per_row_delete(db):
+    """🔴 05 マスタ管理は行ごとの削除のまま。全選択→まとめて削除は作らない。
+    マスタの削除は他の一覧と意味が違い(費目・配布員そのものが消える)、
+    まとめて消せる経路を作るとチェック全部入り＋削除で全滅する。"""
+    did = store.add_distributor("行ごとの人", db_path=db)
+    at = _run("05_マスタ管理.py")
+    keys = {b.key for b in at.button}
+    assert f"del_distributor_{did}_btn" in keys          # 行ごとの削除は残っている
+    assert not any(k and k.endswith("_bulk_del_btn") for k in keys)   # 一括削除は無い
+    assert not any(c.key and c.key.endswith("_all") for c in at.checkbox)  # 全選択も無い
+
+
+# ===== スマホ対応(依頼⑤) =====
+
+
+def test_petty_registration_has_camera_input(db):
+    """🔴 依頼⑤。スマホでその場で撮って登録できること。
+    ⚠️ camera_input ノードは download_button と同じく .key が None を返すため .id で見る。"""
+    at = _run(_EXPENSE_PAGE)
+    assert not at.exception
+    ids = [c.id for c in at.get("camera_input")]
+    assert any("petty_camera" in i for i in ids)
+
+
+# 撮った写真のメディア種別の決め方は ocr.media_type_for_upload の
+# テスト(tests/test_ocr.py)で見る。AppTest は camera_input に値を注入できないため。

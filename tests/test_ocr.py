@@ -113,3 +113,40 @@ def test_invoke_vision_image_block_structure():
     assert content_block["type"] == "image"
     assert content_block["source"]["media_type"] == "image/jpeg"
     assert base64.b64decode(content_block["source"]["data"]) == image_bytes
+
+
+# ===== カメラ撮影・アップロードのメディア種別(依頼⑤) =====
+
+
+class _Upload:
+    def __init__(self, name="", type=""):
+        self.name = name
+        self.type = type
+
+
+def test_media_type_for_upload_prefers_the_uploads_own_type():
+    """🔴 カメラ撮影は実体がPNGのこともある。ファイル名だけで決めると
+    PNGを image/jpeg と偽って送ることになる。upload.type を最優先する。"""
+    assert ocr.media_type_for_upload(_Upload(name="camera_input", type="image/png")) == "image/png"
+    assert ocr.media_type_for_upload(_Upload(name="camera_input", type="image/jpeg")) == "image/jpeg"
+
+
+def test_media_type_for_upload_normalises_image_jpg():
+    assert ocr.media_type_for_upload(_Upload(type="image/jpg")) == "image/jpeg"
+
+
+def test_media_type_for_upload_falls_back_to_extension():
+    """type が空なら拡張子で決める(従来のアップロード経路と同じ)。"""
+    assert ocr.media_type_for_upload(_Upload(name="請求書.pdf", type="")) == "application/pdf"
+    assert ocr.media_type_for_upload(_Upload(name="レシート.png", type="")) == "image/png"
+
+
+def test_media_type_for_upload_falls_back_to_default_without_name_or_type():
+    """🔴 camera_input は拡張子なしの名前になることがある。ここで落ちてはいけない。"""
+    assert ocr.media_type_for_upload(_Upload(name="camera_input", type="")) == "image/jpeg"
+    assert ocr.media_type_for_upload(object()) == "image/jpeg"
+
+
+def test_media_type_for_upload_ignores_unknown_type():
+    """知らない type は信用せず、拡張子/既定に落とす。"""
+    assert ocr.media_type_for_upload(_Upload(name="a.png", type="application/octet-stream")) == "image/png"

@@ -51,7 +51,7 @@ def _open(upload=None, version=None):
     at = AppTest.from_file(PAGE, default_timeout=60)
     at.run()
     if version:
-        at.radio[0].set_value(version)
+        at.segmented_control[0].set_value(version)
         at.run()
     if upload is not None:
         at.file_uploader[0].set_value(("配送管理表.csv", upload, "text/csv"))
