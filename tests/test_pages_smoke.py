@@ -743,7 +743,9 @@ def test_petty_registration_saves_distributor(db):
     at = _run(_EXPENSE_PAGE)
     _sel(at, "配布員(任意)").set_value("山田太郎")
     at.number_input[0].set_value(1500)
-    at.button[0].click().run()
+    # ⚠️ 位置(at.button[0])で押さないこと。2026-08-07 にカメラ起動ボタンが
+    # 先頭に来て、登録ではなくそちらを押してしまった。ラベルで選ぶ。
+    [b for b in at.button if b.label == "登録"][0].click().run()
 
     assert not at.exception
     rows = store.list_petty_cash(db_path=db)
@@ -1622,15 +1624,17 @@ def test_contract_zip_button_exists_without_selection(db):
 
 def test_summary_page_has_action_bar_with_delete_disabled(db):
     """🔴 06 まとめ。印刷・DLは使えるが、削除は押せないこと。
-    ここの行は 01・02 のデータのコピーで、消しても元は消えないため。"""
+    ここの行は 01・02 のデータのコピーで、消しても元は消えないため。
+
+    (2026-08-07 タブ分割でキーが summary_cost_* / summary_sales_* の2系統になった)"""
     cid = store.add_receivables_client("得意先", db_path=db)
     store.add_receivable("2026-08", cid, 1000, db_path=db)
     at = _run("06_原価・売上まとめ.py")
     assert not at.exception
     keys = {b.key for b in at.button}
-    assert "summary_print" in keys
-    assert "summary_bulk_del_btn" in keys
-    assert at.button(key="summary_bulk_del_btn").disabled is True
+    assert "summary_sales_print" in keys
+    assert "summary_sales_bulk_del_btn" in keys
+    assert at.button(key="summary_sales_bulk_del_btn").disabled is True
 
 
 def test_summary_page_delete_stays_disabled_even_when_all_selected(db):
@@ -1638,10 +1642,10 @@ def test_summary_page_delete_stays_disabled_even_when_all_selected(db):
     cid = store.add_receivables_client("得意先", db_path=db)
     store.add_receivable("2026-08", cid, 1000, db_path=db)
     at = _run("06_原価・売上まとめ.py")
-    at.checkbox(key="summary_all").check().run()
+    at.checkbox(key="summary_sales_all").check().run()
     assert not at.exception
-    assert at.button(key="summary_bulk_del_btn").disabled is True
-    assert at.button(key="summary_print").disabled is False
+    assert at.button(key="summary_sales_bulk_del_btn").disabled is True
+    assert at.button(key="summary_sales_print").disabled is False
 
 
 def test_summary_page_old_section_export_is_gone(db):
@@ -1650,7 +1654,11 @@ def test_summary_page_old_section_export_is_gone(db):
     at = _run("06_原価・売上まとめ.py")
     ids = [b.id for b in at.get("download_button")]
     assert not any("summary_xlsx" in i for i in ids)
-    assert any("summary_dl" in i for i in ids)
+    assert any("summary_sales_dl" in i for i in ids)
+    # ⚠️ このテストは売上しか入れていない。selectable_list は行が0件だと
+    # 何も描かないので、原価タブには DL ボタン自体が出ない(既存仕様)。
+    # 0件のタブが真っ白に見えないことは
+    # test_summary_empty_tab_still_shows_zero_caption で守る。
 
 
 def test_issue_page_renders_with_action_bars(db):
@@ -1729,14 +1737,154 @@ def test_master_page_keeps_per_row_delete(db):
 # ===== スマホ対応(依頼⑤) =====
 
 
-def test_petty_registration_has_camera_input(db):
-    """🔴 依頼⑤。スマホでその場で撮って登録できること。
+def test_petty_camera_is_not_started_on_page_load(db):
+    """🔴 ページを開いただけではカメラを起動しないこと(2026-08-07)。
+
+    st.camera_input は「描画された時点で」ブラウザにカメラ許可を要求する。
+    PC で小口を開くと内カメラが点きっぱなしになるため、描画自体をボタンで出し分ける。
     ⚠️ camera_input ノードは download_button と同じく .key が None を返すため .id で見る。"""
     at = _run(_EXPENSE_PAGE)
+    assert not at.exception
+    assert list(at.get("camera_input")) == []
+    assert any(b.key == "petty_camera_open" for b in at.button)
+
+
+def test_petty_camera_appears_after_pressing_open(db):
+    """依頼⑤(スマホでその場で撮る)は、ボタンを押せば従来どおり使えること。"""
+    at = _run(_EXPENSE_PAGE)
+    at.button(key="petty_camera_open").click().run()
     assert not at.exception
     ids = [c.id for c in at.get("camera_input")]
     assert any("petty_camera" in i for i in ids)
 
 
+def test_petty_camera_disappears_after_pressing_close(db):
+    at = _run(_EXPENSE_PAGE)
+    at.button(key="petty_camera_open").click().run()
+    at.button(key="petty_camera_close").click().run()
+    assert not at.exception
+    assert list(at.get("camera_input")) == []
+
+
+def test_petty_camera_key_changes_after_close(db):
+    """🔴 閉じて開き直したら widget の key が変わること。
+
+    同じ key のままだと前回の写真が残り、撮り直したつもりで
+    「古い写真を読み取る」事故になる。"""
+    at = _run(_EXPENSE_PAGE)
+    at.button(key="petty_camera_open").click().run()
+    first = [c.id for c in at.get("camera_input")]
+    at.button(key="petty_camera_close").click().run()
+    at.button(key="petty_camera_open").click().run()
+    second = [c.id for c in at.get("camera_input")]
+    assert first and second
+    assert first != second
+
+
+def test_camera_is_not_shown_in_payable_mode(db):
+    """買掛にはカメラを出さない(現行の挙動を壊していないこと)。"""
+    at = AppTest.from_file(os.path.join(ROOT, "pages", _EXPENSE_PAGE), default_timeout=30)
+    at.run()
+    at.segmented_control[0].set_value("買掛").run()
+    assert not at.exception
+    assert list(at.get("camera_input")) == []
+    assert not any(b.key == "petty_camera_open" for b in at.button)
+
+
 # 撮った写真のメディア種別の決め方は ocr.media_type_for_upload の
 # テスト(tests/test_ocr.py)で見る。AppTest は camera_input に値を注入できないため。
+
+
+# ===== 原価/売上のタブ分け(2026-08-07) =====
+
+
+def _summary_with_both(db):
+    """売上1件・原価3件(買掛/小口/直接入力)を入れた 06 を描く。"""
+    cid = store.add_receivables_client("得意先", db_path=db)
+    store.add_receivable("2026-08", cid, 1000, db_path=db)
+    vid = store.list_payables_vendors(db_path=db)[0]["id"]
+    store.add_payable("2026-08", vid, 200, date="2026-08-01", db_path=db)
+    cat = store.list_expense_categories(db_path=db)[0]["id"]
+    store.add_petty_cash("2026-08-02", cat, 30, db_path=db)
+    pid = store.list_projects(db_path=db)[0]["id"]
+    store.add_issue_manual_cost(pid, "配布", 5, work_date="2026-08-04", db_path=db)
+    return _run("06_原価・売上まとめ.py")
+
+
+def _editor_frames(at):
+    """data_editor を key で引ける形にする。
+
+    ⚠️ 2つ落とし穴がある（2026-08-07 に実物で確認）:
+    ① st.data_editor は at.get("data_editor") では取れず **at.dataframe** に出る。
+    ② key は common/ui.py の selectable_list が f"{key}_select_{int(all_sel)}" で作る。
+       全選択していない初期状態は _select_0。_editor ではない。"""
+    return {e.key: e.value for e in at.dataframe if e.key}
+
+
+def test_summary_page_has_cost_and_sales_tabs(db):
+    at = _summary_with_both(db)
+    assert not at.exception
+    labels = [t.label for t in at.tabs]
+    assert "原価" in labels and "売上" in labels
+
+
+def test_summary_tabs_have_separate_action_bars(db):
+    """🔴 タブごとに別の一覧＝キーが別系統であること(同じkeyだと状態が混線する)。"""
+    at = _summary_with_both(db)
+    keys = {b.key for b in at.button}
+    assert "summary_cost_print" in keys
+    assert "summary_sales_print" in keys
+    assert "summary_cost_bulk_del_btn" in keys
+    assert "summary_sales_bulk_del_btn" in keys
+
+
+def test_summary_tabs_delete_is_disabled_on_both(db):
+    """🔴 どちらのタブでも削除は押せないこと(集計元が消える事故をゼロに)。
+
+    ⚠️ 印刷・DLは「行を選択するまで disabled」が既存仕様なので、
+    全選択してから押せるようになることを見る。削除だけは選んでも灰色のまま。"""
+    at = _summary_with_both(db)
+    assert at.button(key="summary_cost_bulk_del_btn").disabled is True
+    assert at.button(key="summary_sales_bulk_del_btn").disabled is True
+
+    at.checkbox(key="summary_cost_all").check().run()
+    assert not at.exception
+    assert at.button(key="summary_cost_print").disabled is False
+    assert at.button(key="summary_cost_bulk_del_btn").disabled is True
+
+
+def test_summary_cost_tab_shows_no_sales_row(db):
+    """🔴 原価タブに売上の行が1件も無いこと。
+
+    ⚠️ Streamlit の tabs は1回の実行で全タブの中身が描かれるため、
+    at 全体の文字列では分離を検証できない。data_editor の key で
+    タブごとのデータフレームを取り出して見る。"""
+    at = _summary_with_both(db)
+    frames = _editor_frames(at)
+    cost = frames["summary_cost_select_0"]
+    sales = frames["summary_sales_select_0"]
+    assert "売上" not in set(cost["区分"])
+    assert set(sales["区分"]) == {"売上"}
+
+
+def test_summary_tabs_cover_every_row(db):
+    """2つのタブの行数の合計＝明細の全行数。重複も欠落も無いこと。"""
+    at = _summary_with_both(db)
+    frames = _editor_frames(at)
+    assert len(frames["summary_cost_select_0"]) == 3   # 買掛・小口・直接入力
+    assert len(frames["summary_sales_select_0"]) == 1  # 売上
+
+
+def test_summary_empty_tab_still_shows_zero_caption(db):
+    """🔴 片方のタブに1件も無くても、真っ白にはならないこと。
+
+    selectable_list は行が0件だと一覧もアクションバーも描かない。
+    件数・小計のキャプションだけは必ず出しているので、
+    「0件」だと分かる状態を保つ。"""
+    cid = store.add_receivables_client("得意先", db_path=db)
+    store.add_receivable("2026-08", cid, 1000, db_path=db)   # 売上だけ
+    at = _run("06_原価・売上まとめ.py")
+    assert not at.exception
+    caps = [c.value for c in at.caption]
+    assert "0件 ／ 小計 ¥0" in caps          # 原価タブ
+    assert "1件 ／ 小計 ¥1,000" in caps      # 売上タブ

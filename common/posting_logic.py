@@ -270,6 +270,22 @@ def company_summary_totals(*, receivables, payables, petty, contract_lines, manu
     return {"sales": s, "cost": c, "profit": s - c}
 
 
+# 原価・売上まとめの明細をタブに振り分けるための区分。
+# ページ側に if 区分 == "売上" と直接書くと、区分が増えたときに
+# 「どちらのタブにも出ない行」が静かに生まれるため、ここに集約する。
+# company_summary_rows が新しい区分を足したら、必ずどちらかに加えること
+# (tests/test_rev6_summary_logic.py の test_every_kind_is_covered_by_a_tab が守る)。
+SALES_KINDS = ("売上",)
+COST_KINDS = ("買掛", "小口", "業務委託", "直接入力")
+
+
+def split_summary_rows(rows):
+    """明細行を (原価の行, 売上の行) に分ける。並び順は元のまま保つ。"""
+    sales = [r for r in rows if r.get("区分") in SALES_KINDS]
+    cost = [r for r in rows if r.get("区分") in COST_KINDS]
+    return cost, sales
+
+
 def company_summary_rows(*, receivables, payables, petty, contract_lines, manual,
                          id2proj, id2vendor, id2cat, id2client, id2dist):
     """区分・日付・項目・案件・金額 に正規化した明細行のリスト（原価・売上まとめ用）。"""
