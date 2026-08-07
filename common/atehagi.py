@@ -540,52 +540,86 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
     from openpyxl.worksheet.properties import PageSetupProperties
     from openpyxl.utils import get_column_letter as gl
 
+    from common import shukei_style as SS
+
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "集計表"
+
+    # 書式は実物のテンプレートから複写する。実物は游ゴシック7サイズ・罫線5種で
+    # 146通りの組み合わせを使っており、ルールとしてコードに書き起こすのは無理がある。
+    # テンプレートが無い環境では従来どおりの簡易書式で出す(落とさない)。
+    try:
+        tpl = SS.ShukeiTemplate()
+    except FileNotFoundError:
+        tpl = None
+
     thin = Side(style="thin")
     box = Border(left=thin, right=thin, top=thin, bottom=thin)
     center = Alignment(horizontal="center", vertical="center", wrap_text=True)
     bold = Font(bold=True)
 
+    def _style(cell, role, col):
+        """テンプレートがあればその書式を、無ければ従来の簡易書式を当てる。"""
+        if tpl is not None:
+            tpl.apply(cell, role, col)
+        else:
+            cell.alignment = center
+            cell.border = box
+        return cell
+
     label = _VERSION_LABEL.get(version, "京阪")
     md = _md_from(haifubi)
-    ws.cell(1, 1, label).font = Font(bold=True, size=14, color="FFFF0000")
-    ws.merge_cells("A1:E1")
+    # 🔴 実物は版名を **B1**(結合 B1:E1)に置いている。A1 は空。
+    # 以前は A1 に書いて A1:E1 を結合していたため、実物より1列ぶん左に出ていた。
+    t1 = ws.cell(1, 2, label)
+    _style(t1, "title", 2)
+    if tpl is None:
+        t1.font = Font(bold=True, size=14, color="FFFF0000")
+    ws.merge_cells("B1:E1")
     _tparts = [p for p in [md, (f"{gou}号" if gou else None)] if p]
     g = ws.cell(1, 7, "　".join(_tparts) if _tparts else "号")
-    g.font = bold
+    _style(g, "title", 7)
+    if tpl is None:
+        g.font = bold
     ws.merge_cells(start_row=1, start_column=7, end_row=1, end_column=31)
 
     for c, txt in [(1, "エリア"), (2, "リーダー"), (3, "チラシ種類"),
                    (5, "コース数"), (33, "配布部数"), (34, "地区数")]:
         cell = ws.cell(3, c, txt)
-        cell.font = bold
-        cell.alignment = center
-        cell.border = box
+        _style(cell, "header", c)
+        if tpl is None:
+            cell.font = bold
 
     PER_ROW = 6
     r = 4
     for area_block in _shukei_layout(data):
         area_top = r
-        for leader in area_block["leaders"]:
+        n_leaders = len(area_block["leaders"])
+        for li, leader in enumerate(area_block["leaders"]):
             ltop = r
+            role = SS.leader_role(li, n_leaders)
             for i, (t, ku, bu) in enumerate(leader["types"]):
                 if i and i % PER_ROW == 0:
                     r += 1
                 col = 3 + (i % PER_ROW) * 5
                 for cc, val in [(col, t), (col + 1, "-"), (col + 2, ku), (col + 3, bu)]:
                     cell = ws.cell(r, cc, val)
-                    cell.alignment = center
-                    cell.border = box
-                    if cc == col:
-                        cell.font = Font(color="FFFF0000")
+                    _style(cell, role, cc)
+                    if tpl is None:
+                        cell.alignment = center
+                        cell.border = box
+                        if cc == col:
+                            cell.font = Font(color="FFFF0000")
             lbot = r
             bcell = ws.cell(ltop, 2, leader["name"])
-            bcell.alignment = center
-            bcell.border = box
-            ag = ws.cell(ltop, 33, leader["busuu"]); ag.alignment = center; ag.border = box
-            ah = ws.cell(ltop, 34, leader["chiku"]); ah.alignment = center; ah.border = box
+            _style(bcell, role, 2)
+            ag = _style(ws.cell(ltop, 33, leader["busuu"]), role, 33)
+            ah = _style(ws.cell(ltop, 34, leader["chiku"]), role, 34)
+            if tpl is not None:
+                h = tpl.row_height(role)
+                if h:
+                    ws.row_dimensions[ltop].height = h
             if lbot > ltop:
                 ws.merge_cells(start_row=ltop, start_column=2, end_row=lbot, end_column=2)
                 ws.merge_cells(start_row=ltop, start_column=33, end_row=lbot, end_column=33)
@@ -593,23 +627,39 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
             r += 1
         area_bot = r - 1
         acell = ws.cell(area_top, 1, int(area_block["area"]))
-        acell.alignment = center
-        acell.border = box
+        _style(acell, "area_first", 1)
         if area_bot > area_top:
             ws.merge_cells(start_row=area_top, start_column=1, end_row=area_bot, end_column=1)
-        r += 1  # エリア区切りの空行
+        # エリア区切りの空行。実物は高さ18前後の細い行で仕切っている。
+        if tpl is not None:
+            h = tpl.row_height("separator")
+            if h:
+                ws.row_dimensions[r].height = h
+        r += 1
 
     # ---- 下部集計 ----
     br = r + 1
     td = data["type_dist"]
+    def _bottom(rel, cc, val):
+        """下部集計のセル。テンプレートの27行目からの相対位置で書式を採る。"""
+        cell = ws.cell(br + rel, cc, val)
+        if tpl is not None:
+            tpl.apply_bottom(cell, rel, cc)
+        else:
+            cell.alignment = center
+        return cell
+
     rr = br
-    for t in range(_shukei_type_top(td), -1, -1):
+    for k, t in enumerate(range(_shukei_type_top(td), -1, -1)):
         ku, bu = td.get(t, [0, 0])
         for cc, val in [(2, t), (3, "-"), (4, ku), (6, bu)]:
-            ws.cell(rr, cc, val).alignment = center
+            _bottom(k, cc, val)
         rr += 1
-    ws.cell(rr, 2, data["total_chiku"]).font = bold
-    ws.cell(rr, 6, data["total_busuu"]).font = bold
+    total_rel = rr - br
+    _bottom(total_rel, 2, data["total_chiku"]).font = Font(
+        name="游ゴシック", bold=True) if tpl is not None else bold
+    _bottom(total_rel, 6, data["total_busuu"]).font = Font(
+        name="游ゴシック", bold=True) if tpl is not None else bold
     total_row = rr
 
     indicators = [
@@ -620,21 +670,28 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
         ("チラシ総数", data["chirashi_sou"]),
     ]
     for k, (lab, val) in enumerate(indicators):
-        ws.cell(br + k, 13, lab).font = bold
-        ws.cell(br + k, 17, val)
+        c = _bottom(k, 13, lab)
+        if tpl is None:
+            c.font = bold
+        _bottom(k, 17, val)
 
     for k, area in enumerate(sorted(data["area_busuu"], key=lambda a: int(a))):
-        ws.cell(br + 8 + k, 13, f"エリア{area}").font = bold
-        ws.cell(br + 8 + k, 15, "部")
-        ws.cell(br + 8 + k, 16, data["area_busuu"][area])
+        c = _bottom(8 + k, 13, f"エリア{area}")
+        if tpl is None:
+            c.font = bold
+        _bottom(8 + k, 15, "部")
+        _bottom(8 + k, 16, data["area_busuu"][area])
 
-    base_w = [3.6, 2.6, 4.7, 9.2, 3.7]
-    for col in range(3, 33):
-        ws.column_dimensions[gl(col)].width = base_w[(col - 3) % 5]
-    ws.column_dimensions["A"].width = 6.2
-    ws.column_dimensions["B"].width = 10.7
-    ws.column_dimensions["AG"].width = 10.6
-    ws.column_dimensions["AH"].width = 8.6
+    if tpl is not None:
+        tpl.copy_column_widths(ws)
+    else:
+        base_w = [3.6, 2.6, 4.7, 9.2, 3.7]
+        for col in range(3, 33):
+            ws.column_dimensions[gl(col)].width = base_w[(col - 3) % 5]
+        ws.column_dimensions["A"].width = 6.2
+        ws.column_dimensions["B"].width = 10.7
+        ws.column_dimensions["AG"].width = 10.6
+        ws.column_dimensions["AH"].width = 8.6
 
     last_row = max(total_row, br + 8 + len(data["area_busuu"]) - 1)
     ws.print_area = f"A1:AH{last_row}"
