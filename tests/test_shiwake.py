@@ -1,0 +1,225 @@
+"""仕分け表（倉庫でチラシを配布員ごとの山に分けるチェック表）のテスト。
+
+設計: docs/superpowers/specs/2026-08-07-shiwake-hyo-design.md
+"""
+import datetime as dt
+import io
+import os
+
+import openpyxl
+import pytest
+
+from common import shiwake
+
+HEADER = ["配布日", "号数", "ルート", "異動", "配送順位", "ぱどんな", "住所", "電話番号",
+          "担当地区", "チラシコード", "配送物", "配布部数", "配送備考", "町界名",
+          "街区（番地）名称", "受注種別", "チラシサイズ"]
+
+
+def _row(*, padonna, chirashi, busuu, size=None, junni=None, ido=None, chiku="911103"):
+    r = [None] * len(HEADER)
+    r[0] = dt.datetime(2026, 8, 21)
+    r[1] = "1213"
+    r[3] = ido
+    r[4] = junni
+    r[5] = padonna
+    r[8] = chiku
+    r[10] = chirashi
+    r[11] = busuu
+    r[16] = size
+    return r
+
+
+def _table(rows):
+    return [["配送管理表", None], HEADER] + rows
+
+
+# ===== 1. 配布員ごとに合算する =====
+
+
+def test_busuu_is_summed_per_person_across_chiku():
+    """🔴 松岡さんは2地区持ち。業務スーパーは 438+693=1131 と1行にまとまること。"""
+    table = _table([
+        _row(padonna="松岡  直美", chirashi="91 ぱど", busuu=438, chiku="911103",
+             junni=dt.datetime(9101, 4, 1)),
+        _row(padonna="松岡  直美", chirashi="業務スーパー", busuu=438, size="Ｂ４",
+             chiku="911103", junni=dt.datetime(9101, 4, 1)),
+        _row(padonna="松岡  直美", chirashi="91 ぱど", busuu=693, chiku="911107",
+             junni=dt.datetime(9101, 4, 1)),
+        _row(padonna="松岡  直美", chirashi="業務スーパー", busuu=693, size="Ｂ４",
+             chiku="911107", junni=dt.datetime(9101, 4, 1)),
+    ])
+    groups, _ = shiwake.shiwake_groups(shiwake.rows_from_haiso_table(table))
+    assert len(groups) == 1
+    items = {i["chirashi"]: i["busuu"] for i in groups[0]["items"]}
+    assert items == {"91 ぱど": 1131, "業務スーパー": 1131}
+
+
+def test_group_total_matches_sum_of_items():
+    table = _table([
+        _row(padonna="A", chirashi="X", busuu=100),
+        _row(padonna="A", chirashi="Y", busuu=250, size="Ｂ４"),
+    ])
+    groups, _ = shiwake.shiwake_groups(shiwake.rows_from_haiso_table(table))
+    assert groups[0]["total"] == 350
+    assert groups[0]["total"] == sum(i["busuu"] for i in groups[0]["items"])
+
+
+# ===== 2〜3. 休の扱い =====
+
+
+def test_absent_person_is_excluded():
+    """🔴 異動＝休 の人は仕分け表に入れない(オーナー指示)。"""
+    table = _table([
+        _row(padonna="働く人", chirashi="X", busuu=10),
+        _row(padonna="休む人", chirashi="X", busuu=10, ido="休"),
+    ])
+    groups, warn = shiwake.shiwake_groups(shiwake.rows_from_haiso_table(table))
+    names = [g["name"] for g in groups]
+    assert names == ["働く人"]
+    assert warn["excluded"] == ["休む人"]
+
+
+def test_unknown_ido_value_is_kept_and_warned():
+    """🔴 見慣れない異動値で黙って人を落とさない。残したうえで警告する。
+
+    勝手に除外して人数が減るのが一番こわい(倉庫で山が足りなくなる)。"""
+    table = _table([
+        _row(padonna="働く人", chirashi="X", busuu=10),
+        _row(padonna="謎の人", chirashi="X", busuu=10, ido="移"),
+    ])
+    groups, warn = shiwake.shiwake_groups(shiwake.rows_from_haiso_table(table))
+    names = sorted(g["name"] for g in groups)
+    assert names == ["働く人", "謎の人"]
+    assert warn["unknown_ido"] == [("謎の人", "移")]
+
+
+# ===== 4〜5. チラシサイズ =====
+
+
+def test_empty_size_becomes_johoshi():
+    """🔴 チラシサイズが空＝ぱど本誌 → 「情報誌」と書く。"""
+    table = _table([_row(padonna="A", chirashi="91 ぱど", busuu=100, size=None)])
+    groups, _ = shiwake.shiwake_groups(shiwake.rows_from_haiso_table(table))
+    assert groups[0]["items"][0]["size"] == "情報誌"
+
+
+@pytest.mark.parametrize("size", ["Ｂ３", "Ｂ４", "Ａ４"])
+def test_existing_size_is_kept_as_is(size):
+    """全角のまま。オーナー指示「エリア表記等は基本的にCSVをそのまま拾って」。"""
+    table = _table([_row(padonna="A", chirashi="X", busuu=100, size=size)])
+    groups, _ = shiwake.shiwake_groups(shiwake.rows_from_haiso_table(table))
+    assert groups[0]["items"][0]["size"] == size
+
+
+# ===== 6. 配送順位の表記 =====
+
+
+def test_junni_datetime_is_formatted_back_to_original():
+    """🔴 Excelが 9101-04-01 を datetime(9101,4,1) として読む。
+    そのまま出すと 9101/4/1 になって別物になるため元の表記に戻す。"""
+    assert shiwake.format_junni(dt.datetime(9101, 4, 1)) == "9101-04-01"
+    assert shiwake.format_junni(dt.datetime(9101, 12, 31)) == "9101-12-31"
+
+
+def test_junni_string_is_kept_as_is():
+    assert shiwake.format_junni("9101-04-01") == "9101-04-01"
+
+
+def test_junni_none_becomes_empty():
+    assert shiwake.format_junni(None) == ""
+
+
+# ===== 7. 並び順 =====
+
+
+def test_groups_are_sorted_by_junni_with_blanks_last():
+    table = _table([
+        _row(padonna="三番", chirashi="X", busuu=1, junni=dt.datetime(9101, 3, 1)),
+        _row(padonna="空", chirashi="X", busuu=1, junni=None),
+        _row(padonna="一番", chirashi="X", busuu=1, junni=dt.datetime(9101, 1, 1)),
+        _row(padonna="二番", chirashi="X", busuu=1, junni=dt.datetime(9101, 2, 1)),
+    ])
+    groups, _ = shiwake.shiwake_groups(shiwake.rows_from_haiso_table(table))
+    assert [g["name"] for g in groups] == ["一番", "二番", "三番", "空"]
+
+
+# ===== 8〜9. Excel 出力 =====
+
+
+def _build(groups):
+    data = shiwake.build_shiwake_workbook(groups, gou="1213", haifubi="2026-08-21")
+    return openpyxl.load_workbook(io.BytesIO(data))
+
+
+def test_workbook_has_one_page_break_per_person():
+    """🔴 1人1枚＝人数ぶんの改ページが入ること。"""
+    table = _table([
+        _row(padonna="A", chirashi="X", busuu=1, junni=dt.datetime(9101, 1, 1)),
+        _row(padonna="B", chirashi="X", busuu=1, junni=dt.datetime(9101, 2, 1)),
+        _row(padonna="C", chirashi="X", busuu=1, junni=dt.datetime(9101, 3, 1)),
+    ])
+    groups, _ = shiwake.shiwake_groups(shiwake.rows_from_haiso_table(table))
+    ws = _build(groups).active
+    # 最後の人のうしろには改ページを置かないので 人数-1
+    assert len(ws.row_breaks.brk) == len(groups) - 1
+
+
+def test_workbook_shows_name_junni_and_items():
+    table = _table([
+        _row(padonna="松岡  直美", chirashi="91 ぱど", busuu=438,
+             junni=dt.datetime(9101, 4, 1)),
+        _row(padonna="松岡  直美", chirashi="91 ぱど", busuu=693,
+             junni=dt.datetime(9101, 4, 1)),
+    ])
+    groups, _ = shiwake.shiwake_groups(shiwake.rows_from_haiso_table(table))
+    ws = _build(groups).active
+    text = "\n".join(str(c.value) for row in ws.iter_rows() for c in row
+                     if c.value is not None)
+    assert "松岡  直美" in text
+    assert "9101-04-01" in text
+    assert "情報誌" in text
+    assert "1131" in text or "1,131" in text
+
+
+def test_workbook_check_column_is_empty():
+    """チェック欄は空。作業員が手で書く。"""
+    table = _table([_row(padonna="A", chirashi="X", busuu=1)])
+    groups, _ = shiwake.shiwake_groups(shiwake.rows_from_haiso_table(table))
+    ws = _build(groups).active
+    header_row = None
+    for row in ws.iter_rows():
+        vals = [c.value for c in row]
+        if "チラシ名" in vals:
+            header_row = row[0].row
+            break
+    assert header_row is not None
+    check_col = [c.column for c in ws[header_row] if c.value == "済"][0]
+    assert ws.cell(header_row + 1, check_col).value is None
+
+
+# ===== 10. 実データ =====
+
+
+REAL = r"C:\Users\moro\Downloads\【京阪南】20260821配送管理表 (1).xlsx"
+
+
+@pytest.mark.skipif(not os.path.exists(REAL), reason="実データが無い環境ではスキップ")
+def test_real_data_kyohan_minami_20260821():
+    """🔴 実データ(京阪南 8/21号)で、休1名を除いた24名になること。"""
+    wb = openpyxl.load_workbook(REAL, data_only=True)
+    ws = wb["配送管理表"]
+    table = [[c.value for c in row] for row in ws.iter_rows()]
+    groups, warn = shiwake.shiwake_groups(shiwake.rows_from_haiso_table(table))
+
+    assert len(groups) == 24
+    assert warn["excluded"] == ["井上\u3000美由紀"]
+    assert warn["unknown_ido"] == []
+
+    matsuoka = [g for g in groups if g["name"] == "松岡  直美"][0]
+    items = {i["chirashi"]: (i["busuu"], i["size"]) for i in matsuoka["items"]}
+    assert items["91 ぱど"] == (1131, "情報誌")
+    assert items["業務スーパー"] == (1131, "Ｂ４")
+    assert items["おたからや寝屋川店・萱島駅前店"] == (438, "Ｂ４")
+    assert matsuoka["total"] == 1131 + 1131 + 438
+    assert matsuoka["junni"] == "9101-04-01"
