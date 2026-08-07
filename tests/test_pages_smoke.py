@@ -5,6 +5,7 @@ import os
 import pytest
 from streamlit.testing.v1 import AppTest
 
+from common import atehagi as A
 from common import posting_store as store
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1901,3 +1902,26 @@ def test_shiryo_page_has_shiwake_tab(db):
     assert "仕分け表" in labels
     ids = [u.id for u in at.get("file_uploader")]
     assert any("shiwake_upload" in i for i in ids)
+
+
+# ===== D: タブ名と版の並び(2026-08-07) =====
+
+
+def test_shiryo_tab_is_renamed_to_pado(db):
+    """「京阪 あて紙」→「ぱど あて紙」(2026-08-07 オーナー指示)。"""
+    at = _run("07_資料作成・変換表.py")
+    assert not at.exception
+    labels = [t.label for t in at.tabs]
+    assert "ぱど あて紙" in labels
+    assert "京阪 あて紙" not in labels
+
+
+def test_shiryo_version_order_is_minami_then_kita(db):
+    """🔴 版の並びは 南 → 北。既定は北版のまま(位置の入れ替えだけの指示)。"""
+    at = _run("07_資料作成・変換表.py")
+    sc = [s for s in at.segmented_control if s.key == "keihan_version"][0]
+    assert sc.options == ["京阪南版", "京阪北版"]
+    assert sc.value == "京阪北版"
+    # 既定が北版であることは、解決結果でも固定しておく
+    # (segmented_control は選択解除で None を返し、黙って別の版に落ちる事故があったため)
+    assert at.session_state["_resolved_version"] == A.KEIHAN_KITA

@@ -15,7 +15,7 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 VERSION_JP = {A.KEIHAN_KITA: "京阪北版", A.KEIHAN_MINAMI: "京阪南版"}
 
 tab_atehagi, tab_shiwake, tab_proceed, tab_advalue, tab_other = st.tabs(
-    ["京阪 あて紙", "仕分け表", "リビングプロシード あて紙", "アドバリュー 報告書",
+    ["ぱど あて紙", "仕分け表", "リビングプロシード あて紙", "アドバリュー 報告書",
      "その他（準備中）"])
 
 with tab_atehagi:
@@ -25,7 +25,9 @@ with tab_atehagi:
     # `A.KEIHAN_KITA if label == "京阪北版" else A.KEIHAN_MINAMI` のような書き方だと
     # None が黙って南版に落ち、全枚数のあて紙で地区名が誤る。
     # 既定へ戻したうえで、対応表で引く。
-    _VERSIONS = {"京阪北版": A.KEIHAN_KITA, "京阪南版": A.KEIHAN_MINAMI}
+    # 並びは 南 → 北（2026-08-07 オーナー指示で左右を入れ替えた）。
+    # 既定は「京阪北版」のまま変えていない（位置の入れ替えだけの指示だったため）。
+    _VERSIONS = {"京阪南版": A.KEIHAN_MINAMI, "京阪北版": A.KEIHAN_KITA}
     version_label = st.segmented_control("版", list(_VERSIONS), default="京阪北版",
                                          key="keihan_version") or "京阪北版"
     version = _VERSIONS[version_label]
