@@ -656,10 +656,13 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
             _bottom(k, cc, val)
         rr += 1
     total_rel = rr - br
-    _bottom(total_rel, 2, data["total_chiku"]).font = Font(
-        name="游ゴシック", bold=True) if tpl is not None else bold
-    _bottom(total_rel, 6, data["total_busuu"]).font = Font(
-        name="游ゴシック", bold=True) if tpl is not None else bold
+    # テンプレートがあるときは書式を上書きしない。上書きするとフォント名やサイズが
+    # 抜けて、そこだけ既定フォント・サイズ未指定になる(2026-08-07に踏んだ)。
+    c_tc = _bottom(total_rel, 2, data["total_chiku"])
+    c_tb = _bottom(total_rel, 6, data["total_busuu"])
+    if tpl is None:
+        c_tc.font = bold
+        c_tb.font = bold
     total_row = rr
 
     indicators = [

@@ -181,3 +181,46 @@ def test_generated_numbers_have_thousands_separator(tpl):
     fmts = {c.number_format for row in ws.iter_rows() for c in row
             if isinstance(c.value, int) and c.value >= 1000}
     assert any("#,##0" in f for f in fmts), f"桁区切りが無い: {fmts}"
+
+
+def test_generated_sheet_has_no_unsized_font(tpl):
+    """🔴 サイズ未指定のセルを残さない。
+
+    合計行でフォントを Font(name=..., bold=True) で上書きしたとき、
+    サイズが抜けてそこだけ既定サイズになっていた(2026-08-07)。
+    """
+    ws = _build_from_real_like_data()["集計表"]
+    bad = [(c.coordinate, c.value) for row in ws.iter_rows() for c in row
+           if c.value is not None and c.font.sz is None]
+    assert bad == [], f"サイズ未指定のセルがある: {bad}"
+
+
+def test_generated_font_sizes_are_all_in_template_vocabulary(tpl):
+    """🔴 生成物に使うフォント(名前・サイズ)が、実物にあるものだけであること。"""
+    tpl_vocab = {(c.font.name, c.font.sz)
+                 for row in tpl.ws.iter_rows() for c in row if c.value is not None}
+    ws = _build_from_real_like_data()["集計表"]
+    used = {(c.font.name, c.font.sz)
+            for row in ws.iter_rows() for c in row if c.value is not None}
+    assert used <= tpl_vocab, f"実物に無いフォントが使われている: {used - tpl_vocab}"
+
+
+def test_generated_sheet_uses_all_five_border_styles(tpl):
+    """🔴 実物と同じ5種の罫線が出ていること。"""
+    ws = _build_from_real_like_data()["集計表"]
+    styles = set()
+    for row in ws.iter_rows():
+        for c in row:
+            for side in ("left", "right", "top", "bottom"):
+                st = getattr(c.border, side).style
+                if st:
+                    styles.add(st)
+    assert styles == {"dotted", "double", "hair", "medium", "thin"}, styles
+
+
+def test_generated_title_is_red_18pt_at_b1(tpl):
+    """🔴 実物は版名が B1・赤・18pt。"""
+    ws = _build_from_real_like_data()["集計表"]
+    assert ws["A1"].value is None
+    assert ws["B1"].font.color.rgb == "FFFF0000"
+    assert ws["B1"].font.sz == 18.0
