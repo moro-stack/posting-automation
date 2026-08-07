@@ -6,6 +6,7 @@ from common.ui import apply_app_style
 from common import atehagi as A
 from common import proceed_atehagi as PR
 from common import advalue as AV
+from common import shiwake as SH
 
 apply_app_style()
 st.title("資料作成・変換表")
@@ -13,8 +14,9 @@ st.title("資料作成・変換表")
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 VERSION_JP = {A.KEIHAN_KITA: "京阪北版", A.KEIHAN_MINAMI: "京阪南版"}
 
-tab_atehagi, tab_proceed, tab_advalue, tab_other = st.tabs(
-    ["京阪 あて紙", "リビングプロシード あて紙", "アドバリュー 報告書", "その他（準備中）"])
+tab_atehagi, tab_shiwake, tab_proceed, tab_advalue, tab_other = st.tabs(
+    ["京阪 あて紙", "仕分け表", "リビングプロシード あて紙", "アドバリュー 報告書",
+     "その他（準備中）"])
 
 with tab_atehagi:
     st.caption("関西ぱどの配送管理表（CSV / Excel）をアップロードすると、"
@@ -155,6 +157,53 @@ with tab_atehagi:
                 st.download_button(f"{sname} をダウンロード", data=sdata_bytes,
                                    file_name=sname, mime=XLSX_MIME,
                                    key="keihan_single_dl")
+
+with tab_shiwake:
+    st.caption("配送管理表（CSV / Excel）をアップロードすると、配布員ごとの仕分け表を作ります。"
+               "倉庫でチラシを配布員ごとの山に分けるためのチェック表で、"
+               "印刷すると1人1枚になります。京阪南版・北版のどちらでも使えます。")
+    up_s = st.file_uploader("配送管理表をアップロード", type=["csv", "xlsx", "xlsm"],
+                            key="shiwake_upload")
+    if up_s is not None:
+        try:
+            s_table = A.read_uploaded(up_s.name, up_s.getvalue())
+            s_rows = SH.rows_from_haiso_table(s_table)
+            s_groups, s_warn = SH.shiwake_groups(s_rows)
+        except Exception as e:  # noqa: BLE001 - 読み取り失敗は画面に出して止める
+            st.error(f"読み取れませんでした: {e}")
+        else:
+            s_gou = next((r["gou"] for r in s_rows if r["gou"]), None)
+            s_haifubi = next((r["haifubi"] for r in s_rows if r["haifubi"]), None)
+
+            # 🔴 何人を外したかを必ず出す。黙って人数が減ると倉庫で山が足りなくなる。
+            msg = f"{len(s_groups)}名分の仕分け表を作成しました"
+            if s_warn["excluded"]:
+                msg += f"（異動「休」の{len(s_warn['excluded'])}名を除外： " \
+                       f"{'、'.join(s_warn['excluded'])}）"
+            st.success(msg)
+
+            if s_warn["unknown_ido"]:
+                # 見慣れない異動値の人は落とさず残したうえで知らせる。
+                st.warning(
+                    "異動欄に「休」以外の値がある方がいます。**除外していません**ので、"
+                    "外すべき方がいたら教えてください： "
+                    + "、".join(f"{n}（{v}）" for n, v in s_warn["unknown_ido"]))
+
+            if s_groups:
+                s_data = SH.build_shiwake_workbook(s_groups, gou=s_gou,
+                                                   haifubi=s_haifubi)
+                s_name = SH.shiwake_filename(gou=s_gou, haifubi=s_haifubi)
+                st.download_button(f"{s_name} をダウンロード", data=s_data,
+                                   file_name=s_name, mime=XLSX_MIME,
+                                   key="shiwake_dl")
+                with st.expander("中身を確認する（先頭5名）"):
+                    for g in s_groups[:5]:
+                        st.markdown(f"**{g['name']}**　配送順位 {g['junni']}　"
+                                    f"合計 {g['total']:,}部")
+                        st.table([{"チラシ名": i["chirashi"],
+                                   "部数": f"{i['busuu']:,}",
+                                   "サイズ": i["size"]} for i in g["items"]])
+
 
 with tab_proceed:
     st.caption("リビングプロシードの配布依頼書（エリア×広告主）をアップロードすると、"

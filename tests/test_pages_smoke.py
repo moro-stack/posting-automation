@@ -1888,3 +1888,16 @@ def test_summary_empty_tab_still_shows_zero_caption(db):
     caps = [c.value for c in at.caption]
     assert "0件 ／ 小計 ¥0" in caps          # 原価タブ
     assert "1件 ／ 小計 ¥1,000" in caps      # 売上タブ
+
+
+# ===== 仕分け表タブ(2026-08-07) =====
+
+
+def test_shiryo_page_has_shiwake_tab(db):
+    """07 に仕分け表のタブとアップローダが出ること。"""
+    at = _run("07_資料作成・変換表.py")
+    assert not at.exception
+    labels = [t.label for t in at.tabs]
+    assert "仕分け表" in labels
+    ids = [u.id for u in at.get("file_uploader")]
+    assert any("shiwake_upload" in i for i in ids)
