@@ -106,7 +106,15 @@ def shiwake_groups(rows):
     足して1行にする(倉庫では人単位で山を作るため)。
 
     warnings:
-        {"excluded": [休で外した人], "unknown_ido": [(人, 見慣れない異動値)]}
+        {"excluded": [休で外した人],
+         "unknown_ido": [(人, 見慣れない異動値)],
+         "looks_like_wrong_file": bool}
+
+    🔴 looks_like_wrong_file は「その他配送管理表」を入れた疑い。
+    そちらは配布員ではなく会社名(ケイピーエス/フィールドサービス)でまとまっており、
+    仕分け表として出すと「配布員2名・15万部」という無意味な表が黙って出来上がる。
+    見分けは配送順位で、その他配送管理表は全行が空になる。
+    中身は作ったうえで知らせる(勝手に空にしない。判断はオーナーに委ねる)。
 
     🔴 異動が「休」以外の見慣れない値でも人を落とさない。落として山が足りなく
     なるほうが事故として重い。残したうえで呼び出し側に警告を渡す。
@@ -149,7 +157,13 @@ def shiwake_groups(rows):
 
     # 配送順位の昇順。空は末尾。
     groups.sort(key=lambda g: (g["junni"] == "", g["junni"], g["name"]))
-    return groups, {"excluded": excluded, "unknown_ido": unknown}
+
+    # 配送順位が1つも入っていなければ「その他配送管理表」を入れた疑い。
+    wrong_file = bool(rows) and all(
+        format_junni(r["junni"]) == "" for r in rows)
+
+    return groups, {"excluded": excluded, "unknown_ido": unknown,
+                    "looks_like_wrong_file": wrong_file}
 
 
 def _fmt_haifubi(v) -> str:

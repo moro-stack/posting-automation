@@ -5,6 +5,7 @@
 import datetime as dt
 import io
 import os
+from pathlib import Path
 
 import openpyxl
 import pytest
@@ -223,3 +224,56 @@ def test_real_data_kyohan_minami_20260821():
     assert items["おたからや寝屋川店・萱島駅前店"] == (438, "Ｂ４")
     assert matsuoka["total"] == 1131 + 1131 + 438
     assert matsuoka["junni"] == "9101-04-01"
+
+
+# ===== 11. 間違ったファイルを黙って通さない =====
+
+
+def test_warns_when_no_row_has_junni():
+    """🔴 「その他配送管理表」を入れると、配送順位が全行空になる。
+
+    このファイルは配布員ではなく会社名(ケイピーエス/フィールドサービス)で
+    まとまっているため、仕分け表として出すと「配布員2名・15万部」という
+    無意味な表が黙って出来上がる。全行の配送順位が空なら知らせる。
+    """
+    table = _table([
+        _row(padonna="ケイピーエス", chirashi="X", busuu=438, junni=None),
+        _row(padonna="ケイピーエス", chirashi="Y", busuu=438, junni=None),
+        _row(padonna="フィールドサービス", chirashi="X", busuu=100, junni=None),
+    ])
+    groups, warn = shiwake.shiwake_groups(shiwake.rows_from_haiso_table(table))
+    assert warn["looks_like_wrong_file"] is True
+    # 中身は作る(判断はオーナーに委ねる)。黙って空にはしない。
+    assert len(groups) == 2
+
+
+def test_no_wrong_file_warning_when_junni_exists():
+    table = _table([
+        _row(padonna="A", chirashi="X", busuu=1, junni=dt.datetime(9101, 1, 1)),
+        _row(padonna="B", chirashi="X", busuu=1, junni=None),
+    ])
+    _, warn = shiwake.shiwake_groups(shiwake.rows_from_haiso_table(table))
+    assert warn["looks_like_wrong_file"] is False
+
+
+@pytest.mark.skipif(not os.path.exists(REAL), reason="実データが無い環境ではスキップ")
+def test_real_haiso_kanri_hyo_is_not_flagged():
+    """正しいファイル(配送管理表)では警告が出ないこと。"""
+    wb = openpyxl.load_workbook(REAL, data_only=True)
+    ws = wb["配送管理表"]
+    table = [[c.value for c in row] for row in ws.iter_rows()]
+    _, warn = shiwake.shiwake_groups(shiwake.rows_from_haiso_table(table))
+    assert warn["looks_like_wrong_file"] is False
+
+
+SONOTA = r"C:\Users\moro\Downloads\京阪南_その他配送管理表 (1).CSV"
+
+
+@pytest.mark.skipif(not os.path.exists(SONOTA), reason="実データが無い環境ではスキップ")
+def test_real_sonota_haiso_is_flagged():
+    """🔴 実物の「その他配送管理表」で警告が出ること。"""
+    import csv as _csv
+    text = Path(SONOTA).read_bytes().decode("cp932")
+    table = list(_csv.reader(text.splitlines()))
+    _, warn = shiwake.shiwake_groups(shiwake.rows_from_haiso_table(table))
+    assert warn["looks_like_wrong_file"] is True
