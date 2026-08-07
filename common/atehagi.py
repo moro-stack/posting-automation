@@ -670,8 +670,17 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
     # 折チラシ/チラシ総数 を **Q列(17)** に置いており、間に空行(30)がある。
     # 一律に Q列(17)・連番の行から採ると、実物では空のセル(既定11pt)を拾ってしまい、
     # 3行だけ 11pt になって読めなくなる(2026-08-07 オーナー指摘)。
-    # (ラベル行, 値の採取列)
-    _IND_SRC = [(27, 16), (28, 16), (29, 16), (31, 17), (32, 17)]
+    # 🔴 ラベルは必ずセル結合で横に広げる。
+    # 実物は M27:O27（折チラシとチラシ総数は M31:P31）で結合しており、
+    # 結合しないと幅3.6のM列に押し込まれ、**shrink_to_fit が効いて
+    # 14ptでも表示だけ小さくなる**（2026-08-08 オーナー指摘）。
+    # K列を広げて逃がすと、K は上部マトリクスの部数列でもあるため
+    # 2ブロック目だけ間延びする。だから結合で直す。
+    # (書式の採取行, 値の採取列, ラベル結合の右端, 値結合の右端)
+    _IND_SRC = [(27, 16, 15, 20), (28, 16, 15, 20), (29, 16, 15, 20),
+                (31, 17, 16, 20), (32, 17, 16, 20)]
+    _BOTTOM_ROW_H = 19.2          # 行間（オーナーの手直しに合わせる）
+    _BOTTOM_ROW_H_WIDE = 32.4     # 折チラシは2行に折り返すぶん高くする
     indicators = [
         ("帳合", data["choai_busuu"]),
         ("挿み込み", data["sashikomi_busuu"]),
@@ -680,9 +689,10 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
         ("チラシ総数", data["chirashi_sou"]),
     ]
     for k, (lab, val) in enumerate(indicators):
-        src_row, src_col = _IND_SRC[k]
-        c = ws.cell(br + k, 13, lab)
-        v = ws.cell(br + k, 17, val)
+        src_row, src_col, lab_right, val_right = _IND_SRC[k]
+        row_at = br + k
+        c = ws.cell(row_at, 13, lab)
+        v = ws.cell(row_at, 17, val)
         if tpl is not None:
             SS.copy_style(tpl.style_of(src_row, 13), c)
             SS.copy_style(tpl.style_of(src_row, src_col), v)
@@ -690,12 +700,29 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
             c.font = bold
             c.alignment = center
             v.alignment = center
+        ws.merge_cells(start_row=row_at, start_column=13,
+                       end_row=row_at, end_column=lab_right)
+        ws.merge_cells(start_row=row_at, start_column=17,
+                       end_row=row_at, end_column=val_right)
+        # 🔴 shrink_to_fit は必ず切る。これが入っていると、フォントが14ptでも
+        # Excel が「表示だけ」縮めてしまい、読めなくなる（今回の元凶）。
+        # ラベルは折り返しを許して、長いものは2行にする。
+        c.alignment = Alignment(horizontal=c.alignment.horizontal or "center",
+                                vertical=c.alignment.vertical or "center",
+                                wrap_text=True, shrink_to_fit=False)
+        v.alignment = Alignment(horizontal=v.alignment.horizontal or "center",
+                                vertical=v.alignment.vertical or "center",
+                                wrap_text=False, shrink_to_fit=False)
+        ws.row_dimensions[row_at].height = (
+            _BOTTOM_ROW_H_WIDE if lab.startswith("折チラシ") else _BOTTOM_ROW_H)
 
-    # エリア別部数。「部」だけ既定サイズで浮かないよう、行の中で書式を揃える。
+    # エリア別部数。「部」だけ既定サイズで浮かないよう書式を揃え、
+    # ラベルと数字は同じく結合して縮まないようにする。
     for k, area in enumerate(sorted(data["area_busuu"], key=lambda a: int(a))):
-        c = ws.cell(br + 8 + k, 13, f"エリア{area}")
-        u = ws.cell(br + 8 + k, 15, "部")
-        v = ws.cell(br + 8 + k, 16, data["area_busuu"][area])
+        row_at = br + 8 + k
+        c = ws.cell(row_at, 13, f"エリア{area}")
+        u = ws.cell(row_at, 16, "部")
+        v = ws.cell(row_at, 17, data["area_busuu"][area])
         if tpl is not None:
             src = tpl.style_of(35 + min(k, 4), 13)
             for cell in (c, u, v):
@@ -703,6 +730,16 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
             SS.copy_style(tpl.style_of(35 + min(k, 4), 16), v)
         else:
             c.font = bold
+        ws.merge_cells(start_row=row_at, start_column=13,
+                       end_row=row_at, end_column=15)
+        ws.merge_cells(start_row=row_at, start_column=17,
+                       end_row=row_at, end_column=20)
+        for cell in (c, u, v):
+            cell.alignment = Alignment(
+                horizontal=cell.alignment.horizontal or "center",
+                vertical=cell.alignment.vertical or "center",
+                wrap_text=False, shrink_to_fit=False)
+        ws.row_dimensions[row_at].height = _BOTTOM_ROW_H
 
     if tpl is not None:
         tpl.copy_column_widths(ws)

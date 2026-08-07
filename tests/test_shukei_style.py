@@ -274,3 +274,75 @@ def test_area_busuu_line_is_uniform_size(tpl):
             continue
         sizes = {c.font.sz for c in cells if c.column >= 13}
         assert sizes == {14.0}, f"{labels[0].value} の行のサイズが揃っていない: {sizes}"
+
+
+def _merged_width(ws, cell):
+    """そのセルが属する結合範囲の合計幅を返す（結合していなければ単独の幅）。"""
+    from openpyxl.utils import get_column_letter as gl
+    for rng in ws.merged_cells.ranges:
+        if cell.coordinate in rng:
+            return sum((ws.column_dimensions[gl(c)].width or 8.43)
+                       for c in range(rng.min_col, rng.max_col + 1))
+    return ws.column_dimensions[gl(cell.column)].width or 8.43
+
+
+def test_bottom_labels_are_wide_enough_not_to_shrink(tpl):
+    """🔴 下部集計のラベルが縮んで読めなくならないこと。
+
+    実物はラベルをセル結合で横に広げている(M27:O27 / 折チラシは M31:P31)。
+    結合しないと幅3.6のM列に押し込まれ、shrink_to_fit が効いて
+    14ptでも表示だけ小さくなる(2026-08-08 オーナー指摘)。
+    幅は「文字数×1.9」を目安に必要量を見る。
+    """
+    ws = _build_from_real_like_data()["集計表"]
+    labels = ("帳合", "挿み込み", "ぱどのみ", "折チラシ（B3,B4）", "チラシ総数")
+    seen = set()
+    for row in ws.iter_rows():
+        for c in row:
+            if c.value in labels:
+                seen.add(c.value)
+                need = len(str(c.value)) * 1.9
+                got = _merged_width(ws, c)
+                # 折り返し可＋行が高いぶんは容量が増える（実物も折チラシは2行になる）
+                h = ws.row_dimensions[c.row].height or 19.2
+                lines = max(1, round(h / 19.2)) if c.alignment.wrap_text else 1
+                assert got * lines >= need, (
+                    f"{c.value}: 幅{got:.1f}×{lines}行 < 必要{need:.1f}")
+    assert seen == set(labels)
+
+
+def test_bottom_values_are_wide_enough(tpl):
+    """数字も同様。桁区切り込みで縮まない幅があること。"""
+    ws = _build_from_real_like_data()["集計表"]
+    labels = ("帳合", "挿み込み", "ぱどのみ", "折チラシ（B3,B4）", "チラシ総数")
+    for row in ws.iter_rows():
+        for c in row:
+            if c.value in labels:
+                vals = [x for x in ws[c.row] if x.column > c.column
+                        and x.value is not None]
+                assert vals, f"{c.value} の数字が無い"
+                assert _merged_width(ws, vals[0]) >= 12,                     f"{c.value} の数字の幅が狭い"
+
+
+def test_bottom_rows_have_height(tpl):
+    """🔴 行間が詰まっていないこと(オーナー指示 2026-08-08)。"""
+    ws = _build_from_real_like_data()["集計表"]
+    labels = ("帳合", "挿み込み", "ぱどのみ", "折チラシ（B3,B4）", "チラシ総数")
+    for row in ws.iter_rows():
+        for c in row:
+            if c.value in labels:
+                h = ws.row_dimensions[c.row].height
+                assert h is not None and h >= 19, f"{c.value} の行高が {h}"
+
+
+def test_upper_matrix_column_widths_are_uniform(tpl):
+    """🔴 下部のために上の表の列幅を変えないこと。
+
+    K列を広げて回避すると、K は上部マトリクスの部数列でもあるため
+    2ブロック目だけ間延びする。
+    """
+    ws = _build_from_real_like_data()["集計表"]
+    # 部数列は F,K,P,U,Z,AE（stride 5）。すべて同じ幅であること。
+    widths = {col: ws.column_dimensions[col].width
+              for col in ("F", "K", "P", "U", "Z", "AE")}
+    assert len(set(round(w, 2) for w in widths.values())) == 1, widths

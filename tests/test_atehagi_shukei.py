@@ -87,7 +87,10 @@ def test_build_shukei_daishi_layout():
     assert ws["M13"].value == "折チラシ（B3,B4）" and ws["Q13"].value == "—"
     assert ws["M14"].value == "チラシ総数" and ws["Q14"].value == 9999
     # エリア別部数
-    assert ws["M18"].value == "エリア1" and ws["P18"].value == 350
+    # 2026-08-08: ラベルを M:O 結合、「部」を P、数字を Q:T 結合に変更
+    # （結合しないと shrink_to_fit で表示だけ縮んで読めなくなるため）
+    assert ws["M18"].value == "エリア1" and ws["P18"].value == "部"
+    assert ws["Q18"].value == 350
     assert ws.page_setup.orientation == "landscape"
     assert "1248号" in ws["G1"].value          # 号数がタイトルに入る
     # 🔴 実物は版名を B1(結合 B1:E1)に置いている。A1 は空。
