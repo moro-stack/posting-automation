@@ -224,3 +224,53 @@ def test_generated_title_is_red_18pt_at_b1(tpl):
     assert ws["A1"].value is None
     assert ws["B1"].font.color.rgb == "FFFF0000"
     assert ws["B1"].font.sz == 18.0
+
+
+def test_bottom_indicator_values_are_all_14pt(tpl):
+    """🔴 帳合・挿み込み・ぱどのみ の数字が小さくならないこと。
+
+    実物は 帳合/挿み込み/ぱどのみ の数字を **P列**、
+    折チラシ/チラシ総数 を **Q列** に置いている。
+    全部を Q列に書くと、実物では空セルの行(既定11pt)から書式を拾ってしまい、
+    3行だけ 11pt になって読めなくなる(2026-08-07 オーナー指摘)。
+    """
+    ws = _build_from_real_like_data()["集計表"]
+    labels = ("帳合", "挿み込み", "ぱどのみ", "折チラシ（B3,B4）", "チラシ総数")
+    found = {}
+    for row in ws.iter_rows():
+        for c in row:
+            if c.value in labels:
+                # 同じ行の右側にある値セルを探す
+                vals = [x for x in ws[c.row] if x.column > c.column
+                        and x.value is not None]
+                found[c.value] = (c.font.sz, vals[0].font.sz if vals else None)
+    assert set(found) == set(labels), f"見つからないラベルがある: {set(labels) - set(found)}"
+    for lab, (label_sz, value_sz) in found.items():
+        assert label_sz == 14.0, f"{lab} のラベルが {label_sz}pt"
+        assert value_sz == 14.0, f"{lab} の数字が {value_sz}pt（14ptにする）"
+
+
+def test_bottom_indicator_labels_are_all_bold(tpl):
+    """折チラシだけ太字が外れていた(実物の空行から書式を拾っていたため)。"""
+    ws = _build_from_real_like_data()["集計表"]
+    labels = ("帳合", "挿み込み", "ぱどのみ", "折チラシ（B3,B4）", "チラシ総数")
+    for row in ws.iter_rows():
+        for c in row:
+            if c.value in labels:
+                assert c.font.b is True, f"{c.value} が太字でない"
+
+
+def test_area_busuu_line_is_uniform_size(tpl):
+    """エリア別部数の行で「部」だけ小さくならないこと。"""
+    ws = _build_from_real_like_data()["集計表"]
+    for row in ws.iter_rows():
+        cells = [c for c in row if c.value is not None]
+        # ⚠️ 見出し行の A3「エリア」も startswith に一致してしまうので、
+        # 下部集計の列(13以降)かつ「エリア1」のように番号が続くものだけを見る。
+        labels = [c for c in cells if isinstance(c.value, str)
+                  and c.column >= 13 and c.value.startswith("エリア")
+                  and c.value != "エリア"]
+        if not labels:
+            continue
+        sizes = {c.font.sz for c in cells if c.column >= 13}
+        assert sizes == {14.0}, f"{labels[0].value} の行のサイズが揃っていない: {sizes}"

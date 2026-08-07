@@ -665,6 +665,13 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
         c_tb.font = bold
     total_row = rr
 
+    # 🔴 集計指標は、実物のどのセルに載っているかで書式を採る。
+    # 実物は 帳合/挿み込み/ぱどのみ の数字を **P列(16)**、
+    # 折チラシ/チラシ総数 を **Q列(17)** に置いており、間に空行(30)がある。
+    # 一律に Q列(17)・連番の行から採ると、実物では空のセル(既定11pt)を拾ってしまい、
+    # 3行だけ 11pt になって読めなくなる(2026-08-07 オーナー指摘)。
+    # (ラベル行, 値の採取列)
+    _IND_SRC = [(27, 16), (28, 16), (29, 16), (31, 17), (32, 17)]
     indicators = [
         ("帳合", data["choai_busuu"]),
         ("挿み込み", data["sashikomi_busuu"]),
@@ -673,17 +680,29 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
         ("チラシ総数", data["chirashi_sou"]),
     ]
     for k, (lab, val) in enumerate(indicators):
-        c = _bottom(k, 13, lab)
-        if tpl is None:
+        src_row, src_col = _IND_SRC[k]
+        c = ws.cell(br + k, 13, lab)
+        v = ws.cell(br + k, 17, val)
+        if tpl is not None:
+            SS.copy_style(tpl.style_of(src_row, 13), c)
+            SS.copy_style(tpl.style_of(src_row, src_col), v)
+        else:
             c.font = bold
-        _bottom(k, 17, val)
+            c.alignment = center
+            v.alignment = center
 
+    # エリア別部数。「部」だけ既定サイズで浮かないよう、行の中で書式を揃える。
     for k, area in enumerate(sorted(data["area_busuu"], key=lambda a: int(a))):
-        c = _bottom(8 + k, 13, f"エリア{area}")
-        if tpl is None:
+        c = ws.cell(br + 8 + k, 13, f"エリア{area}")
+        u = ws.cell(br + 8 + k, 15, "部")
+        v = ws.cell(br + 8 + k, 16, data["area_busuu"][area])
+        if tpl is not None:
+            src = tpl.style_of(35 + min(k, 4), 13)
+            for cell in (c, u, v):
+                SS.copy_style(src, cell)
+            SS.copy_style(tpl.style_of(35 + min(k, 4), 16), v)
+        else:
             c.font = bold
-        _bottom(8 + k, 15, "部")
-        _bottom(8 + k, 16, data["area_busuu"][area])
 
     if tpl is not None:
         tpl.copy_column_widths(ws)
