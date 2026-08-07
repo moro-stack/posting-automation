@@ -65,15 +65,34 @@ s3.markdown(f'<div style="color:#67788a;font-weight:700;font-size:.9rem">利益<
             unsafe_allow_html=True)
 
 st.divider()
-st.markdown("**明細（原価・売上）**")
-# 日付で並べ替え（空は末尾）
-disp = sorted(rows, key=lambda r: (r["日付"] == "", r["日付"]))
-disp = [{"日付": r["日付"], "区分": r["区分"], "項目": r["項目"],
-         "案件": r["案件"], "金額": _yen(r["金額"])} for r in disp]
-# 集計を見るだけの画面。行は 01・02 のデータのコピーなので、ここから消しても元は消えない。
-# 見た目は他ページと揃えつつ、削除だけ無効(灰色)にしている。
-_edited, _ = selectable_list(disp, key="summary", id_col=None)
-list_action_bar(_edited, key="summary", title="原価・売上まとめ",
-                filename="原価売上まとめ", id_col=None, delete_fn=None,
-                delete_note="この画面は集計を見るためのものです。"
-                            "元のデータは『小口／買掛／売掛』『業務委託登録』から削除してください。")
+
+# 原価と売上が1つの一覧に混ざっていると、どちらを見ているのか分からない。
+# 区分→タブの対応は posting_logic に集約してある（区分が増えたときに
+# 「どちらのタブにも出ない行」が静かに生まれるのを防ぐため）。
+cost_rows, sales_rows = posting_logic.split_summary_rows(rows)
+
+
+def _render_tab(tab_rows, *, key, title, filename):
+    """1つのタブの中身。件数と小計を出してから一覧を描く。
+
+    集計を見るだけの画面なので、削除は灰色のまま(delete_fn=None)。
+    ここから消しても 01・02 の元データは消えない。
+    """
+    st.caption(f"{len(tab_rows)}件 ／ 小計 {_yen(sum(r['金額'] for r in tab_rows))}")
+    # 日付で並べ替え（空は末尾）
+    disp = sorted(tab_rows, key=lambda r: (r["日付"] == "", r["日付"]))
+    disp = [{"日付": r["日付"], "区分": r["区分"], "項目": r["項目"],
+             "案件": r["案件"], "金額": _yen(r["金額"])} for r in disp]
+    edited, _ = selectable_list(disp, key=key, id_col=None)
+    list_action_bar(edited, key=key, title=title, filename=filename, id_col=None,
+                    delete_fn=None,
+                    delete_note="この画面は集計を見るためのものです。"
+                                "元のデータは『小口／買掛／売掛』『業務委託登録』から"
+                                "削除してください。")
+
+
+tab_cost, tab_sales = st.tabs(["原価", "売上"])
+with tab_cost:
+    _render_tab(cost_rows, key="summary_cost", title="原価明細", filename="原価明細")
+with tab_sales:
+    _render_tab(sales_rows, key="summary_sales", title="売上明細", filename="売上明細")
