@@ -116,21 +116,42 @@ if mode == "小口":
             else:
                 st.session_state["petty_bulk"] = drafts
 
-        # スマホからその場で撮って登録できるようにする(社内Wi-Fiで 8502 を開いた場合)
-        shot = st.camera_input("その場で撮る（スマホ向け）", key="petty_camera")
-        if shot is not None and st.button("撮った写真をAIで読み取る", key="petty_camera_ocr"):
-            # camera_input はファイル名から拡張子を取れず、実体がPNGのこともある。
-            # 撮影データ自身が持つ type を優先して決める(嘘のMIMEで送らないため)。
-            drafts = _ocr_files([shot], ocr.extract_receipt,
-                                media_type=ocr.media_type_for_upload(shot))
-            st.session_state.pop("petty_draft", None)
-            st.session_state.pop("petty_bulk", None)
-            if len(drafts) == 1 and drafts[0].get("amount"):
-                st.session_state["petty_draft"] = {"date": drafts[0].get("date"),
-                                                   "amount": drafts[0].get("amount"),
-                                                   "item": drafts[0].get("item")}
-            else:
-                st.session_state["petty_bulk"] = drafts
+        # その場で撮って登録できるようにする(スマホ・PC共通)。
+        # ⚠️ st.camera_input は「描画された時点で」ブラウザにカメラ許可を要求する。
+        # 無条件に描くとページを開いただけで内カメラが点きっぱなしになるため、
+        # 描画自体をボタンで出し分ける。
+        st.session_state.setdefault("petty_camera_on", False)
+        st.session_state.setdefault("petty_camera_gen", 0)
+
+        if not st.session_state["petty_camera_on"]:
+            if st.button("📷 カメラを起動", key="petty_camera_open"):
+                st.session_state["petty_camera_on"] = True
+                st.rerun()
+        else:
+            # 閉じるたびに gen を上げて key を変える。同じ key のままだと前回の写真が
+            # 残り、撮り直したつもりで古い写真を読み取ってしまう。
+            shot = st.camera_input(
+                "その場で撮る",
+                key=f"petty_camera_{st.session_state['petty_camera_gen']}")
+            c_ocr, c_close = st.columns(2)
+            if shot is not None and c_ocr.button("撮った写真をAIで読み取る",
+                                                 key="petty_camera_ocr"):
+                # camera_input はファイル名から拡張子を取れず、実体がPNGのこともある。
+                # 撮影データ自身が持つ type を優先して決める(嘘のMIMEで送らないため)。
+                drafts = _ocr_files([shot], ocr.extract_receipt,
+                                    media_type=ocr.media_type_for_upload(shot))
+                st.session_state.pop("petty_draft", None)
+                st.session_state.pop("petty_bulk", None)
+                if len(drafts) == 1 and drafts[0].get("amount"):
+                    st.session_state["petty_draft"] = {"date": drafts[0].get("date"),
+                                                       "amount": drafts[0].get("amount"),
+                                                       "item": drafts[0].get("item")}
+                else:
+                    st.session_state["petty_bulk"] = drafts
+            if c_close.button("カメラを閉じる", key="petty_camera_close"):
+                st.session_state["petty_camera_on"] = False
+                st.session_state["petty_camera_gen"] += 1
+                st.rerun()
 
         # 複数レシートの一括登録レビュー(#9)
         if "petty_bulk" in st.session_state:

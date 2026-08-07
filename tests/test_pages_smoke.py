@@ -743,7 +743,9 @@ def test_petty_registration_saves_distributor(db):
     at = _run(_EXPENSE_PAGE)
     _sel(at, "配布員(任意)").set_value("山田太郎")
     at.number_input[0].set_value(1500)
-    at.button[0].click().run()
+    # ⚠️ 位置(at.button[0])で押さないこと。2026-08-07 にカメラ起動ボタンが
+    # 先頭に来て、登録ではなくそちらを押してしまった。ラベルで選ぶ。
+    [b for b in at.button if b.label == "登録"][0].click().run()
 
     assert not at.exception
     rows = store.list_petty_cash(db_path=db)
@@ -1735,13 +1737,58 @@ def test_master_page_keeps_per_row_delete(db):
 # ===== スマホ対応(依頼⑤) =====
 
 
-def test_petty_registration_has_camera_input(db):
-    """🔴 依頼⑤。スマホでその場で撮って登録できること。
+def test_petty_camera_is_not_started_on_page_load(db):
+    """🔴 ページを開いただけではカメラを起動しないこと(2026-08-07)。
+
+    st.camera_input は「描画された時点で」ブラウザにカメラ許可を要求する。
+    PC で小口を開くと内カメラが点きっぱなしになるため、描画自体をボタンで出し分ける。
     ⚠️ camera_input ノードは download_button と同じく .key が None を返すため .id で見る。"""
     at = _run(_EXPENSE_PAGE)
     assert not at.exception
+    assert list(at.get("camera_input")) == []
+    assert any(b.key == "petty_camera_open" for b in at.button)
+
+
+def test_petty_camera_appears_after_pressing_open(db):
+    """依頼⑤(スマホでその場で撮る)は、ボタンを押せば従来どおり使えること。"""
+    at = _run(_EXPENSE_PAGE)
+    at.button(key="petty_camera_open").click().run()
+    assert not at.exception
     ids = [c.id for c in at.get("camera_input")]
     assert any("petty_camera" in i for i in ids)
+
+
+def test_petty_camera_disappears_after_pressing_close(db):
+    at = _run(_EXPENSE_PAGE)
+    at.button(key="petty_camera_open").click().run()
+    at.button(key="petty_camera_close").click().run()
+    assert not at.exception
+    assert list(at.get("camera_input")) == []
+
+
+def test_petty_camera_key_changes_after_close(db):
+    """🔴 閉じて開き直したら widget の key が変わること。
+
+    同じ key のままだと前回の写真が残り、撮り直したつもりで
+    「古い写真を読み取る」事故になる。"""
+    at = _run(_EXPENSE_PAGE)
+    at.button(key="petty_camera_open").click().run()
+    first = [c.id for c in at.get("camera_input")]
+    at.button(key="petty_camera_close").click().run()
+    at.button(key="petty_camera_open").click().run()
+    second = [c.id for c in at.get("camera_input")]
+    assert first and second
+    assert first != second
+
+
+def test_camera_is_not_shown_in_payable_mode(db):
+    """買掛にはカメラを出さない(現行の挙動を壊していないこと)。"""
+    at = AppTest.from_file(os.path.join(ROOT, "pages", _EXPENSE_PAGE), default_timeout=30)
+    at.run()
+    at.segmented_control[0].set_value("買掛").run()
+    assert not at.exception
+    assert list(at.get("camera_input")) == []
+    assert not any(b.key == "petty_camera_open" for b in at.button)
 
 
 # 撮った写真のメディア種別の決め方は ocr.media_type_for_upload の
