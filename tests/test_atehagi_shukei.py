@@ -65,7 +65,7 @@ def test_build_shukei_daishi_layout():
     wb = openpyxl.load_workbook(io.BytesIO(out))
     ws = wb.active
     # タイトル・ヘッダー
-    assert ws["A1"].value == "京阪北版"
+    assert ws["B1"].value == "京阪北版"   # 実物どおり B1(2026-08-07に A1 から移動)
     assert ws["A3"].value == "エリア" and ws["B3"].value == "リーダー"
     assert ws["C3"].value == "チラシ種類" and ws["E3"].value == "コース数"
     assert ws["AG3"].value == "配布部数" and ws["AH3"].value == "地区数"
@@ -87,10 +87,15 @@ def test_build_shukei_daishi_layout():
     assert ws["M13"].value == "折チラシ（B3,B4）" and ws["Q13"].value == "—"
     assert ws["M14"].value == "チラシ総数" and ws["Q14"].value == 9999
     # エリア別部数
-    assert ws["M18"].value == "エリア1" and ws["P18"].value == 350
+    # 2026-08-08: ラベルを M:O 結合、「部」を P、数字を Q:T 結合に変更
+    # （結合しないと shrink_to_fit で表示だけ縮んで読めなくなるため）
+    assert ws["M18"].value == "エリア1" and ws["P18"].value == "部"
+    assert ws["Q18"].value == 350
     assert ws.page_setup.orientation == "landscape"
     assert "1248号" in ws["G1"].value          # 号数がタイトルに入る
-    assert ws["A1"].font.color.rgb == "FFFF0000"        # 版名は赤字
+    # 🔴 実物は版名を B1(結合 B1:E1)に置いている。A1 は空。
+    # 2026-08-07 に実物へ合わせて A1 から B1 へ移した。
+    assert ws["B1"].font.color.rgb == "FFFF0000"        # 版名は赤字
     assert ws["C4"].font.color.rgb == "FFFF0000"        # チラシ種類数は赤字
     assert ws["H4"].font.color.rgb == "FFFF0000"
     assert ws["E4"].font.color is None or ws["E4"].font.color.rgb != "FFFF0000"  # コース数は赤でない

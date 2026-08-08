@@ -172,16 +172,44 @@ def _fmt_haifubi(v) -> str:
     return _s(v)
 
 
-def build_shiwake_workbook(groups, gou=None, haifubi=None) -> bytes:
-    """1シートに全員・1人ごとに改ページした xlsx を返す。
+# Excel がシート名に使えない文字。使うと保存時に壊れる。
+_SHEET_NG = set('[]:*?/\\')
+_SHEET_MAX = 31
 
-    シートを人数分に分けないのは、24人なら24シートになり一括印刷しづらいため。
+
+def sheet_name_for(name, used):
+    """配布員名から、Excel が受け付けるシート名を作る。
+
+    禁止文字は消さずに全角へ寄せる(「メイト/南川」の / を消すと誰の分か読みにくい)。
+    31文字を超える場合は末尾を落とす。すでに同じ名前があれば連番を足す
+    (同姓同名でシートが潰れると、その人の分が丸ごと消える)。
+    """
+    s = "".join("／" if ch == "/" else ("｜" if ch in _SHEET_NG else ch)
+                for ch in (name or "")).strip()
+    s = s or "名称未設定"
+    s = s[:_SHEET_MAX]
+    if s not in used:
+        used.add(s)
+        return s
+    for i in range(2, 1000):
+        suffix = f"({i})"
+        cand = s[:_SHEET_MAX - len(suffix)] + suffix
+        if cand not in used:
+            used.add(cand)
+            return cand
+    raise ValueError(f"シート名を決められません: {name}")
+
+
+def build_shiwake_workbook(groups, gou=None, haifubi=None) -> bytes:
+    """配布員ごとに1シートの xlsx を返す（ファイルは1つ）。
+
+    1人ずつ印刷する可能性があるため、シートを分ける(2026-08-08 オーナー指示)。
     """
     from openpyxl.styles import Alignment, Border, Font, Side
 
     wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "仕分け表"
+    wb.remove(wb.active)          # 既定の空シートは使わない
+    used_names = set()
 
     thin = Side(style="thin")
     medium = Side(style="medium")
@@ -191,16 +219,14 @@ def build_shiwake_workbook(groups, gou=None, haifubi=None) -> bytes:
     left = Alignment(horizontal="left", vertical="center")
     right = Alignment(horizontal="right", vertical="center")
 
-    ws.column_dimensions["A"].width = 34
-    ws.column_dimensions["B"].width = 10
-    ws.column_dimensions["C"].width = 10
-    ws.column_dimensions["D"].width = 8
+    for g in groups:
+        ws = wb.create_sheet(sheet_name_for(g["name"], used_names))
+        ws.column_dimensions["A"].width = 34
+        ws.column_dimensions["B"].width = 10
+        ws.column_dimensions["C"].width = 10
+        ws.column_dimensions["D"].width = 8
 
-    r = 1
-    for n, g in enumerate(groups):
-        if n:
-            ws.row_breaks.append(openpyxl.worksheet.pagebreak.Break(id=r - 1))
-
+        r = 1
         top = f"{_fmt_haifubi(haifubi)}　{gou}号" if (gou or haifubi) else ""
         c = ws.cell(r, 1, top)
         c.font = Font(size=11)
@@ -249,10 +275,14 @@ def build_shiwake_workbook(groups, gou=None, haifubi=None) -> bytes:
         ct.number_format = "#,##0"
         ws.cell(r, 3).border = head_box
         ws.cell(r, 4).border = head_box
-        r += 2
 
-    ws.page_setup.orientation = "portrait"
-    ws.print_options.horizontalCentered = False
+        ws.page_setup.orientation = "portrait"
+        ws.print_options.horizontalCentered = False
+
+    if not wb.sheetnames:
+        # 0名でも壊れたファイルにしない(Excelはシート0枚のブックを開けない)
+        ws = wb.create_sheet("仕分け表")
+        ws.cell(1, 1, "対象の配布員がいません。")
 
     buf = io.BytesIO()
     wb.save(buf)

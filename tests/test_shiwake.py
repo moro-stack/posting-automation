@@ -153,17 +153,74 @@ def _build(groups):
     return openpyxl.load_workbook(io.BytesIO(data))
 
 
-def test_workbook_has_one_page_break_per_person():
-    """🔴 1人1枚＝人数ぶんの改ページが入ること。"""
+def test_workbook_has_one_sheet_per_person():
+    """🔴 配布員ごとに1シート(2026-08-08 オーナー指示)。
+
+    1人ずつ印刷する可能性があるため、Excelファイルは1つのままシートを分ける。
+    """
     table = _table([
         _row(padonna="A", chirashi="X", busuu=1, junni=dt.datetime(9101, 1, 1)),
         _row(padonna="B", chirashi="X", busuu=1, junni=dt.datetime(9101, 2, 1)),
         _row(padonna="C", chirashi="X", busuu=1, junni=dt.datetime(9101, 3, 1)),
     ])
     groups, _ = shiwake.shiwake_groups(shiwake.rows_from_haiso_table(table))
-    ws = _build(groups).active
-    # 最後の人のうしろには改ページを置かないので 人数-1
-    assert len(ws.row_breaks.brk) == len(groups) - 1
+    wb = _build(groups)
+    assert len(wb.sheetnames) == len(groups) == 3
+    assert wb.sheetnames == ["A", "B", "C"]
+
+
+def test_sheet_names_are_sanitized_and_unique():
+    """🔴 シート名は31文字まで、Excelが禁じる記号は使えない。同名も付けられない。
+
+    配布員名にこれらが入っていても落ちないこと。名前が消えないこと。
+    """
+    long_name = "あ" * 40
+    table = _table([
+        _row(padonna=long_name, chirashi="X", busuu=1, junni=dt.datetime(9101, 1, 1)),
+        _row(padonna="メイト/南川 信哉", chirashi="X", busuu=1,
+             junni=dt.datetime(9101, 2, 1)),
+        _row(padonna="A[1]", chirashi="X", busuu=1, junni=dt.datetime(9101, 3, 1)),
+    ])
+    groups, _ = shiwake.shiwake_groups(shiwake.rows_from_haiso_table(table))
+    wb = _build(groups)
+    names = wb.sheetnames
+    assert len(names) == 3
+    assert len(set(names)) == 3                     # 重複なし
+    for n in names:
+        assert len(n) <= 31
+        assert not set(n) & set("[]:*?/" + chr(92))
+    # スラッシュは消すのではなく別の字に置き換えて、誰の分か分かるようにする
+    assert any("南川" in n for n in names)
+
+
+def test_duplicate_person_names_get_distinct_sheets():
+    """同姓同名がいてもシートが潰れないこと。"""
+    table = _table([
+        _row(padonna="田尻　美穂子", chirashi="X", busuu=1, chiku="911001",
+             junni=dt.datetime(9101, 1, 1)),
+    ])
+    groups, _ = shiwake.shiwake_groups(shiwake.rows_from_haiso_table(table))
+    groups = groups + [dict(groups[0])]      # わざと同名を2件にする
+    wb = _build(groups)
+    assert len(wb.sheetnames) == 2
+    assert len(set(wb.sheetnames)) == 2
+
+
+def test_each_sheet_has_its_own_person_only():
+    """🔴 シートに他人の情報が混ざらないこと。"""
+    table = _table([
+        _row(padonna="山田", chirashi="X", busuu=100, junni=dt.datetime(9101, 1, 1)),
+        _row(padonna="鈴木", chirashi="Y", busuu=200, junni=dt.datetime(9101, 2, 1)),
+    ])
+    groups, _ = shiwake.shiwake_groups(shiwake.rows_from_haiso_table(table))
+    wb = _build(groups)
+    for name in wb.sheetnames:
+        text = chr(10).join(str(c.value) for row in wb[name].iter_rows()
+                             for c in row if c.value is not None)
+        others = [n for n in wb.sheetnames if n != name]
+        assert name in text
+        for o in others:
+            assert o not in text
 
 
 def test_workbook_shows_name_junni_and_items():
@@ -187,7 +244,7 @@ def test_workbook_check_column_is_empty():
     """チェック欄は空。作業員が手で書く。"""
     table = _table([_row(padonna="A", chirashi="X", busuu=1)])
     groups, _ = shiwake.shiwake_groups(shiwake.rows_from_haiso_table(table))
-    ws = _build(groups).active
+    ws = _build(groups).worksheets[0]
     header_row = None
     for row in ws.iter_rows():
         vals = [c.value for c in row]
