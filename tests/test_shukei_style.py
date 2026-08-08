@@ -346,3 +346,42 @@ def test_upper_matrix_column_widths_are_uniform(tpl):
     widths = {col: ws.column_dimensions[col].width
               for col in ("F", "K", "P", "U", "Z", "AE")}
     assert len(set(round(w, 2) for w in widths.values())) == 1, widths
+
+
+def test_only_labels_that_need_it_are_wrapped(tpl):
+    """🔴 1行で収まるラベルに折り返しを付けないこと。
+
+    付けると行高が1行ぶんのままなので文字が切れる(2026-08-08 オーナー指摘)。
+    折り返すのは幅に収まらないものだけ。収まらない行は行高も2行ぶんにする。
+    """
+    ws = _build_from_real_like_data()["集計表"]
+    labels = ("帳合", "挿み込み", "ぱどのみ", "折チラシ（B3,B4）", "チラシ総数")
+    seen = {}
+    for row in ws.iter_rows():
+        for c in row:
+            if c.value in labels:
+                w = _merged_width(ws, c)
+                need = len(str(c.value)) * 1.9
+                h = ws.row_dimensions[c.row].height
+                seen[c.value] = (bool(c.alignment.wrap_text), w, need, h)
+    assert set(seen) == set(labels)
+    for lab, (wrapped, w, need, h) in seen.items():
+        if need <= w:
+            assert not wrapped, f"{lab} は1行で収まるのに折り返しが付いている"
+            assert h == 19.2, f"{lab} の行高が {h}"
+        else:
+            assert wrapped, f"{lab} は収まらないのに折り返しが無い"
+            assert h and h >= 32, f"{lab} は折り返すのに行高が {h}"
+
+
+def test_shrink_to_fit_is_off_in_bottom_block(tpl):
+    """🔴 縮小表示は必ず切る（14ptでも表示だけ小さくなる元凶）。"""
+    ws = _build_from_real_like_data()["集計表"]
+    labels = ("帳合", "挿み込み", "ぱどのみ", "折チラシ（B3,B4）", "チラシ総数")
+    for row in ws.iter_rows():
+        for c in row:
+            if c.value in labels:
+                assert not c.alignment.shrink_to_fit, f"{c.value} に縮小が残っている"
+                vals = [x for x in ws[c.row] if x.column > c.column
+                        and x.value is not None]
+                assert not vals[0].alignment.shrink_to_fit,                     f"{c.value} の数字に縮小が残っている"

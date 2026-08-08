@@ -559,6 +559,19 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
     center = Alignment(horizontal="center", vertical="center", wrap_text=True)
     bold = Font(bold=True)
 
+    # 🔴 列幅は最初に決める。下部集計で「ラベルが幅に収まるか」を見て
+    # 折り返しの要否を決めるため、その時点で幅が入っている必要がある。
+    if tpl is not None:
+        tpl.copy_column_widths(ws)
+    else:
+        _base_w = [3.6, 2.6, 4.7, 9.2, 3.7]
+        for _c in range(3, 33):
+            ws.column_dimensions[gl(_c)].width = _base_w[(_c - 3) % 5]
+        ws.column_dimensions["A"].width = 6.2
+        ws.column_dimensions["B"].width = 10.7
+        ws.column_dimensions["AG"].width = 10.6
+        ws.column_dimensions["AH"].width = 8.6
+
     def _style(cell, role, col):
         """テンプレートがあればその書式を、無ければ従来の簡易書式を当てる。"""
         if tpl is not None:
@@ -680,7 +693,8 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
     _IND_SRC = [(27, 16, 15, 20), (28, 16, 15, 20), (29, 16, 15, 20),
                 (31, 17, 16, 20), (32, 17, 16, 20)]
     _BOTTOM_ROW_H = 19.2          # 行間（オーナーの手直しに合わせる）
-    _BOTTOM_ROW_H_WIDE = 32.4     # 折チラシは2行に折り返すぶん高くする
+    _BOTTOM_ROW_H_WIDE = 32.4     # 折り返す行は2行ぶん高くする
+    _CHAR_W = 1.9                 # 全角1文字あたりの必要幅の目安（14pt）
     indicators = [
         ("帳合", data["choai_busuu"]),
         ("挿み込み", data["sashikomi_busuu"]),
@@ -706,15 +720,22 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
                        end_row=row_at, end_column=val_right)
         # 🔴 shrink_to_fit は必ず切る。これが入っていると、フォントが14ptでも
         # Excel が「表示だけ」縮めてしまい、読めなくなる（今回の元凶）。
-        # ラベルは折り返しを許して、長いものは2行にする。
+        #
+        # 🔴 折り返しは「幅に収まらないラベルだけ」に付ける。
+        # 全部に付けると、1行で足りるラベル（挿み込み・ぱどのみ）まで
+        # 折り返し扱いになり、行高が1行ぶんのままなので文字が切れる
+        # （2026-08-08 オーナー指摘）。
+        lab_w = sum((ws.column_dimensions[gl(cc)].width or 8.43)
+                    for cc in range(13, lab_right + 1))
+        need_wrap = len(lab) * _CHAR_W > lab_w
         c.alignment = Alignment(horizontal=c.alignment.horizontal or "center",
                                 vertical=c.alignment.vertical or "center",
-                                wrap_text=True, shrink_to_fit=False)
+                                wrap_text=need_wrap, shrink_to_fit=False)
         v.alignment = Alignment(horizontal=v.alignment.horizontal or "center",
                                 vertical=v.alignment.vertical or "center",
                                 wrap_text=False, shrink_to_fit=False)
         ws.row_dimensions[row_at].height = (
-            _BOTTOM_ROW_H_WIDE if lab.startswith("折チラシ") else _BOTTOM_ROW_H)
+            _BOTTOM_ROW_H_WIDE if need_wrap else _BOTTOM_ROW_H)
 
     # エリア別部数。「部」だけ既定サイズで浮かないよう書式を揃え、
     # ラベルと数字は同じく結合して縮まないようにする。
@@ -741,16 +762,7 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
                 wrap_text=False, shrink_to_fit=False)
         ws.row_dimensions[row_at].height = _BOTTOM_ROW_H
 
-    if tpl is not None:
-        tpl.copy_column_widths(ws)
-    else:
-        base_w = [3.6, 2.6, 4.7, 9.2, 3.7]
-        for col in range(3, 33):
-            ws.column_dimensions[gl(col)].width = base_w[(col - 3) % 5]
-        ws.column_dimensions["A"].width = 6.2
-        ws.column_dimensions["B"].width = 10.7
-        ws.column_dimensions["AG"].width = 10.6
-        ws.column_dimensions["AH"].width = 8.6
+    # 列幅は関数の先頭で設定済み（下部集計の折り返し判定に必要なため）
 
     last_row = max(total_row, br + 8 + len(data["area_busuu"]) - 1)
     ws.print_area = f"A1:AH{last_row}"
