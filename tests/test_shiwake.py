@@ -35,6 +35,10 @@ def _table(rows):
     return [["配送管理表", None], HEADER] + rows
 
 
+# Excel がシート名に受け付けない文字。半角だけでなく全角も同じ扱いで弾かれる。
+_EXCEL_NG_SHEET_CHARS = set("[]:*?/" + chr(92)) | set("［］：＊？／＼")
+
+
 # ===== 1. 配布員ごとに合算する =====
 
 
@@ -188,9 +192,40 @@ def test_sheet_names_are_sanitized_and_unique():
     assert len(set(names)) == 3                     # 重複なし
     for n in names:
         assert len(n) <= 31
-        assert not set(n) & set("[]:*?/" + chr(92))
+        # 半角だけを見ていたため、全角 ／ に寄せた名前を素通りさせていた(2026-08-10)
+        assert not set(n) & _EXCEL_NG_SHEET_CHARS
     # スラッシュは消すのではなく別の字に置き換えて、誰の分か分かるようにする
     assert any("南川" in n for n in names)
+
+
+def test_sheet_name_rejects_fullwidth_forbidden_chars():
+    """🔴 Excel は全角の ／ も半角 / と同じ禁止文字として弾く（2026-08-10 に実機で確認）。
+
+    「メイト/南川 信哉」の / を全角 ／ に寄せていたため、Excel で開くと
+    「修復されたレコード: /xl/workbook.xml パーツ内のワークシートのプロパティ」が出て、
+    そのシートが『回復済み_Sheet1』に化けていた。
+    元データ側にすでに全角 ／ が入っている場合も同じく弾かれるので、両方を対象にする。
+    """
+    for raw in ("メイト/南川 信哉", "メイト／南川 信哉"):
+        name = shiwake.sheet_name_for(raw, set())
+        assert not set(name) & _EXCEL_NG_SHEET_CHARS, (
+            f"{raw!r} → {name!r} に Excel が受け付けない文字が残っている")
+        assert "南川" in name          # 誰の分か分かること（消してはいけない）
+
+
+def test_built_workbook_has_no_forbidden_sheet_names():
+    """ブック全体として、Excel が修復にかからない名前になっていること。"""
+    table = _table([
+        _row(padonna="メイト/南川 信哉", chirashi="X", busuu=1,
+             junni=dt.datetime(9101, 1, 1)),
+        _row(padonna="メイト／中本 美希", chirashi="X", busuu=1,
+             junni=dt.datetime(9101, 2, 1)),
+    ])
+    groups, _ = shiwake.shiwake_groups(shiwake.rows_from_haiso_table(table))
+    wb = _build(groups)
+    assert len(wb.sheetnames) == 2
+    for n in wb.sheetnames:
+        assert not set(n) & _EXCEL_NG_SHEET_CHARS, f"{n!r} が Excel に弾かれる"
 
 
 def test_duplicate_person_names_get_distinct_sheets():
