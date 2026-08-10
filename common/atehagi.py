@@ -22,14 +22,32 @@ _CODE_MAX_DIGITS = 6      # 担当地区コードの最大桁（北版5桁 / 南
 _ZEN2HAN = str.maketrans("０１２３４５６７８９", "0123456789")
 
 
+def _drop_trailing_zero(chiku) -> str:
+    """小数として渡された地区コードを、桁が増えない文字列にする。
+
+    913006.0 → "913006"。整数でない小数（あり得ないが）はそのまま文字列化する。
+    """
+    if isinstance(chiku, float) and chiku.is_integer():
+        return str(int(chiku))
+    s = str(chiku)
+    if re.fullmatch(r"\s*\d+\.0+\s*", s):     # "913006.0" のような文字列で来る場合
+        return s.strip().split(".")[0]
+    return s
+
+
 def area_code(chiku) -> str:
     """担当地区コードを数字のみ抽出して正規化する（グループ化キー・シート名に使う）。
 
     北版は5桁（10101）、南版は6桁（911001）。7桁以上の異常値のみ末尾6桁に切る。
     日本語入力のままの全角数字も受け付ける（画面から手入力されるため）。
     ※旧 area5 は「末尾5桁」に切っていたため、南版の先頭1桁が落ちていた。
+
+    🔴 Excelのセルは小数で入ってくることがある（openpyxl が 913006.0 を返す）。
+    そのまま str() すると "913006.0" → 数字だけで "9130060" の7桁になり、
+    上の「7桁以上は末尾6桁」が**先頭の 9 を切り落として 130060 にしていた**。
+    別の地区コードとして黙って通ってしまうため、先に小数を整数へ寄せる（2026-08-10）。
     """
-    digits = re.sub(r"\D", "", str(chiku).translate(_ZEN2HAN))
+    digits = re.sub(r"\D", "", _drop_trailing_zero(chiku).translate(_ZEN2HAN))
     return digits[-_CODE_MAX_DIGITS:] if len(digits) > _CODE_MAX_DIGITS else digits
 
 

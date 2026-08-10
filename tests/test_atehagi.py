@@ -11,6 +11,29 @@ def test_area_code_normalizes_digits():
     assert A.area_code("1234567") == "234567"     # 7桁以上の異常値のみ末尾6桁
 
 
+def test_area_code_handles_float_cells():
+    """🔴 Excelのセルが小数(913006.0)で入ってくると、str() の '.0' が桁数を押し上げ、
+    「7桁以上は末尾6桁」の規則が先頭の 9 を切り落としていた（2026-08-10 に発覚）。
+
+    その結果 913006 → 130060 となり、あて紙に印字する担当地区コードそのものが
+    別の地区に化け、版の判定(detect_version)も外れて表題が「京阪」になっていた。
+    """
+    assert A.area_code(913006.0) == "913006"
+    assert A.area_code6(913006.0) == "913006"
+    assert A.area_code(10101.0) == "10101"          # 北版5桁も同じ
+    assert A.area_code6(10101.0) == "010101"
+    assert A.area_code("913006.0") == "913006"      # 文字列で来ても同じ
+    # 🔴 末尾が0のコードを巻き込んで消さないこと（"911000.0" → "911" になる実装を弾く）
+    assert A.area_code(911000.0) == "911000"
+    assert A.area_code6(10100.0) == "010100"
+
+
+def test_detect_version_works_with_float_cells():
+    """小数で読み込まれても版を取り違えないこと。"""
+    groups = {913006.0: [], 913106.0: [], 913202.0: []}
+    assert A.detect_version(groups) == A.KEIHAN_MINAMI
+
+
 def test_chiku_name_kita_rule():
     assert A.chiku_name(A.KEIHAN_KITA, "10101") == "枚方・交野"   # 先頭1
     assert A.chiku_name(A.KEIHAN_KITA, "30101") == "枚方・交野"   # 先頭3
