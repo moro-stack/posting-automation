@@ -94,6 +94,16 @@ def _ocr_files(files, reader, media_type=None):
                    "（AI未設定/読取失敗分は手入力できます）")
     else:
         st.success(f"{len(drafts)}件を読み取りました。内容を確認・修正して登録してください。")
+
+    # 🔴 エラーの中身を必ず画面に出す。ここを出していなかったせいで 2026-08-07 に
+    # 「0件しか読めない」の原因究明に50分かかった(真因はIAMポリシーの付け忘れ)。
+    # 折りたたまない。1クリック隠すと、また誰も気づかない。
+    fails = ocr.failed_reads(drafts)
+    if fails:
+        st.error(f"{len(fails)}件でエラーが出ました。原因は下のとおりです。"
+                 "（解決しない場合は、この文面をそのまま毛呂までお送りください）")
+        for fname, reason in fails:
+            st.code(f"{fname}\n{reason}", language=None)
     return drafts
 
 

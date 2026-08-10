@@ -150,3 +150,36 @@ def test_media_type_for_upload_falls_back_to_default_without_name_or_type():
 def test_media_type_for_upload_ignores_unknown_type():
     """知らない type は信用せず、拡張子/既定に落とす。"""
     assert ocr.media_type_for_upload(_Upload(name="a.png", type="application/octet-stream")) == "image/png"
+
+# ===== 読み取り失敗の「原因」を画面に出すため（2026-08-10） =====
+
+def test_failed_reads_returns_file_and_reason():
+    """🔴 例外の中身を捨てない。8/7 は AWS の権限エラーを画面にもログにも出さず、
+    「0件しか読めない」の原因究明に50分かかった。原因の文字列が必ず取り出せること。"""
+    reason = ("Bedrock呼び出しに失敗しました: AccessDeniedException: "
+              "User is not authorized to perform: bedrock:InvokeModel")
+    drafts = [
+        {"amount": 3300, "_file": "ok.jpg"},
+        {"amount": None, "_file": "ng.pdf", "_error": reason},
+    ]
+    assert ocr.failed_reads(drafts) == [("ng.pdf", reason)]
+
+
+def test_failed_reads_is_empty_when_all_succeeded():
+    drafts = [{"amount": 1, "_file": "a.jpg"}, {"amount": 2, "_file": "b.jpg"}]
+    assert ocr.failed_reads(drafts) == []
+
+
+def test_failed_reads_keeps_every_failure():
+    """複数落ちたら全部返す。1件だけ出して他を握りつぶさないこと。"""
+    drafts = [
+        {"amount": None, "_file": "a.pdf", "_error": "E1"},
+        {"amount": 5, "_file": "b.jpg"},
+        {"amount": None, "_file": "c.png", "_error": "E2"},
+    ]
+    assert ocr.failed_reads(drafts) == [("a.pdf", "E1"), ("c.png", "E2")]
+
+
+def test_failed_reads_survives_missing_file_name():
+    """カメラ撮影などでファイル名が無くても、原因は落とさない。"""
+    assert ocr.failed_reads([{"_error": "E"}]) == [("", "E")]

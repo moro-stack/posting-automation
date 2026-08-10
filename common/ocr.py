@@ -95,3 +95,13 @@ def extract_invoice(image_bytes, media_type="image/jpeg", *, client=None) -> dic
             "amount": _as_int(d.get("amount")),
             "date": d.get("date") or None,
             "note": d.get("note") or None}
+
+def failed_reads(drafts):
+    """AIの読み取りに失敗したものを [(ファイル名, 原因)] で返す。
+
+    🔴 例外の中身を握りつぶさないための関数。画面に原因をそのまま出すのに使う。
+    2026-08-07、AWSの権限エラー(IAMポリシー未アタッチ)を画面にもログにも出して
+    いなかったため「0件しか読めない」の原因究明に50分かかった。1行出ていれば5分だった。
+    """
+    return [(d.get("_file") or "", d["_error"]) for d in drafts if d.get("_error")]
+
