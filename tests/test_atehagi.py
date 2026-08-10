@@ -94,3 +94,30 @@ def test_group_by_chiku_preserves_order_and_counts():
     assert len(groups["10101"]) == 2
     assert A.chirashi_count(groups["10101"]) == 1        # サンプル生協のみサイズ有り
     assert A.chirashi_count(groups["46501"]) == 0        # 04 ぱど のみ・サイズ無し
+
+
+# ===== シート名に Excel が弾く文字を残さない（2026-08-10 の点検で見つかった地雷） =====
+
+_EXCEL_NG_SHEET_CHARS = set("[]:*?/" + chr(92)) | set("［］：＊？／＼")
+
+
+def test_unique_title_strips_forbidden_chars():
+    """🔴 シート名に禁止文字が残ると Excel が『回復済み_Sheet1』に化けさせる。
+
+    今は地区コード(数字のみ)しか渡していないので踏まないが、配布員名や地区名を
+    使うようにした瞬間に、2026-08-10 の仕分け表と同じ事故が再発する。
+    半角だけでなく全角も弾かれる（Excelは全角を半角に正規化して判定する）。
+    """
+    for raw in ("メイト/南川", "メイト／南川", "A[1]", "A［1］", "9:00", "9：00"):
+        got = A._unique_title(raw, set())
+        assert not set(got) & _EXCEL_NG_SHEET_CHARS, f"{raw!r} → {got!r} に禁止文字が残る"
+        assert len(got) <= 31
+
+
+def test_unique_title_keeps_area_codes_unchanged():
+    """今使っている地区コード(数字のみ)の出力は変えないこと。"""
+    assert A._unique_title("911002", set()) == "911002"
+    used = set()
+    assert A._unique_title("911002", used) == "911002"
+    assert A._unique_title("911002", used) == "911002_2"      # 重複時の連番は従来どおり
+

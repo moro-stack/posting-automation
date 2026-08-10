@@ -11,6 +11,8 @@ import io
 
 import openpyxl
 
+from common.excel_io import EXCEL_NG_SHEET_CHARS
+
 # 異動 がこれの人は仕分け表に入れない(オーナー指示 2026-08-07)。
 ABSENT_MARK = "休"
 
@@ -177,7 +179,7 @@ def _fmt_haifubi(v) -> str:
 #    / を全角 ／ に寄せていたため、開くと
 #    「修復されたレコード: /xl/workbook.xml パーツ内のワークシートのプロパティ」が出て、
 #    そのシートが『回復済み_Sheet1』に化けていた。全角も NG 側に入れること。
-_SHEET_NG = set('[]:*?/\\') | set('［］：＊？／＼')
+_SHEET_NG = set(EXCEL_NG_SHEET_CHARS)
 # スラッシュだけは「メイト/南川」のような所属＋氏名の区切りなので、
 # 区切りと分かる _ に置き換える(消すと誰の分か読みにくい)。
 _SHEET_SLASH = {'/', '／'}

@@ -24,7 +24,7 @@ import re
 import openpyxl
 
 from common.atehagi import read_uploaded
-from common.excel_io import freeze_xlsx_bytes
+from common.excel_io import freeze_xlsx_bytes, sanitize_sheet_chars
 
 PROCEED_TEMPLATE = os.path.join(
     os.path.dirname(os.path.dirname(__file__)),
@@ -147,7 +147,9 @@ def parse_haifu_irai(table):
 
 
 def _unique_title(title, used):
-    t = re.sub(r"[\[\]\*\?/\\:]", "-", str(title))[:31]
+    # 🔴 半角だけを - に置換していたため、全角(／［］：＊？＼)が素通りしていた。
+    #    Excel は全角を半角に正規化して判定するので、残すと修復にかかる（2026-08-10）。
+    t = sanitize_sheet_chars(title, "-")[:31]
     base, n = t, 1
     while t in used:
         n += 1

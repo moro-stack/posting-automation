@@ -12,7 +12,7 @@ from collections import OrderedDict
 import openpyxl
 from openpyxl.worksheet.properties import PageSetupProperties
 
-from common.excel_io import freeze_xlsx_bytes
+from common.excel_io import freeze_xlsx_bytes, sanitize_sheet_chars
 
 KEIHAN_KITA = "北"
 KEIHAN_MINAMI = "南"
@@ -265,7 +265,10 @@ _VERSION_LABEL = {KEIHAN_KITA: "京阪北版", KEIHAN_MINAMI: "京阪南版"}
 
 
 def _unique_title(title, used):
-    t = str(title)[:31]
+    # 🔴 禁止文字を落としてから丸める。いまは地区コード(数字のみ)しか渡していないので
+    #    出力は変わらないが、配布員名や地区名を渡すようにした瞬間に Excel が修復して
+    #    『回復済み_Sheet1』に化ける（2026-08-10 に仕分け表で発生した事故と同じ形）。
+    t = sanitize_sheet_chars(title)[:31]
     base, n = t, 1
     while t in used:
         n += 1

@@ -92,3 +92,22 @@ def test_proceed_filename():
     name = P.proceed_atehagi_filename(p)
     assert name.startswith("リビングプロシード_あて紙_サンプル市_")
     assert name.endswith(".xlsx")
+
+
+# ===== シート名に Excel が弾く文字を残さない（2026-08-10 の点検） =====
+
+_EXCEL_NG_SHEET_CHARS = set("[]:*?/" + chr(92)) | set("［］：＊？／＼")
+
+
+def test_unique_title_strips_forbidden_chars_including_fullwidth():
+    """半角は - に置換していたが、全角(／［］：＊？＼)が素通りしていた。
+    Excelは全角を半角に正規化して判定するため、そのまま残すと修復にかかる。"""
+    for raw in ("メイト/南川", "メイト／南川", "A［1］", "9：00"):
+        got = P._unique_title(raw, set())
+        assert not set(got) & _EXCEL_NG_SHEET_CHARS, f"{raw!r} → {got!r} に禁止文字が残る"
+        assert len(got) <= 31
+
+
+def test_unique_title_keeps_codes_unchanged():
+    assert P._unique_title("911002", set()) == "911002"
+

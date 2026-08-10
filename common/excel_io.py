@@ -122,9 +122,24 @@ def inject_template_charts(saved_bytes: bytes, template_path: str, new_sheet_tit
     return out.getvalue()
 
 
+# Excel がシート名に受け付けない文字。
+# 🔴 半角だけでなく全角も同じ扱いで弾かれる。Excel は全角を半角に正規化してから
+#    判定するため、禁止文字を「全角の双子に寄せて回避する」ことはできない。
+#    2026-08-10、仕分け表で ／(U+FF0F) を使っていたシートが Excel に修復され
+#    『回復済み_Sheet1』に化けた（修復メッセージ＝/xl/workbook.xml のワークシートのプロパティ）。
+#    シート名を作る処理は、必ずこの定数を使って判定すること。
+EXCEL_NG_SHEET_CHARS = "[]:*?/" + "\\" + "［］：＊？／＼"
+
+
+def sanitize_sheet_chars(title, replacement="_") -> str:
+    """Excelがシート名に受け付けない文字を replacement に置き換える（半角・全角とも）。"""
+    return "".join(replacement if ch in EXCEL_NG_SHEET_CHARS else ch
+                   for ch in str(title))
+
+
 def _safe_sheet_title(title: str, existing=()) -> str:
     """Excelのシート名禁止文字を除き31文字に丸め、既存名と重複しないようにする。"""
-    cleaned = re.sub(r"[:\\/?*\[\]]", "", str(title)).strip() or "Sheet"
+    cleaned = sanitize_sheet_chars(title, "").strip() or "Sheet"
     cleaned = cleaned[:31]
     if cleaned not in existing:
         return cleaned
