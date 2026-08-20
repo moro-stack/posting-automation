@@ -22,6 +22,29 @@ _INVOICE_PROMPT = (
     "読み取れない項目は null。金額はカンマや円記号を除いた整数で。"
 )
 
+# 🔴 2026-08-20: プロンプトで「宛名(御中/様)をvendorにしない」と指示しても、AIが自社(受取側)の
+# 名前をvendorとして返すことがある(大橋様ご指摘・実際の請求書14枚でテストし2件で再現)。
+# プロンプトを強化して再テストしたが改善せず、むしろ他の書類で取引先名の読み取りが悪化した
+# (試行1回で悪化を確認・AIの読み取り精度そのものの限界と判断)。
+# 確実性を優先し、既知の誤りパターン(受取側の名前・宛名の敬称)をコード側で検知したら
+# vendor を null にする(誤った値を確定登録するより、空欄にして人に入力してもらう方が安全)。
+_SELF_COMPANY_MARKERS = ("ケイピーエス", "ケイビーエス", "kps")
+_RECIPIENT_SUFFIXES = ("御中", "様")
+
+
+def _sanitize_vendor(vendor):
+    """AIが受取側(自社/御中)の名前をvendorとして返す既知の誤りを検知し、nullにする。"""
+    if not vendor:
+        return None
+    v = vendor.strip()
+    if not v:
+        return None
+    if any(marker in v.lower() for marker in _SELF_COMPANY_MARKERS):
+        return None
+    if v.endswith(_RECIPIENT_SUFFIXES):
+        return None
+    return v
+
 
 def media_type_for(filename: str) -> str:
     """ファイル名から Bedrock 送信用のメディア種別を返す(PDF/PNG/JPEG対応)。"""
@@ -91,7 +114,7 @@ def extract_receipt(image_bytes, media_type="image/jpeg", *, client=None) -> dic
 def extract_invoice(image_bytes, media_type="image/jpeg", *, client=None) -> dict:
     raw = bedrock_client.invoke_vision(_INVOICE_PROMPT, image_bytes, media_type, client=client)
     d = _parse_json(raw)
-    return {"vendor": d.get("vendor") or None,
+    return {"vendor": _sanitize_vendor(d.get("vendor")),
             "amount": _as_int(d.get("amount")),
             "date": d.get("date") or None,
             "note": d.get("note") or None}

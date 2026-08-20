@@ -51,6 +51,46 @@ def test_extract_invoice_parses_date_and_vendor():
     assert result["date"] == "2026-06-16"
 
 
+# ===== 取引先が受取側(自社/御中)に化けるバグ（2026-08-20・大橋様ご指摘） =====
+# 実際の請求書14枚でテストし、プロンプトで「御中/様は宛名なのでvendorにしない」と
+# 指示していても、AIが受取側の名前をvendorとして返すことが2件で再現した
+# (配夢株式会社の請求書で vendor="株式会社ケイピーエス 大阪支社 御中"、
+#  株式会社スペースリーダーの請求書で vendor="株式会社ケイピーエス"）。
+# プロンプトを強化して再テストしたが改善せず、他の書類で悪化もしたため、
+# コード側で既知の誤りパターンを検知してnullにする方式にした。
+
+
+def test_extract_invoice_nulls_vendor_when_ai_returns_recipient_with_onchu():
+    """再現ケースそのもの：配夢株式会社の請求書でAIが返した実際の誤り値。"""
+    fake = _FakeClient('{"vendor":"株式会社ケイピーエス 大阪支社 御中","amount":198000,'
+                       '"date":"2026-06-30","note":"6月度ご請求"}')
+    result = ocr.extract_invoice(b"x", client=fake)
+    assert result["vendor"] is None
+    assert result["amount"] == 198000  # 他の項目は正しいので巻き込んで消さない
+
+
+def test_extract_invoice_nulls_vendor_when_ai_returns_bare_self_company():
+    """再現ケースそのもの：株式会社スペースリーダーの請求書でAIが返した実際の誤り値
+    （敬称なしで自社名だけを返すこともある）。"""
+    fake = _FakeClient('{"vendor":"株式会社ケイピーエス","amount":11000,'
+                       '"date":"2026-06-10","note":"備品費"}')
+    result = ocr.extract_invoice(b"x", client=fake)
+    assert result["vendor"] is None
+
+
+def test_extract_invoice_nulls_vendor_ending_in_sama():
+    fake = _FakeClient('{"vendor":"黒瀬 誠 様","amount":1000,"note":"備考"}')
+    result = ocr.extract_invoice(b"x", client=fake)
+    assert result["vendor"] is None
+
+
+def test_extract_invoice_keeps_normal_vendor_name():
+    """自社名を含まない普通の取引先名まで巻き込んで消さないこと。"""
+    fake = _FakeClient('{"vendor":"株式会社ネクストレベル","amount":32307,"note":"宿泊費"}')
+    result = ocr.extract_invoice(b"x", client=fake)
+    assert result["vendor"] == "株式会社ネクストレベル"
+
+
 def test_extract_invoice_missing_date_is_none():
     fake = _FakeClient('{"vendor":"関西電力株式会社","amount":16216,"note":"電気"}')
     result = ocr.extract_invoice(b"x", client=fake)
