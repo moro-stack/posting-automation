@@ -205,19 +205,46 @@ def build_report_rows(irai_rows, minami_index):
     return out
 
 
-def build_advalue_report_workbook(report_rows) -> bytes:
-    """報告書Excel（1シート＝ヘッダー＋明細）を bytes で返す。"""
+def build_advalue_report_workbook(report_rows, *, case_label=None) -> bytes:
+    """報告書Excel（1シート＝ヘッダー＋明細）を bytes で返す。
+
+    アドバリューは週ごとに依頼が来て『8-1』『8-2』『8-3』のように案件を
+    分けて管理している(2026-08-19 大橋様ご指摘)。case_label を渡すと、
+    どの案件の報告書か分かるよう先頭に見出し行を入れる。渡さなければ
+    これまでどおりヘッダーがA1から始まる(後方互換)。
+    """
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "アドバリュー報告書"
-    ws.append(_REPORT_HEADERS)
-    for r in report_rows:
-        ws.append([r.get(h) for h in _REPORT_HEADERS])
+    header_row = 1
+    if case_label:
+        ws.cell(row=1, column=1, value=f"アドバリュー エリア被り報告書　{case_label}")
+        ws.cell(row=1, column=1).font = openpyxl.styles.Font(bold=True, size=14)
+        header_row = 2
+    for col, h in enumerate(_REPORT_HEADERS, start=1):
+        ws.cell(row=header_row, column=col, value=h)
+    for i, r in enumerate(report_rows):
+        for col, h in enumerate(_REPORT_HEADERS, start=1):
+            ws.cell(row=header_row + 1 + i, column=col, value=r.get(h))
     for col in range(1, len(_REPORT_HEADERS) + 1):
-        ws.cell(row=1, column=col).font = openpyxl.styles.Font(bold=True)
+        ws.cell(row=header_row, column=col).font = openpyxl.styles.Font(bold=True)
     buf = io.BytesIO()
     wb.save(buf)
     return freeze_xlsx_bytes(buf.getvalue())
+
+
+_FILENAME_UNSAFE = re.compile(r'[\\/:*?"<>|]')
+
+
+def advalue_filename(case_label=None) -> str:
+    """報告書のファイル名。案件名を渡すと、週ごとに生成しても上書きせず
+    分けて保存できるようファイル名にも入れる(2026-08-19 大橋様ご指摘)。"""
+    base = "アドバリュー_エリア被り報告書"
+    if case_label:
+        safe = _FILENAME_UNSAFE.sub("_", str(case_label).strip())
+        if safe:
+            base += f"_{safe}"
+    return base + ".xlsx"
 
 
 def overlap_summary(report_rows):

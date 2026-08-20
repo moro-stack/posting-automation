@@ -83,3 +83,47 @@ def test_build_report_workbook():
     assert ws["A2"].value == "サンプル町1"
     assert ws["C2"].value == "913101"
     assert ws["D2"].value == "被り"
+
+
+# ===== 週ごとの案件(8-1/8-2/8-3等)を分けて管理したい（依頼⑥・2026-08-19大橋様ご指摘） =====
+
+
+def test_build_advalue_report_workbook_without_case_label_is_unchanged():
+    """case_label を渡さなければ、これまでどおりヘッダーがA1から始まる。"""
+    rows = [{"町丁目名": "サンプル町1", "市区名": "サンプル市", "担当地区(被り)": "913101",
+             "被り": "被り", "世帯数15": 840, "暫定部数": 570, "クライアント①": "×",
+             "クライアント②": "○", "配布日メモ": "6月9日", "併配部数": 570, "店舗名": "サンプル店",
+             "投禁物件": "なし", "配布日": "6/8-6/14"}]
+    data = V.build_advalue_report_workbook(rows)
+    wb = openpyxl.load_workbook(io.BytesIO(data))
+    ws = wb.active
+    assert ws["A1"].value == "町丁目名"
+
+
+def test_build_advalue_report_workbook_with_case_label_adds_title_row():
+    """アドバリューは週ごとに『8-1』『8-2』『8-3』のように案件を分けて管理しているため、
+    ラベルを渡したときは報告書に見出し行として入れ、ヘッダーは1行下にずれる。"""
+    rows = [{"町丁目名": "サンプル町1", "市区名": "サンプル市", "担当地区(被り)": "913101",
+             "被り": "被り", "世帯数15": 840, "暫定部数": 570, "クライアント①": "×",
+             "クライアント②": "○", "配布日メモ": "6月9日", "併配部数": 570, "店舗名": "サンプル店",
+             "投禁物件": "なし", "配布日": "6/8-6/14"}]
+    data = V.build_advalue_report_workbook(rows, case_label="8-1")
+    wb = openpyxl.load_workbook(io.BytesIO(data))
+    ws = wb.active
+    assert ws["A1"].value == "アドバリュー エリア被り報告書　8-1"
+    assert ws["A2"].value == "町丁目名"
+    assert ws["A3"].value == "サンプル町1"
+
+
+def test_advalue_filename_without_case_label():
+    assert V.advalue_filename() == "アドバリュー_エリア被り報告書.xlsx"
+
+
+def test_advalue_filename_with_case_label():
+    """ファイル名にも案件を入れる。週ごとに生成しても上書きせず分けて保存できるように。"""
+    assert V.advalue_filename("8-1") == "アドバリュー_エリア被り報告書_8-1.xlsx"
+
+
+def test_advalue_filename_strips_characters_unsafe_for_filenames():
+    """案件名に / などが入っても壊れたファイル名にならないこと。"""
+    assert "/" not in V.advalue_filename("8/1")

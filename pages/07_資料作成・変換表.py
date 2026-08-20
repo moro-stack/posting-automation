@@ -252,6 +252,11 @@ with tab_proceed:
 with tab_advalue:
     st.caption("アドバリューの依頼表と、京阪南版の配送管理表をアップロードすると、"
                "各町丁目が京阪南版と被る担当地区を割り出した報告書を作成します。")
+    adv_case = st.text_input(
+        "案件名（任意・例：8-1）",
+        help="アドバリューは週ごとに依頼が来るため『8-1』『8-2』『8-3』のように分けて"
+             "管理されています。入力すると報告書とファイル名にそのまま入り、週ごとに"
+             "生成しても上書きされず分けて保存できます。")
     col1, col2 = st.columns(2)
     with col1:
         up_irai = st.file_uploader("① アドバリュー依頼表", type=["xlsx", "xls", "csv"],
@@ -273,11 +278,11 @@ with tab_advalue:
                    f"京阪南と被り {summ['overlap']}件・被らない {summ['non_overlap']}件")
         st.dataframe(report_rows, use_container_width=True, hide_index=True)
         if st.button("報告書を生成", type="primary", key="adv_build"):
-            data = AV.build_advalue_report_workbook(report_rows)
+            data = AV.build_advalue_report_workbook(report_rows, case_label=adv_case.strip() or None)
             st.download_button(
                 "報告書をダウンロード",
                 data=data,
-                file_name="アドバリュー_エリア被り報告書.xlsx",
+                file_name=AV.advalue_filename(adv_case.strip() or None),
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="adv_dl",
             )
