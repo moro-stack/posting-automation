@@ -16,7 +16,7 @@ st.title("小口／買掛／売掛の登録")
 # 🔴 segmented_control は選択を解除でき、そのとき None を返す。None のまま下の
 # if/elif/else に流すと else に落ちて「売掛」の画面が開いてしまうため、
 # 明示的に既定へ戻す。
-_MODES = ["小口", "買掛", "売掛"]
+_MODES = ["小口", "買掛", "売掛", "車両"]
 mode = st.segmented_control("入力の種類", _MODES, default=_MODES[0],
                             key="entry_mode") or _MODES[0]
 
@@ -405,7 +405,7 @@ elif mode == "買掛":
                             filename="買掛_選択一覧", section="payable",
                             delete_fn=store.delete_payable)
 
-else:  # 売掛
+elif mode == "売掛":
     st.subheader("売掛（売上）")
     tab_reg, tab_list = st.tabs([_REG_TAB, _LIST_TAB])
 
@@ -468,3 +468,57 @@ else:  # 売掛
             list_action_bar(edited, key="recv", title="売掛一覧",
                             filename="売掛_選択一覧", section="receivable",
                             delete_fn=store.delete_receivable)
+
+else:  # 車両
+    st.subheader("車両使用履歴")
+    tab_reg, tab_list = st.tabs([_REG_TAB, _LIST_TAB])
+
+    _VEHICLE_PRESETS = ["ハイエース", "軽バン", "レンタカー", "その他"]
+
+    with tab_reg:
+        show_flash()
+        with st.form("vehicle", clear_on_submit=True):
+            v_date = st.text_input("日付（例：2026-07-05）")
+            v_kind = st.selectbox("車両", _VEHICLE_PRESETS)
+            v_other = st.text_input(
+                "車両名", placeholder="「その他」を選んだときだけ入力（例：新しく借りた軽トラ等）",
+                help="車両が『その他』のときだけ使われます。")
+            driver = st.text_input("ドライバー")
+            oc1, oc2 = st.columns(2)
+            odo_start = oc1.number_input("開始時の走行距離メーター", min_value=0, step=1, value=0)
+            odo_end = oc2.number_input("終了時の走行距離メーター", min_value=0, step=1, value=0)
+            purpose = st.text_input("使用用途")
+            fuel = st.number_input("給油量(L・任意)", min_value=0.0, step=0.1, value=0.0, format="%.2f")
+            if st.form_submit_button("登録"):
+                vehicle_name = (v_other.strip() if v_kind == "その他" else v_kind)
+                if not vehicle_name:
+                    st.error("車両名を入力してください。")
+                else:
+                    store.add_vehicle_log(
+                        v_date or None, vehicle_name, driver.strip() or None,
+                        odo_start or None, odo_end or None,
+                        purpose=purpose.strip() or None,
+                        fuel_liters=fuel or None)
+                    flash("登録しました")
+                    st.rerun()
+
+    with tab_list:
+        show_flash("vehicle")
+        st.markdown("**登録済みの車両使用履歴**")
+        lo, hi, note = period_picker(key="vehicle_period")
+        _rows = posting_logic.filter_rows_by_period(store.list_vehicle_logs(), "date", lo, hi)
+        st.caption(f"表示期間: {note}（{len(_rows)}件）")
+        _disp = [{"No.": r["id"], "日付": r.get("date") or "",
+                  "車両": r.get("vehicle") or "",
+                  "ドライバー": r.get("driver") or "",
+                  "走行距離": f'{r["distance"]}km' if r.get("distance") is not None else "",
+                  "使用用途": r.get("purpose") or "",
+                  "給油量": f'{r["fuel_liters"]}L' if r.get("fuel_liters") is not None else "",
+                  "登録日": (r.get("created_at") or "")[:10]} for r in _rows]
+        if not _disp:
+            st.caption("車両使用履歴の登録はまだありません。")
+        else:
+            edited, selected_ids = selectable_list(_disp, key="vehicle")
+            list_action_bar(edited, key="vehicle", title="車両使用履歴",
+                            filename="車両使用履歴_選択一覧", section="vehicle",
+                            delete_fn=store.delete_vehicle_log)

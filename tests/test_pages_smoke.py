@@ -964,6 +964,39 @@ def test_receivable_list_deletes_the_right_row_and_announces(db):
     assert [s.value for s in at.tabs[0].success] == []
 
 
+# ============================================================ 車両使用履歴（依頼⑤）
+
+
+def test_vehicle_registration_computes_distance_and_shows_in_list(db):
+    at = _run(_EXPENSE_PAGE)
+    at.segmented_control[0].set_value("車両").run()
+    at.text_input[0].set_value("2026-06-19")       # 日付
+    _sel(at, "車両").set_value("ハイエース")
+    at.text_input[2].set_value("時野")             # ドライバー(0=日付,1=車両名,2=ドライバー)
+    at.number_input[0].set_value(55876)            # 開始メーター
+    at.number_input[1].set_value(55908)            # 終了メーター
+    at.text_input[3].set_value("DOMOぱどポスト")    # 使用用途
+    [b for b in at.button if b.label == "登録"][0].click().run()
+
+    assert not at.exception
+    rows = store.list_vehicle_logs(db_path=db)
+    assert len(rows) == 1
+    assert rows[0]["vehicle"] == "ハイエース"
+    assert rows[0]["driver"] == "時野"
+    assert rows[0]["distance"] == 32
+    assert "32km" in _rendered_text(at)
+
+
+def test_vehicle_registration_requires_vehicle_name_when_other(db):
+    """『その他』を選んだのに車両名が空なら、登録せずエラーを出す。"""
+    at = _run(_EXPENSE_PAGE)
+    at.segmented_control[0].set_value("車両").run()
+    _sel(at, "車両").set_value("その他")
+    [b for b in at.button if b.label == "登録"][0].click().run()
+    assert not at.exception
+    assert any("車両名を入力してください" in e.value for e in at.error)
+
+
 # ============================================================ 業務委託登録
 _CONTRACT_PAGE = "02_業務委託登録.py"
 
@@ -1684,7 +1717,7 @@ def test_expense_page_mode_is_segmented_control(db):
     at = _run(_EXPENSE_PAGE)
     assert not at.exception
     assert [s.key for s in at.segmented_control] == ["entry_mode"]
-    assert at.segmented_control[0].options == ["小口", "買掛", "売掛"]
+    assert at.segmented_control[0].options == ["小口", "買掛", "売掛", "車両"]
     assert not at.radio
 
 

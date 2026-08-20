@@ -87,6 +87,11 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             distributor_id INTEGER NOT NULL,
             work_name TEXT NOT NULL,
             amount INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS vehicle_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT, vehicle TEXT NOT NULL, driver TEXT,
+            odo_start INTEGER, odo_end INTEGER, distance INTEGER,
+            purpose TEXT, fuel_liters REAL, created_at TEXT NOT NULL);
         """
     )
     # 買掛に請求書の日付(YYYY-MM-DD)を持たせる(#12)。旧DBは自動でカラム追加。
@@ -419,6 +424,43 @@ def list_petty_cash(*, project_id=None, date_from=None, date_to=None, db_path=No
 
 def delete_petty_cash(row_id, *, db_path=None):
     _delete("petty_cash", row_id, db_path)
+
+
+# --- vehicle_logs ---
+def add_vehicle_log(date, vehicle, driver, odo_start, odo_end, *, purpose=None,
+                    fuel_liters=None, db_path=None, now=None):
+    """車両の使用履歴を1件登録する。開始/終了メーターが両方あれば走行距離を
+    引き算で出す(片方でも欠けていれば0kmと決めつけずnullのままにする)。"""
+    start = _int_or_none(odo_start)
+    end = _int_or_none(odo_end)
+    distance = end - start if start is not None and end is not None else None
+    fuel = None if fuel_liters in (None, "") else float(fuel_liters)
+    return _add("vehicle_logs",
+                ["date", "vehicle", "driver", "odo_start", "odo_end", "distance",
+                 "purpose", "fuel_liters", "created_at"],
+                [date, vehicle, driver or None, start, end, distance,
+                 purpose or None, fuel, _now(now)], db_path)
+
+
+def list_vehicle_logs(*, vehicle=None, date_from=None, date_to=None, db_path=None):
+    conn = _connect(db_path)
+    try:
+        sql = "SELECT * FROM vehicle_logs WHERE 1=1"
+        args = []
+        if vehicle is not None:
+            sql += " AND vehicle=?"; args.append(vehicle)
+        if date_from is not None:
+            sql += " AND date>=?"; args.append(date_from)
+        if date_to is not None:
+            sql += " AND date<=?"; args.append(date_to)
+        sql += " ORDER BY id DESC"
+        return [dict(r) for r in conn.execute(sql, args).fetchall()]
+    finally:
+        conn.close()
+
+
+def delete_vehicle_log(row_id, *, db_path=None):
+    _delete("vehicle_logs", row_id, db_path)
 
 
 # --- payables ---

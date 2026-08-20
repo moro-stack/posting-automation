@@ -6,7 +6,7 @@ TABLES = {
     "receivables_clients", "distributors",
     "petty_cash", "payables", "receivables",
     "contract_invoices", "contract_invoice_lines", "issue_manual_costs",
-    "distributor_daily_rates",
+    "distributor_daily_rates", "vehicle_logs",
 }
 
 
@@ -262,6 +262,59 @@ def test_petty_cash_distributor_is_optional(tmp_path):
     rid = store.add_petty_cash("2026-07-17", None, 1500, db_path=db)
     row = next(r for r in store.list_petty_cash(db_path=db) if r["id"] == rid)
     assert row["distributor_id"] is None
+
+
+# ===== 車両使用履歴（依頼⑤・2026-08-19 大橋様ご指摘） =====
+# 現在Excelで手管理している「社用車 使用履歴」（車両/日付/ドライバー/
+# 開始・終了の走行距離メーター/使用用途/給油量）をアプリで記録できるようにする。
+
+
+def test_add_vehicle_log_computes_distance_from_odometer(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    rid = store.add_vehicle_log("2026-06-19", "ハイエース", "時野",
+                                55876, 55908, purpose="DOMOぱどポスト",
+                                db_path=db, now="T")
+    row = next(r for r in store.list_vehicle_logs(db_path=db) if r["id"] == rid)
+    assert row["odo_start"] == 55876
+    assert row["odo_end"] == 55908
+    assert row["distance"] == 32           # 実データ(社用車使用履歴.xlsx)と同じ引き算
+    assert row["purpose"] == "DOMOぱどポスト"
+    assert row["driver"] == "時野"
+    assert row["vehicle"] == "ハイエース"
+
+
+def test_add_vehicle_log_without_odometer_has_no_distance(tmp_path):
+    """開始/終了のどちらかが未入力なら距離は計算しない(0kmと決めつけない)。"""
+    db = os.path.join(tmp_path, "t.db")
+    rid = store.add_vehicle_log("2026-06-19", "軽バン", "黒瀬", None, None, db_path=db)
+    row = next(r for r in store.list_vehicle_logs(db_path=db) if r["id"] == rid)
+    assert row["distance"] is None
+
+
+def test_add_vehicle_log_stores_fuel_liters(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    rid = store.add_vehicle_log("2026-06-19", "ハイエース", "時野", 100, 149,
+                                fuel_liters=49.04, db_path=db)
+    row = next(r for r in store.list_vehicle_logs(db_path=db) if r["id"] == rid)
+    assert row["fuel_liters"] == 49.04
+
+
+def test_list_vehicle_logs_filters_by_vehicle_and_date(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    store.add_vehicle_log("2026-06-01", "ハイエース", "時野", 100, 150, db_path=db)
+    store.add_vehicle_log("2026-06-10", "軽バン", "黒瀬", 200, 235, db_path=db)
+    store.add_vehicle_log("2026-07-01", "ハイエース", "枡田", 150, 180, db_path=db)
+    only_haiace = store.list_vehicle_logs(vehicle="ハイエース", db_path=db)
+    assert {r["driver"] for r in only_haiace} == {"時野", "枡田"}
+    ranged = store.list_vehicle_logs(date_from="2026-06-05", date_to="2026-06-30", db_path=db)
+    assert len(ranged) == 1 and ranged[0]["driver"] == "黒瀬"
+
+
+def test_delete_vehicle_log(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    rid = store.add_vehicle_log("2026-06-01", "ハイエース", "時野", 100, 150, db_path=db)
+    store.delete_vehicle_log(rid, db_path=db)
+    assert store.list_vehicle_logs(db_path=db) == []
 
 
 def test_payable_and_receivable_store_other_label(tmp_path):
