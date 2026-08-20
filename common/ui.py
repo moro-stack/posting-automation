@@ -108,16 +108,18 @@ h1,h2,h3,h4{ color:var(--ink); font-weight:700; }
 }
 [data-testid="stDownloadButton"]>button:hover{ background:var(--primary-soft); }
 
-/* pills(案件・期間指定)を水色ボタンで目立たせる。未選択=水色枠/選択=水色フィル */
+/* pills(案件・期間指定): 選択中とそれ以外の差をはっきり付ける(2026-08-20 オーナー
+   指摘＝隣を押し間違えそうで分かりにくい)。未選択=グレー地に沈める／選択中=水色フィル+影。 */
 button[data-testid="stBaseButton-pills"]{
-  border-radius:999px !important; border:1.5px solid var(--primary) !important;
-  color:var(--primary-d) !important; background:#fff !important; font-weight:700 !important;
+  border-radius:999px !important; border:1.5px solid #d7dde3 !important;
+  color:#67788a !important; background:#eef1f4 !important; font-weight:700 !important;
 }
-button[data-testid="stBaseButton-pills"] p{ color:var(--primary-d) !important; }
-button[data-testid="stBaseButton-pills"]:hover{ background:var(--primary-soft) !important; }
+button[data-testid="stBaseButton-pills"] p{ color:#67788a !important; }
+button[data-testid="stBaseButton-pills"]:hover{ background:#e2e7ec !important; }
 button[data-testid="stBaseButton-pillsActive"]{
   border-radius:999px !important; background:var(--primary) !important;
-  color:#fff !important; border:1.5px solid var(--primary) !important; font-weight:700 !important;
+  color:#fff !important; border:1.5px solid var(--primary) !important; font-weight:800 !important;
+  box-shadow:0 2px 6px rgba(20,164,220,.35);
 }
 button[data-testid="stBaseButton-pillsActive"] p{ color:#fff !important; }
 
@@ -302,6 +304,20 @@ div[data-baseweb="popover"]:has([data-baseweb="calendar"]) label{ display:none !
   min-height:44px !important; padding:.45rem 1.1rem !important;
   font-weight:700 !important;
 }
+/* 選択中とそれ以外の差をはっきり付ける(2026-08-20 オーナー指摘＝隣を
+   押し間違えそうで分かりにくい)。未選択=グレー地に沈める／選択中=水色フィル+影で浮かせる。 */
+button[data-testid="stBaseButton-segmented_control"]{
+  background:#eef1f4 !important; border:1.5px solid #d7dde3 !important;
+  color:#67788a !important; font-weight:700 !important;
+}
+button[data-testid="stBaseButton-segmented_control"] p{ color:#67788a !important; }
+button[data-testid="stBaseButton-segmented_control"]:hover{ background:#e2e7ec !important; }
+button[data-testid="stBaseButton-segmented_controlActive"]{
+  background:var(--primary) !important; border:1.5px solid var(--primary) !important;
+  color:#fff !important; font-weight:800 !important;
+  box-shadow:0 2px 6px rgba(20,164,220,.35);
+}
+button[data-testid="stBaseButton-segmented_controlActive"] p{ color:#fff !important; }
 
 /* ===== 印刷ビュー(選択した行だけを紙に載せる) ===== */
 .printable{ background:#fff; border:1px solid var(--line); border-radius:14px;
