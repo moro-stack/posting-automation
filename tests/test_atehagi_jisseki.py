@@ -67,12 +67,61 @@ def test_build_daishi_title_and_first_course():
     wb = openpyxl.load_workbook(io.BytesIO(data))
     ws = wb.active
     assert ws["A1"].value == "6/26 ／ 1248号　京阪北版"
-    assert ws["A2"].value == "010101 枚方・交野"     # ヘッダー(コース名)
-    assert ws["A3"].value == "サンプル生協"           # 本文(案件名)
-    assert ws["B3"].value == "224"                    # 本文(枚数)
-    assert ws["A4"].value == "サイン："                # サイン行
-    assert ws["A4"].border.bottom.style is not None    # 署名用の横線
+    assert ws["A2"].value == "テスト太郎"              # リーダー名の見出し行
+    assert ws["A3"].value == "010101 枚方・交野"     # ヘッダー(コース名)
+    assert ws["A4"].value == "サンプル生協"           # 本文(案件名)
+    assert ws["B4"].value == "224"                    # 本文(枚数)
+    assert ws["A5"].value == "サイン："                # サイン行
+    assert ws["A5"].border.bottom.style is not None    # 署名用の横線
     assert ws.page_setup.orientation == "landscape"
+
+
+# ===== リーダー名・外注先ごとの分割表示（依頼④・2026-08-19 大橋様ご指摘） =====
+
+
+def test_jisseki_courses_includes_leader():
+    groups = A.group_by_chiku(A.rows_from_table(_sample_table()))
+    courses = A.jisseki_courses(groups, A.KEIHAN_KITA)
+    assert courses[0]["leader"] == "テスト太郎"
+
+
+def test_build_daishi_groups_courses_by_leader_with_header_row():
+    """リーダー(または外注先)が変わったら、その名前の見出し行を挟んで
+    グループごとに表示する。実物の手書き台帳(CJ/時野/竹島/宇田/枡田…)と
+    同じく、名前ごとにひとまとまりで見えること。"""
+    courses = [
+        {"code": "010101", "chiku_name": "A地区", "course_name": "010101 A地区",
+         "flyers": [{"name": "f1", "count": 100}], "leader": "山田"},
+        {"code": "010102", "chiku_name": "B地区", "course_name": "010102 B地区",
+         "flyers": [{"name": "f2", "count": 200}], "leader": "外注先会社"},
+        {"code": "010103", "chiku_name": "C地区", "course_name": "010103 C地区",
+         "flyers": [{"name": "f3", "count": 300}], "leader": "山田"},
+    ]
+    data = A.build_jisseki_daishi_workbook(courses, A.KEIHAN_KITA, gou=1,
+                                           haifubi="2026-06-26")
+    wb = openpyxl.load_workbook(io.BytesIO(data))
+    ws = wb.active
+    # グループ1: 山田(010101と010103。離れて出てきても同じグループにまとまり、
+    # per_row=4以内なので同じ行ブロックの隣の列に並ぶ)
+    assert ws["A2"].value == "山田"
+    assert ws["A3"].value == "010101 A地区"
+    assert ws["C3"].value == "010103 C地区"      # 山田グループの2件目(2列目)
+    # グループ2: 外注先会社(新しい行ブロックから、A列に戻って始まる)
+    assert ws["A6"].value == "外注先会社"
+    assert ws["A7"].value == "010102 B地区"
+
+
+def test_build_daishi_without_leader_key_has_no_header_row():
+    """leader を持たないコース(既存の呼び出し方)は、以前どおり見出し行を出さない。"""
+    courses = [
+        {"code": "010101", "chiku_name": "A地区", "course_name": "010101 A地区",
+         "flyers": [{"name": "f1", "count": 100}]},
+    ]
+    data = A.build_jisseki_daishi_workbook(courses, A.KEIHAN_KITA, gou=1,
+                                           haifubi="2026-06-26")
+    wb = openpyxl.load_workbook(io.BytesIO(data))
+    ws = wb.active
+    assert ws["A2"].value == "010101 A地区"
 
 
 def test_build_daishi_wrapping_4_per_row():

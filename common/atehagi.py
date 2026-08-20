@@ -357,7 +357,9 @@ def atehagi_filename(version, rows, chiku=None) -> str:
 
 def jisseki_courses(groups, version):
     """実績表台紙の1コース分データ。挟み込みチラシ(size非空)が1つ以上ある
-    コースのみ。ぱどのみ地区は除外。flyers は元の並び順。"""
+    コースのみ。ぱどのみ地区は除外。flyers は元の並び順。
+    leader は「ぱどんな」＝リーダー名・外注先の別を問わず同じ列に入っている
+    （個人名も配布委託会社名も同じ「ぱどんな」欄に書かれる運用）。"""
     out = []
     for chiku, rows in groups.items():
         flyers = [
@@ -368,13 +370,31 @@ def jisseki_courses(groups, version):
             continue
         name = chiku_name(version, chiku)
         code = area_code6(chiku)
+        base = pado_row(rows)
         out.append({
             "code": code,
             "chiku_name": name,
             "course_name": f"{code} {name}",
             "flyers": flyers,
+            "leader": base["padonna"] or None,
         })
     return out
+
+
+def _group_by_leader(courses):
+    """コースを「ぱどんな」(リーダー名／外注先)ごとにまとめる。元の並びの中で
+    離れて出てきても同じ相手ならまとめる。初出順を保つ。
+    leader キーが無い(または空)コースは1つの無名グループにまとめ、
+    ヘッダー行を出さない(呼び出し側の後方互換のため)。"""
+    order = []
+    grouped = {}
+    for c in courses:
+        leader = c.get("leader") or None
+        if leader not in grouped:
+            grouped[leader] = []
+            order.append(leader)
+        grouped[leader].append(c)
+    return [(leader, grouped[leader]) for leader in order]
 
 
 def _md_from(haifubi) -> str:
@@ -419,45 +439,63 @@ def build_jisseki_daishi_workbook(courses, version, gou, haifubi, per_row=4) -> 
     signalign = Alignment(horizontal="left", vertical="bottom")
 
     ROWS_PER = 3  # ヘッダー・本文・サイン
+    LEADER_ROW_H = 22
 
-    for i, c in enumerate(courses):
-        grp, col = divmod(i, per_row)
-        top = 2 + grp * ROWS_PER
-        rh, rb, rs = top, top + 1, top + 2
-        c0 = 1 + col * 2
-        c1 = c0 + 1
-        ws.merge_cells(start_row=rh, start_column=c0, end_row=rh, end_column=c1)
-        h = ws.cell(row=rh, column=c0, value=c["course_name"])
-        h.font = Font(bold=True, size=11)
-        h.alignment = center
-        names = "\n".join(f["name"] for f in c["flyers"])
-        counts = "\n".join(str(f["count"]) for f in c["flyers"])
-        ws.cell(row=rb, column=c0, value=names).alignment = topleft
-        ws.cell(row=rb, column=c1, value=counts).alignment = topright
-        ws.merge_cells(start_row=rs, start_column=c0, end_row=rs, end_column=c1)
-        s = ws.cell(row=rs, column=c0, value="サイン：")
-        s.alignment = signalign
-        for (r, cc) in [(rh, c0), (rh, c1), (rb, c0), (rb, c1), (rs, c0), (rs, c1)]:
-            ws.cell(row=r, column=cc).border = Border(
-                left=thick if cc == c0 else thin,
-                right=thick if cc == c1 else thin,
-                top=thick if r == rh else thin,
-                bottom=thick if r == rs else thin,
-            )
+    # 🔴 2026-08-19 大橋様ご指摘: 「リーダー名」「外注先」ごとに分けて表示したい。
+    # jisseki_courses が付ける leader(=ぱどんな。個人名も外注先の会社名も同じ欄)
+    # ごとにコースをまとめ、グループの先頭にその名前を見出し行として出す。
+    # leader を持たないコース(このテストのように手作りしたデータ等)は
+    # 見出し行を出さず、以前どおりの表示に留める(後方互換)。
+    row = 2
+    for leader, group_courses in _group_by_leader(courses):
+        if leader:
+            lcell = ws.cell(row=row, column=1, value=leader)
+            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=ncol)
+            lcell.font = Font(bold=True, size=13)
+            lcell.alignment = Alignment(horizontal="left", vertical="center")
+            ws.row_dimensions[row].height = LEADER_ROW_H
+            row += 1
 
-    ngrp = (len(courses) + per_row - 1) // per_row
-    for grp in range(ngrp):
-        block = courses[grp * per_row:(grp + 1) * per_row]
-        max_lines = max(len(c["flyers"]) for c in block)
-        top = 2 + grp * ROWS_PER
-        ws.row_dimensions[top].height = 20
-        ws.row_dimensions[top + 1].height = max(36, max_lines * 18)
-        ws.row_dimensions[top + 2].height = 28
+        for i, c in enumerate(group_courses):
+            grp, col = divmod(i, per_row)
+            top = row + grp * ROWS_PER
+            rh, rb, rs = top, top + 1, top + 2
+            c0 = 1 + col * 2
+            c1 = c0 + 1
+            ws.merge_cells(start_row=rh, start_column=c0, end_row=rh, end_column=c1)
+            h = ws.cell(row=rh, column=c0, value=c["course_name"])
+            h.font = Font(bold=True, size=11)
+            h.alignment = center
+            names = "\n".join(f["name"] for f in c["flyers"])
+            counts = "\n".join(str(f["count"]) for f in c["flyers"])
+            ws.cell(row=rb, column=c0, value=names).alignment = topleft
+            ws.cell(row=rb, column=c1, value=counts).alignment = topright
+            ws.merge_cells(start_row=rs, start_column=c0, end_row=rs, end_column=c1)
+            s = ws.cell(row=rs, column=c0, value="サイン：")
+            s.alignment = signalign
+            for (r, cc) in [(rh, c0), (rh, c1), (rb, c0), (rb, c1), (rs, c0), (rs, c1)]:
+                ws.cell(row=r, column=cc).border = Border(
+                    left=thick if cc == c0 else thin,
+                    right=thick if cc == c1 else thin,
+                    top=thick if r == rh else thin,
+                    bottom=thick if r == rs else thin,
+                )
+
+        ngrp = (len(group_courses) + per_row - 1) // per_row
+        for grp in range(ngrp):
+            block = group_courses[grp * per_row:(grp + 1) * per_row]
+            max_lines = max(len(c["flyers"]) for c in block)
+            top = row + grp * ROWS_PER
+            ws.row_dimensions[top].height = 20
+            ws.row_dimensions[top + 1].height = max(36, max_lines * 18)
+            ws.row_dimensions[top + 2].height = 28
+        row += ngrp * ROWS_PER
+
     for col in range(per_row):
         ws.column_dimensions[openpyxl.utils.get_column_letter(1 + col * 2)].width = 24
         ws.column_dimensions[openpyxl.utils.get_column_letter(2 + col * 2)].width = 6
 
-    last_row = 1 + ngrp * ROWS_PER if ngrp else 1
+    last_row = row - 1 if row > 2 else 1
     last_col = openpyxl.utils.get_column_letter(ncol)
     ws.print_area = f"A1:{last_col}{last_row}"
     ws.page_setup.orientation = "landscape"
