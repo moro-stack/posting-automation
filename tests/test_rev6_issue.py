@@ -62,3 +62,24 @@ def test_issue_excludes_payable_from_cost(tmp_path, monkeypatch):
     assert genka_excluding_payable in text        # 配布原価(税込) = 150(買掛を含めない)
     assert genka_including_payable not in text    # 買掛9999が混ざった10,149ではない
     assert "大家" not in text
+
+
+def test_issue_summary_metrics_have_overlap_fix_marker(tmp_path, monkeypatch):
+    """バグ(2026-08-19 大橋様ご指摘): st.columnsがスマホ幅で縦積みになるとき、
+    Streamlit既定の stMarkdownContainer{margin-bottom:-1rem} が
+    display:flex;align-items:center の親のクロスサイズ計算を狂わせ、
+    2行のカスタムHTML(配布原価/売上/利益)の高さが実寸より1rem(=16px)短く
+    計算される。結果、次のカラムがその欠けた分だけ上にめり込み、
+    「売上」「利益」の文字が重なって表示される。
+    上部サマリー3項目のdivに metric-lines クラスを付け、common/ui.py で
+    そのクラスを含む stMarkdownContainer の margin-bottom を打ち消すCSSを
+    当てることで固定する。"""
+    db = os.path.join(tmp_path, "t.db"); _seed(db, monkeypatch)
+    at = _run(db)
+    html_blocks = [str(el.value) for el in at.markdown]
+    metric_blocks = [h for h in html_blocks if 'class="metric-lines"' in h]
+    assert len(metric_blocks) == 3  # 配布原価 / 売上 / 利益 の3項目すべてに付いている
+
+    from common.ui import _STYLE
+    assert "metric-lines" in _STYLE
+    assert "margin-bottom:0 !important" in _STYLE

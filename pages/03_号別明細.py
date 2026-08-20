@@ -93,7 +93,7 @@ profit = receivable_total - groups["genka"]
 s1, s2, s3 = st.columns([1.5, 1, 1])
 with s1:
     st.markdown(
-        f'''<div style="line-height:1.12">
+        f'''<div class="metric-lines" style="line-height:1.12">
   <div style="color:#67788a;font-weight:700;font-size:.9rem">配布原価（税込）</div>
   <div style="color:#1f2d3a;font-weight:800;font-size:2.6rem;letter-spacing:-.01em">{_yen(groups["genka"])}</div>
   <div style="color:#67788a;font-size:.86rem;margin-top:.15rem">内訳：配布員代 <b style="color:#0f87b8">{_yen(groups["labor"])}</b> ／ 雑費 <b style="color:#0f87b8">{_yen(groups["misc"])}</b></div>
@@ -102,14 +102,14 @@ with s1:
 _profit_color = "#0f87b8" if profit >= 0 else "#c0392b"
 with s2:
     st.markdown(
-        f'''<div style="line-height:1.12">
+        f'''<div class="metric-lines" style="line-height:1.12">
   <div style="color:#67788a;font-weight:700;font-size:.9rem">売上</div>
   <div style="color:#1f2d3a;font-weight:800;font-size:1.9rem">{_yen(receivable_total)}</div>
 </div>''',
         unsafe_allow_html=True)
 with s3:
     st.markdown(
-        f'''<div style="line-height:1.12">
+        f'''<div class="metric-lines" style="line-height:1.12">
   <div style="color:#67788a;font-weight:700;font-size:.9rem">利益</div>
   <div style="color:{_profit_color};font-weight:800;font-size:1.9rem">{_yen(profit)}</div>
 </div>''',

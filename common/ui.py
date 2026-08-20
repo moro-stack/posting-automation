@@ -231,6 +231,13 @@ div[data-baseweb="popover"]:has([data-baseweb="calendar"]) label{ display:none !
 /* 自動翻訳を止めるための仕込み(下記 _NO_TRANSLATE_JS)で入るiframeは高さ0。行ごと消す。 */
 [data-testid="stElementContainer"]:has(iframe[height="0"]){ display:none !important; }
 
+/* st.columns内の複数行カスタムHTML(号別明細の配布原価/売上/利益など)がスマホ幅で
+   縦積みになると、既定の stMarkdownContainer{margin-bottom:-1rem} が
+   display:flex;align-items:center の親のクロスサイズ計算を1rem分短くし、
+   次のカラムがその欠けた分だけめり込んで文字が重なって見える(2026-08-20)。
+   metric-lines クラスを付けた要素だけ margin-bottom を打ち消して防ぐ。 */
+[data-testid="stMarkdownContainer"]:has(.metric-lines){ margin-bottom:0 !important; }
+
 /* ファイルアップローダーを日本語化 */
 [data-testid="stFileUploaderDropzoneInstructions"]{ display:none !important; }
 [data-testid="stFileUploaderDropzone"]{ position:relative; min-height:84px; align-items:center; }
