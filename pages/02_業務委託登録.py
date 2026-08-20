@@ -18,6 +18,11 @@ dist_rows = {d["name"]: d for d in store.list_distributors(only_active=True)}
 dists = {name: d["id"] for name, d in dist_rows.items()}
 projs = {p["name"]: p["id"] for p in store.list_projects(only_active=True)}
 
+# 🔴 依頼①(2026-08-19大橋様→2026-08-20詳細確認): アドバリューは週ごとに案件が来て
+# 「8-1」「8-2」「8-3」のように区分して管理している。「その他」向けに元々あった
+# 案件区分の自由入力欄(other_label)を、アドバリューでも使えるようにする。
+_OTHER_LABEL_PROJECTS = ("その他", "アドバリュー")
+
 if not dists:
     st.warning("先に『マスタ管理』の「業務委託」タブで配布員を登録してください。")
     st.stop()
@@ -65,7 +70,8 @@ with tab_reg:
         "単価": st.column_config.NumberColumn(min_value=0.0, step=0.5, format="%g"),
         "数量": st.column_config.NumberColumn(_qty_label, min_value=0.0, step=0.5,
                                              format="%g"),
-        "その他の案件名": st.column_config.TextColumn(help="案件を『その他』にしたとき、何の案件か"),
+        "その他の案件名": st.column_config.TextColumn(
+            help="案件が『その他』なら何の案件か、『アドバリュー』なら8-1等の区分"),
     }
     if pay_type == "日当":
         _base = {"案件": "", "種別": "配布", "業務": "", "単価": 0.0, "数量": 0.0,
@@ -83,8 +89,8 @@ with tab_reg:
             help="報告書の報告数に使います。報酬の計算には使いません。")
 
     st.markdown(f"**明細**（案件・種別・単価・{_qty_label}）｜数量と単価は小数点も入力できます")
-    st.caption("案件を「その他」にした行は、右の『その他の案件名』に何の案件か入力してください"
-               "（号別明細の『その他』で確認できます）。")
+    st.caption("案件を「その他」「アドバリュー」にした行は、右の『その他の案件名』に"
+               "何の案件か・8-1等の区分を入力してください（号別明細で確認できます）。")
     editor = st.data_editor(
         pd.DataFrame([_base]), num_rows="dynamic", column_config=_conf,
         column_order=_cols, use_container_width=True, key=f"line_editor_{pay_type}")
@@ -103,7 +109,8 @@ with tab_reg:
                 price = _rates.get(str(work), 0)
         remark = row["種別"] if pd.notna(row["種別"]) else "配布"
         olabel = row.get("その他の案件名") if "その他の案件名" in row else None
-        olabel = (str(olabel).strip() or None) if (pd.notna(olabel) and row["案件"] == "その他") else None
+        olabel = (str(olabel).strip() or None) if (
+            pd.notna(olabel) and row["案件"] in _OTHER_LABEL_PROJECTS) else None
         copies = None
         if _needs_copies and "部数" in row and pd.notna(row["部数"]):
             copies = int(row["部数"] or 0)

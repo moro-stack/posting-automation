@@ -95,6 +95,28 @@ def filter_rows_by_period(rows, key, lo, hi):
     return [r for r in rows if in_period(r.get(key), lo, hi)]
 
 
+def distinct_other_labels(*row_lists):
+    """複数の行リストから案件区分(other_label)の値を集め、重複無しで昇順に返す。
+
+    アドバリューの「8-1」「8-2」等のように、案件をさらに区分して号別明細で
+    見られるようにするため(2026-08-20)。空値は含めない。
+    """
+    values = set()
+    for rows in row_lists:
+        for r in rows:
+            v = str(r.get("other_label") or "").strip()
+            if v:
+                values.add(v)
+    return sorted(values)
+
+
+def filter_rows_by_label(rows, label):
+    """label が指定されていれば other_label が一致する行だけに絞る。未指定ならそのまま。"""
+    if not label:
+        return rows
+    return [r for r in rows if str(r.get("other_label") or "").strip() == label]
+
+
 def line_copies(line, pay_type=None):
     """その明細行の配布部数。歩合(と未設定・未知の値)は数量がそのまま部数＝これまでの動き。
     日当・時給・月給は数量が日数/時間なので、別列の copies を使う。
@@ -284,6 +306,46 @@ def split_summary_rows(rows):
     sales = [r for r in rows if r.get("区分") in SALES_KINDS]
     cost = [r for r in rows if r.get("区分") in COST_KINDS]
     return cost, sales
+
+
+def company_summary_by_project(*, receivables, payables, petty, contract_lines, manual, id2proj):
+    """案件別(アドバリューだけ号別明細と同じく区分ごと)に、売上・原価・利益を集計する。
+
+    依頼②(2026-08-20): 原価・売上まとめで「細かい内訳は号別明細で見る、こちらは
+    案件別の売上・原価だけで良い」というオーナー方針に沿った、シンプルな案件別集計。
+    会議用売上表の一括出力も、この集計を土台にする。
+    """
+    def _proj(pid):
+        return id2proj.get(pid, "") if pid is not None else ""
+
+    def _key(pid, other_label):
+        name = _proj(pid)
+        label = str(other_label or "").strip() or None
+        return (name, label if name == "アドバリュー" else None)
+
+    agg = {}
+
+    def _add(pid, other_label, kind, amount):
+        k = _key(pid, other_label)
+        d = agg.setdefault(k, {"sales": 0, "cost": 0})
+        d[kind] += _num(amount)
+
+    for r in receivables:
+        _add(r.get("project_id"), r.get("other_label"), "sales", r.get("amount"))
+    for r in payables:
+        _add(r.get("project_id"), r.get("other_label"), "cost", r.get("amount"))
+    for r in petty:
+        _add(r.get("project_id"), r.get("other_label"), "cost", r.get("amount"))
+    for r in contract_lines:
+        _add(r.get("project_id"), r.get("other_label"), "cost", r.get("amount"))
+    for r in manual:
+        _add(r.get("project_id"), r.get("other_label"), "cost", r.get("amount"))
+
+    out = [{"案件": name, "区分": label, "売上": d["sales"], "原価": d["cost"],
+           "利益": d["sales"] - d["cost"]}
+          for (name, label), d in agg.items()]
+    out.sort(key=lambda r: (r["案件"], r["区分"] or ""))
+    return out
 
 
 def company_summary_rows(*, receivables, payables, petty, contract_lines, manual,

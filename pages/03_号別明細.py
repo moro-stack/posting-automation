@@ -54,6 +54,25 @@ st.markdown(
     f'<div style="font-size:1.9rem;font-weight:800;color:#0f87b8;margin:.1rem 0 .5rem">{sel}</div>',
     unsafe_allow_html=True)
 
+# ===== アドバリューだけ、週次の案件区分(8-1等)でさらに絞れるようにする =====
+# 🔴 依頼①(2026-08-19大橋様→2026-08-20詳細確認): アドバリューは週ごとに案件が来て
+# 「8-1」「8-2」「8-3」のように区分して管理している。号別明細でも区分ごとに集計を
+# 見られるようにする。登録済みのデータに含まれる区分だけを選択肢に出す(期間を問わず)。
+sub_label = None
+if sel == "アドバリュー":
+    _all_contract = []
+    for _inv in store.list_contract_invoices():
+        _all_contract.extend(store.get_contract_invoice(_inv["id"])["lines"])
+    _labels = posting_logic.distinct_other_labels(
+        store.list_petty_cash(project_id=pid),
+        store.list_receivables(project_id=pid),
+        store.list_issue_manual_costs(project_id=pid),
+        [ln for ln in _all_contract if ln.get("project_id") == pid])
+    if _labels:
+        _sub_sel = st.pills("案件区分", ["全体"] + _labels, selection_mode="single",
+                            default="全体", key="adv_sub_pills")
+        sub_label = None if (not _sub_sel or _sub_sel == "全体") else _sub_sel
+
 # ===== 期間指定：全期間 / 今月 / 今週 / 期間指定 を同じ並びのボタンで =====
 lo, hi, period_note = period_picker(key="issue_period")
 st.caption(f"表示期間: {period_note}")
@@ -61,8 +80,10 @@ st.caption(f"表示期間: {period_note}")
 # ===== コストを集める =====
 petty = posting_logic.filter_rows_by_period(
     store.list_petty_cash(project_id=pid), "date", lo, hi)
+petty = posting_logic.filter_rows_by_label(petty, sub_label)
 receivables = posting_logic.filter_rows_by_period(
     store.list_receivables(project_id=pid), "month", lo, hi)
+receivables = posting_logic.filter_rows_by_label(receivables, sub_label)
 
 _dist_names = {d["id"]: d["name"] for d in store.list_distributors()}  # 停止中も含めて引く
 
@@ -77,11 +98,13 @@ for inv in store.list_contract_invoices():
         ln["distributor_name"] = _dist_names.get(inv.get("distributor_id"), "")
         ln["pay_type"] = inv.get("pay_type")       # 登録時点の支払形態(マスタの現在値は使わない)
         contract_lines.append(ln)
+contract_lines = posting_logic.filter_rows_by_label(contract_lines, sub_label)
 
 # 直接入力(配布員代): work_date で期間絞り込み。日付なしは常に計上。
 all_manual = store.list_issue_manual_costs(project_id=pid)
 manual = [r for r in all_manual
           if r.get("work_date") is None or posting_logic.in_period(r.get("work_date"), lo, hi)]
+manual = posting_logic.filter_rows_by_label(manual, sub_label)
 
 agg = posting_logic.aggregate_issue(
     pid, petty=petty, payables=[], contract_lines=contract_lines, manual=manual)
@@ -118,9 +141,10 @@ with s3:
 
 st.divider()
 
-# 案件=「その他」の号のときだけ、内訳表の左端に「案件名」(登録時に手入力した other_label)を出す。
-# 「その他」に何の案件で入れたかを、配布員代・雑費の内訳の中でそのまま確認できるようにする。
-_show_label = (sel == "その他")
+# 案件=「その他」「アドバリュー」の号のときだけ、内訳表の左端に「案件名」
+# (登録時に手入力した other_label)を出す。「その他」に何の案件で入れたか・
+# アドバリューのどの区分(8-1等)かを、配布員代・雑費の内訳の中でそのまま確認できるようにする。
+_show_label = sel in ("その他", "アドバリュー")
 
 
 def _with_label(row, other_label):
@@ -154,14 +178,16 @@ with st.expander(f":material/groups: 配布員代の内訳（業務委託＋直�
     nice_table(_man_disp, "直接入力の配布員代はありません。")
 
     with st.form("add_labor", clear_on_submit=True):
-        st.caption("配布員代を直接追加（日給の人・後からの追加もここで）")
+        st.caption("配布員代を直接追加（日給の人・後からの追加もここで）"
+                   + ("　※現在の案件区分「" + sub_label + "」で登録されます" if sub_label else ""))
         a1, a2, a3 = st.columns([1, 2, 1])
         w = a1.date_input("日付", value=_date.today(), format="YYYY/MM/DD")
         work = a2.text_input("作業", placeholder="例：配布 / 丁合・配布")
         amt_str = a3.text_input("金額", placeholder="例：50000")
         if st.form_submit_button("追加") and _parse_int(amt_str) > 0:
             store.add_issue_manual_cost(pid, work.strip() or "配布",
-                                        _parse_int(amt_str), work_date=str(w))
+                                        _parse_int(amt_str), work_date=str(w),
+                                        other_label=sub_label)
             flash("配布員代を追加しました")
             st.rerun()
 
@@ -254,14 +280,15 @@ with st.expander(":material/table_chart: 会議用売上表に出力", expanded=
     st.caption("大阪支社の会議で使う売上表と同じ列で書き出します。"
                "「ぱど」「チラシ」「仕分け」の内訳・備考はアプリに記録が無いため"
                "空欄のまま出ます。コピー＆ペーストしてお使いください。")
-    _hakko_gou = st.text_input("発行号（例：8/21）", key="uriage_gou")
+    _hakko_gou = st.text_input("発行号（例：8/21）", value=sub_label or "", key="uriage_gou")
     _koutsuhi = sum(posting_logic._num(r.get("amount")) for r in petty
                     if _cats.get(r.get("category_id")) == "駐車場代")
     _nomimono = sum(posting_logic._num(r.get("amount")) for r in petty
                     if _cats.get(r.get("category_id")) == "飲み物代")
     st.caption(f"交通費（駐車場代） ¥{posting_logic.fmt_num(_koutsuhi)} ／ "
                f"飲み物 ¥{posting_logic.fmt_num(_nomimono)}（小口の費目から自動集計）")
-    _uriage_row = U.build_row(hakko_gou=_hakko_gou or None, ban_mei=sel,
+    _ban_mei = f"{sel} {sub_label}" if sub_label else sel
+    _uriage_row = U.build_row(hakko_gou=_hakko_gou or None, ban_mei=_ban_mei,
                               uriage_zeikomi=receivable_total,
                               genka_goukei_zeikomi=groups["genka"],
                               koutsuhi=_koutsuhi, nomimono=_nomimono)

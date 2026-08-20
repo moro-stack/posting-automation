@@ -1484,6 +1484,62 @@ def test_issue_page_houbai_still_shows_mai(db):
     assert "3 日" not in text
 
 
+# ===== アドバリューの案件区分(8-1等)で号別明細をさらに絞る（依頼①・2026-08-20） =====
+
+
+def test_issue_page_advalue_without_labels_has_no_sub_pills(db):
+    """まだ案件区分を登録していないアドバリューは、選択肢が出ず今までどおりの表示。"""
+    pid = store.add_project("アドバリュー", db_path=db)
+    store.add_receivable("2026-07", None, 100000, project_id=pid, db_path=db)
+    at = _issue_page(db, project="アドバリュー")
+    assert not at.exception
+    assert not any(p.key == "adv_sub_pills" for p in at.pills)
+
+
+def test_issue_page_advalue_sub_case_filters_totals(db):
+    """依頼①: 8-1/8-2を切り替えると、それぞれの売上・案件区分だけが表示されること。"""
+    pid = store.add_project("アドバリュー", db_path=db)
+    store.add_receivable("2026-07", None, 495427, project_id=pid, other_label="8-1", db_path=db)
+    store.add_receivable("2026-07", None, 194969, project_id=pid, other_label="8-2", db_path=db)
+
+    at = _issue_page(db, project="アドバリュー")
+    assert not at.exception
+    sub_pills = [p for p in at.pills if p.key == "adv_sub_pills"]
+    assert len(sub_pills) == 1
+    assert sub_pills[0].options == ["全体", "8-1", "8-2"]
+    assert "¥690,396" in _rendered_text(at)  # 全体表示では合算(495,427+194,969)
+
+    at.session_state["adv_sub_pills"] = "8-1"
+    at.run()
+    assert not at.exception
+    text = _rendered_text(at)
+    assert "¥495,427" in text
+    assert "¥690,396" not in text
+    assert "¥194,969" not in text
+
+
+def test_issue_page_advalue_manual_cost_tagged_with_selected_sub_case(db):
+    """依頼①: 案件区分を選んだ状態で直接入力を追加すると、その区分で登録されること。"""
+    pid = store.add_project("アドバリュー", db_path=db)
+    store.add_petty_cash("2026-07-01", None, 1000, project_id=pid, other_label="8-1", db_path=db)
+
+    at = _issue_page(db, project="アドバリュー")
+    at.session_state["adv_sub_pills"] = "8-1"
+    at.run()
+    assert not at.exception
+    # 作業/金額はラベル指定で確実に拾う(位置は他の欄の増減で変わりうるため)
+    work_input = next(t for t in at.text_input if t.label == "作業")
+    amt_input = next(t for t in at.text_input if t.label == "金額")
+    work_input.set_value("配布")
+    amt_input.set_value("50000")
+    [b for b in at.button if b.label == "追加"][0].click().run()
+
+    assert not at.exception
+    rows = store.list_issue_manual_costs(project_id=pid, db_path=db)
+    added = next(r for r in rows if r["content"] == "配布" and r["amount"] == 50000)
+    assert added["other_label"] == "8-1"
+
+
 def test_issue_page_keeps_deactivated_project(db):
     """🔴 案件を停止中にしても、号別明細から号が消えないこと。
     マスタ画面は「過去データを残すため、削除ではなく停止中にします（登録の選択肢から

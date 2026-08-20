@@ -238,6 +238,33 @@ def test_filter_rows_by_period():
     assert L.filter_rows_by_period(rows, "date", None, None) == rows
 
 
+# ===== アドバリューの案件区分(8-1等)で号別明細をさらに絞る（依頼①・2026-08-20） =====
+
+
+def test_distinct_other_labels_collects_from_multiple_lists_and_sorts():
+    petty = [{"other_label": "8-2"}, {"other_label": "8-1"}]
+    receivables = [{"other_label": "8-1"}, {"other_label": None}]
+    manual = [{"other_label": "8-3"}]
+    got = L.distinct_other_labels(petty, receivables, manual)
+    assert got == ["8-1", "8-2", "8-3"]
+
+
+def test_distinct_other_labels_ignores_blank_and_whitespace():
+    rows = [{"other_label": ""}, {"other_label": "  "}, {"other_label": None}, {}]
+    assert L.distinct_other_labels(rows) == []
+
+
+def test_filter_rows_by_label_returns_all_when_label_is_none():
+    rows = [{"other_label": "8-1"}, {"other_label": "8-2"}]
+    assert L.filter_rows_by_label(rows, None) == rows
+
+
+def test_filter_rows_by_label_narrows_to_matching_rows():
+    rows = [{"other_label": "8-1", "id": 1}, {"other_label": "8-2", "id": 2},
+            {"other_label": None, "id": 3}]
+    assert L.filter_rows_by_label(rows, "8-1") == [{"other_label": "8-1", "id": 1}]
+
+
 def test_payment_method_petty_is_cash():
     assert L.payment_method("petty", {}) == "現金"
 

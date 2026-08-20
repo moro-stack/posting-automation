@@ -17,6 +17,11 @@ st.title("小口／買掛／売掛の登録")
 # if/elif/else に流すと else に落ちて「売掛」の画面が開いてしまうため、
 # 明示的に既定へ戻す。
 _MODES = ["小口", "買掛", "売掛", "車両"]
+
+# 🔴 依頼①(2026-08-19大橋様→2026-08-20詳細確認): アドバリューは週ごとに案件が来て
+# 「8-1」「8-2」「8-3」のように区分して管理している。「その他」向けに元々あった
+# 案件区分の自由入力欄(other_label)を、アドバリューでも使えるようにする。
+_OTHER_LABEL_PROJECTS = ("その他", "アドバリュー")
 mode = st.segmented_control("入力の種類", _MODES, default=_MODES[0],
                             key="entry_mode") or _MODES[0]
 
@@ -230,15 +235,17 @@ if mode == "小口":
             dist = st.selectbox("配布員(任意)", ["(なし)"] + list(dists.keys()),
                                 help="この費用が誰の分か。号別明細の雑費の内訳に出ます。")
             other_label = st.text_input(
-                "その他の案件名", placeholder="案件を「その他」にしたとき、何の案件か入力",
-                help="案件を『その他』にしたときだけ使われます。号別明細の『その他』で確認できます。")
+                "案件区分", placeholder="「その他」なら何の案件か／「アドバリュー」なら8-1等の区分",
+                help="案件を『その他』『アドバリュー』にしたときだけ使われます。"
+                     "号別明細の内訳・案件切り替えで確認できます。")
             memo = st.text_input("メモ", value=draft.get("item") or "")
             if st.form_submit_button("登録") and amount > 0:
                 payload = {"date": date or None, "category_id": cats.get(cat), "amount": int(amount),
                            "project_id": projs.get(proj), "memo": memo or None,
                            "source": "ocr" if ups else "manual",
                            "distributor_id": dists.get(dist),
-                           "other_label": (other_label.strip() or None) if proj == "その他" else None}
+                           "other_label": (other_label.strip() or None)
+                                          if proj in _OTHER_LABEL_PROJECTS else None}
                 if store.find_duplicate_petty(payload["date"], payload["category_id"], payload["amount"]):
                     st.session_state["petty_pending"] = payload
                     st.rerun()
@@ -363,15 +370,17 @@ elif mode == "買掛":
             pay_projs = _project_options()
             pay_proj = st.selectbox("案件(任意)", ["(なし)"] + list(pay_projs.keys()))
             pay_other = st.text_input(
-                "その他の案件名", placeholder="案件を「その他」にしたとき、何の案件か入力",
-                help="案件を『その他』にしたときだけ使われます。号別明細の『その他』で確認できます。")
+                "案件区分", placeholder="「その他」なら何の案件か／「アドバリュー」なら8-1等の区分",
+                help="案件を『その他』『アドバリュー』にしたときだけ使われます。"
+                     "号別明細の内訳・案件切り替えで確認できます。")
             note = st.text_input("備考", value=draft.get("note") or "")
             if st.form_submit_button("登録") and amount > 0:
                 payload = {"date": str(inv_date), "vendor_name": vendor or None,
                            "amount": int(amount), "original_status": original, "note": note or None,
                            "source": "ocr" if ups else "manual",
                            "project_id": pay_projs.get(pay_proj),
-                           "other_label": (pay_other.strip() or None) if pay_proj == "その他" else None}
+                           "other_label": (pay_other.strip() or None)
+                                          if pay_proj in _OTHER_LABEL_PROJECTS else None}
                 if store.find_duplicate_payable(payload["date"], None, payload["amount"],
                                                 vendor_name=payload["vendor_name"]):
                     st.session_state["pay_pending"] = payload
@@ -436,12 +445,14 @@ elif mode == "売掛":
             projs = _project_options()
             proj = st.selectbox("案件(任意)", ["(なし)"] + list(projs.keys()))
             recv_other = st.text_input(
-                "その他の案件名", placeholder="案件を「その他」にしたとき、何の案件か入力",
-                help="案件を『その他』にしたときだけ使われます。号別明細の『その他』で確認できます。")
+                "案件区分", placeholder="「その他」なら何の案件か／「アドバリュー」なら8-1等の区分",
+                help="案件を『その他』『アドバリュー』にしたときだけ使われます。"
+                     "号別明細の内訳・案件切り替えで確認できます。")
             if st.form_submit_button("登録") and amount > 0:
                 payload = {"month": month or None, "client_id": clients.get(client),
                            "amount": int(amount), "note": note or None, "project_id": projs.get(proj),
-                           "other_label": (recv_other.strip() or None) if proj == "その他" else None}
+                           "other_label": (recv_other.strip() or None)
+                                          if proj in _OTHER_LABEL_PROJECTS else None}
                 if store.find_duplicate_receivable(payload["month"], payload["client_id"], payload["amount"]):
                     st.session_state["recv_pending"] = payload
                     st.rerun()

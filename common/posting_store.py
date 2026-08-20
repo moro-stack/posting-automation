@@ -117,8 +117,10 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     cil_cols = {r[1] for r in conn.execute("PRAGMA table_info(contract_invoice_lines)")}
     if "copies" not in cil_cols:
         conn.execute("ALTER TABLE contract_invoice_lines ADD COLUMN copies INTEGER")
-    # 案件=「その他」で登録した時の『何の案件か』手入力を持たせる。旧DBは自動でカラム追加。
-    for tbl in ("petty_cash", "payables", "receivables", "contract_invoice_lines"):
+    # 案件=「その他」「アドバリュー」で登録した時の『何の案件か・週の区分(8-1等)』を
+    # 手入力で持たせる。旧DBは自動でカラム追加。
+    for tbl in ("petty_cash", "payables", "receivables", "contract_invoice_lines",
+                "issue_manual_costs"):
         cols = {r[1] for r in conn.execute(f"PRAGMA table_info({tbl})")}
         if "other_label" not in cols:
             conn.execute(f"ALTER TABLE {tbl} ADD COLUMN other_label TEXT")
@@ -644,10 +646,12 @@ def delete_contract_invoice(invoice_id, *, db_path=None):
 
 
 # --- issue_manual_costs ---
-def add_issue_manual_cost(project_id, content, amount, *, work_date=None, db_path=None, now=None):
+def add_issue_manual_cost(project_id, content, amount, *, work_date=None, other_label=None,
+                          db_path=None, now=None):
     return _add("issue_manual_costs",
-                ["project_id", "content", "amount", "work_date", "created_at"],
-                [_int_or_none(project_id), content, int(amount), work_date or None, _now(now)],
+                ["project_id", "content", "amount", "work_date", "other_label", "created_at"],
+                [_int_or_none(project_id), content, int(amount), work_date or None,
+                 other_label or None, _now(now)],
                 db_path)
 
 
@@ -666,8 +670,9 @@ def list_issue_manual_costs(*, project_id=None, db_path=None):
         conn.close()
 
 
-def update_issue_manual_cost(row_id, *, work_date=_UNSET, content=_UNSET, amount=_UNSET, db_path=None):
-    fields = {"work_date": work_date, "content": content,
+def update_issue_manual_cost(row_id, *, work_date=_UNSET, content=_UNSET, amount=_UNSET,
+                             other_label=_UNSET, db_path=None):
+    fields = {"work_date": work_date, "content": content, "other_label": other_label,
               "amount": (int(amount) if amount is not _UNSET else _UNSET)}
     _update("issue_manual_costs", row_id, fields, db_path)
 

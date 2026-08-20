@@ -213,6 +213,32 @@ def test_issue_manual_cost_update_and_delete(tmp_path):
     assert all(r["id"] != rid for r in store.list_issue_manual_costs(project_id=pid, db_path=db))
 
 
+def test_issue_manual_cost_stores_other_label(tmp_path):
+    """アドバリューの週次案件(8-1等)を直接入力にも付けられること(依頼①)。"""
+    db = os.path.join(tmp_path, "t.db")
+    pid = store.add_project("アドバリュー", db_path=db)
+    rid = store.add_issue_manual_cost(pid, "配布", 8000, other_label="8-1", db_path=db)
+    row = [r for r in store.list_issue_manual_costs(project_id=pid, db_path=db) if r["id"] == rid][0]
+    assert row["other_label"] == "8-1"
+
+
+def test_issue_manual_cost_other_label_is_optional(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    pid = store.add_project("号", db_path=db)
+    rid = store.add_issue_manual_cost(pid, "配布", 8000, db_path=db)
+    row = [r for r in store.list_issue_manual_costs(project_id=pid, db_path=db) if r["id"] == rid][0]
+    assert row["other_label"] is None
+
+
+def test_issue_manual_cost_update_other_label(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    pid = store.add_project("アドバリュー", db_path=db)
+    rid = store.add_issue_manual_cost(pid, "配布", 8000, other_label="8-1", db_path=db)
+    store.update_issue_manual_cost(rid, other_label="8-2", db_path=db)
+    row = [r for r in store.list_issue_manual_costs(project_id=pid, db_path=db) if r["id"] == rid][0]
+    assert row["other_label"] == "8-2"
+
+
 def test_issue_manual_cost_migrates_old_db(tmp_path):
     import sqlite3
     db = os.path.join(tmp_path, "t.db")
