@@ -30,6 +30,60 @@ def test_company_summary_rows_classifies_and_resolves_names():
     assert dist["項目"] == "山田" and dist["日付"] == "2026-07-05"
 
 
+# ===== 案件別 原価・売上（依頼②・2026-08-20） =====
+
+
+def test_company_summary_by_project_groups_by_project():
+    rows = L.company_summary_by_project(
+        receivables=[{"project_id": 1, "amount": 1000}, {"project_id": 2, "amount": 500}],
+        payables=[], petty=[{"project_id": 1, "amount": 300}],
+        contract_lines=[], manual=[],
+        id2proj={1: "京阪南", 2: "京阪北"})
+    by_name = {r["案件"]: r for r in rows}
+    assert by_name["京阪南"] == {"案件": "京阪南", "区分": None, "売上": 1000,
+                               "原価": 300, "利益": 700}
+    assert by_name["京阪北"] == {"案件": "京阪北", "区分": None, "売上": 500,
+                               "原価": 0, "利益": 500}
+
+
+def test_company_summary_by_project_splits_advalue_by_other_label():
+    """アドバリューだけは、号別明細と同じく案件区分(8-1等)ごとに分けて出す。"""
+    rows = L.company_summary_by_project(
+        receivables=[{"project_id": 9, "other_label": "8-1", "amount": 495427},
+                    {"project_id": 9, "other_label": "8-2", "amount": 194969}],
+        payables=[], petty=[{"project_id": 9, "other_label": "8-1", "amount": 177540}],
+        contract_lines=[], manual=[],
+        id2proj={9: "アドバリュー"})
+    assert len(rows) == 2
+    by_label = {r["区分"]: r for r in rows}
+    assert by_label["8-1"]["売上"] == 495427 and by_label["8-1"]["原価"] == 177540
+    assert by_label["8-2"]["売上"] == 194969 and by_label["8-2"]["原価"] == 0
+    assert all(r["案件"] == "アドバリュー" for r in rows)
+
+
+def test_company_summary_by_project_other_projects_ignore_other_label():
+    """アドバリュー以外は区分を持っていても無視し、案件単位で合算する
+    (『その他』のother_labelは"何の案件か"という別の意味で使われているため)。"""
+    rows = L.company_summary_by_project(
+        receivables=[{"project_id": 5, "other_label": "配夢", "amount": 1000},
+                    {"project_id": 5, "other_label": "買取専科", "amount": 2000}],
+        payables=[], petty=[], contract_lines=[], manual=[],
+        id2proj={5: "その他"})
+    assert len(rows) == 1
+    assert rows[0] == {"案件": "その他", "区分": None, "売上": 3000, "原価": 0, "利益": 3000}
+
+
+def test_company_summary_by_project_is_sorted_by_project_then_label():
+    rows = L.company_summary_by_project(
+        receivables=[{"project_id": 9, "other_label": "8-2", "amount": 1},
+                    {"project_id": 9, "other_label": "8-1", "amount": 1},
+                    {"project_id": 1, "amount": 1}],
+        payables=[], petty=[], contract_lines=[], manual=[],
+        id2proj={9: "アドバリュー", 1: "京阪南"})
+    assert [(r["案件"], r["区分"]) for r in rows] == [
+        ("アドバリュー", "8-1"), ("アドバリュー", "8-2"), ("京阪南", None)]
+
+
 # ===== 原価/売上のタブ分け(2026-08-07) =====
 
 

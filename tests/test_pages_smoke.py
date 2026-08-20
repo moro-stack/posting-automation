@@ -1794,6 +1794,81 @@ def test_summary_page_old_section_export_is_gone(db):
     # test_summary_empty_tab_still_shows_zero_caption で守る。
 
 
+# ===== 案件別 原価・売上／月次売上表一括生成（依頼②・2026-08-20） =====
+
+
+def test_summary_page_shows_project_breakdown_table(db):
+    pid = store.add_project("京阪南", db_path=db)
+    store.add_receivable("2026-08", None, 847502, project_id=pid, db_path=db)
+    store.add_petty_cash("2026-08-01", None, 324505, project_id=pid, db_path=db)
+    at = _run("06_原価・売上まとめ.py")
+    assert not at.exception
+    text = _rendered_text(at)
+    assert "案件別 原価・売上" in text
+    assert "京阪南" in text
+    assert "¥847,502" in text
+    assert "¥324,505" in text
+
+
+def test_summary_page_splits_advalue_project_breakdown_by_sub_case(db):
+    pid = store.add_project("アドバリュー", db_path=db)
+    store.add_receivable("2026-08", None, 544970, project_id=pid, other_label="8-1", db_path=db)
+    store.add_receivable("2026-08", None, 214466, project_id=pid, other_label="8-2", db_path=db)
+    at = _run("06_原価・売上まとめ.py")
+    assert not at.exception
+    text = _rendered_text(at)
+    assert "アドバリュー　8-1" in text
+    assert "アドバリュー　8-2" in text
+
+
+def test_summary_page_bulk_export_lists_expected_cases(db):
+    pid1 = store.add_project("京阪南", db_path=db)
+    pid2 = store.add_project("アドバリュー", db_path=db)
+    store.add_receivable("2026-08", None, 847502, project_id=pid1, db_path=db)
+    store.add_receivable("2026-08", None, 544970, project_id=pid2, other_label="8-1", db_path=db)
+    at = _run("06_原価・売上まとめ.py")
+    year_input = next(n for n in at.number_input if n.label == "年")
+    month_input = next(n for n in at.number_input if n.label == "月")
+    year_input.set_value(2026)
+    month_input.set_value(8)
+    at.run()
+    assert not at.exception
+    text = _rendered_text(at)
+    assert "2案件ぶんを生成します" in text
+    assert "京阪南" in text
+    assert "アドバリュー　8-1" in text
+
+
+def test_summary_page_bulk_export_workbook_matches_real_style(db, monkeypatch):
+    """依頼②: ダウンロードされる内容が実物と同じ列見出し・デザインであること。"""
+    import io
+
+    import openpyxl
+    import pandas as pd
+
+    # ⚠️ 既定の年月(今日の日付)と被ると、既定表示分の生成も同じシート名で
+    # 捕まってヒットが2件になる。今日と絶対に被らない過去月を選ぶ。
+    pid = store.add_project("京阪南", db_path=db)
+    store.add_receivable("2025-12", None, 847502, project_id=pid, db_path=db)
+    store.add_petty_cash("2025-12-01", None, 324505, project_id=pid, db_path=db)
+    seen = _spy_xlsx(monkeypatch)
+    at = _run("06_原価・売上まとめ.py")
+    year_input = next(n for n in at.number_input if n.label == "年")
+    month_input = next(n for n in at.number_input if n.label == "月")
+    year_input.set_value(2025)
+    month_input.set_value(12)
+    at.run()
+    assert not at.exception
+    hits = [b for b in seen if "2025年12月度 売上" in pd.ExcelFile(io.BytesIO(b)).sheet_names]
+    assert len(hits) == 1
+    wb = openpyxl.load_workbook(io.BytesIO(hits[0]))
+    ws = wb.active
+    assert ws["A1"].value == "㈱ケイピーエス　大阪支社　　2025年 12月度 売上表"
+    assert ws["A2"].value == "発行号"
+    assert ws["A4"].value == "京阪南"
+    assert ws["K4"].value == 847502
+
+
 def test_issue_page_renders_with_action_bars(db):
     """03 号別明細も例外なく描けて、削除は押せないこと。
 

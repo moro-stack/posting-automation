@@ -1,9 +1,12 @@
+import calendar
+import datetime as _dt
 import io
 import pandas as pd
 import streamlit as st
 
 from common import posting_logic
 from common import posting_store as store
+from common import uriagehyo, uriagehyo_style
 from common.ui import (apply_app_style, nice_table, period_picker, show_flash,
                        selectable_list, list_action_bar)
 
@@ -66,6 +69,23 @@ s3.markdown(f'<div style="color:#67788a;font-weight:700;font-size:.9rem">利益<
 
 st.divider()
 
+# ===== 案件別 原価・売上（依頼②・2026-08-20） =====
+# 🔴 オーナー方針＝「細かい内訳は号別明細で見る、ここは案件別の売上・原価だけで良い」。
+# アドバリューだけは号別明細と同じく案件区分(8-1等)ごとに分けて出す。
+st.markdown("**案件別 原価・売上**")
+_by_proj = posting_logic.company_summary_by_project(
+    receivables=receivables, payables=payables, petty=petty,
+    contract_lines=contract_lines, manual=manual, id2proj=id2proj)
+if not _by_proj:
+    st.caption("この期間のデータはありません。")
+else:
+    _disp = [{"案件": (f'{r["案件"]}　{r["区分"]}' if r["区分"] else r["案件"]),
+              "売上（税込）": _yen(r["売上"]), "原価（税込）": _yen(r["原価"]),
+              "利益": _yen(r["利益"])} for r in _by_proj]
+    nice_table(_disp, "この期間のデータはありません。")
+
+st.divider()
+
 # 原価と売上が1つの一覧に混ざっていると、どちらを見ているのか分からない。
 # 区分→タブの対応は posting_logic に集約してある（区分が増えたときに
 # 「どちらのタブにも出ない行」が静かに生まれるのを防ぐため）。
@@ -96,3 +116,51 @@ with tab_cost:
     _render_tab(cost_rows, key="summary_cost", title="原価明細", filename="原価明細")
 with tab_sales:
     _render_tab(sales_rows, key="summary_sales", title="売上明細", filename="売上明細")
+
+st.divider()
+
+# ===== 月次 売上表を一括生成（依頼②・2026-08-20） =====
+# 🔴 大阪支社が今使っている会議用売上表(KPS（大阪）売上表.xlsx)と全く同じ
+# デザインで、指定した月の案件別データ(アドバリューは区分ごと)を一括で書き出す。
+# 「ぱど」「チラシ」「仕分け」の内訳・備考はアプリに記録が無いため空欄のまま出る。
+# 実ファイルへの直接書き込みはせず、都度エクスポートしてコピー＆ペーストしてもらう
+# 運用(2026-08-20 オーナー判断)。
+with st.expander(":material/table_chart: 月次の会議用売上表を一括生成", expanded=False):
+    st.caption("大阪支社の会議で使う売上表と全く同じデザインで、指定した月の案件別データを"
+               "1シートにまとめて書き出します。「ぱど」「チラシ」「仕分け」の内訳・備考は"
+               "アプリに記録が無いため空欄のまま出ます。")
+    _today = _dt.date.today()
+    my1, my2 = st.columns(2)
+    _year = my1.number_input("年", min_value=2020, max_value=2100, value=_today.year, step=1)
+    _month = my2.number_input("月", min_value=1, max_value=12, value=_today.month, step=1)
+    _mlo = f"{int(_year)}-{int(_month):02d}-01"
+    _mhi_day = calendar.monthrange(int(_year), int(_month))[1]
+    _mhi = f"{int(_year)}-{int(_month):02d}-{_mhi_day:02d}"
+    _m_receivables = [r for r in store.list_receivables()
+                      if posting_logic.in_period(r.get("month"), _mlo, _mhi)]
+    _m_payables = [r for r in store.list_payables()
+                  if posting_logic.in_period(r.get("date") or r.get("month"), _mlo, _mhi)]
+    _m_petty = [r for r in store.list_petty_cash() if posting_logic.in_period(r.get("date"), _mlo, _mhi)]
+    _m_manual = [r for r in store.list_issue_manual_costs()
+                if r.get("work_date") is None or posting_logic.in_period(r.get("work_date"), _mlo, _mhi)]
+    _m_contract_lines = []
+    for inv in store.list_contract_invoices():
+        if not posting_logic.in_period(inv.get("issue_date"), _mlo, _mhi):
+            continue
+        for ln in store.get_contract_invoice(inv["id"])["lines"]:
+            _m_contract_lines.append(ln)
+    _bulk_rows = uriagehyo.build_bulk_rows(
+        receivables=_m_receivables, petty=_m_petty, payables=_m_payables,
+        contract_lines=_m_contract_lines, manual=_m_manual,
+        id2proj=id2proj, id2cat=id2cat)
+    if not _bulk_rows:
+        st.caption(f"{int(_year)}年{int(_month)}月のデータはありません。")
+    else:
+        st.caption(f"{int(_year)}年{int(_month)}月：{len(_bulk_rows)}案件ぶんを生成します"
+                   f"（{'、'.join(label for label, _ in _bulk_rows)}）。")
+        st.download_button(
+            "月次売上表をダウンロード",
+            data=uriagehyo_style.build_monthly_workbook(_bulk_rows, int(_year), int(_month)),
+            file_name=uriagehyo_style.monthly_filename(int(_year), int(_month)),
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            icon=":material/download:", key="dl_uriage_bulk")

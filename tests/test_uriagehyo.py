@@ -68,3 +68,32 @@ def test_build_workbook_headers_match_the_real_sheet():
 
 def test_uriagehyo_filename():
     assert U.uriagehyo_filename() == "会議用売上表_出力.xlsx"
+
+
+# ===== 月次一括生成（依頼②・2026-08-20） =====
+
+
+def test_build_bulk_rows_one_row_per_project():
+    rows = U.build_bulk_rows(
+        receivables=[{"project_id": 1, "amount": 847502}],
+        petty=[], payables=[], contract_lines=[], manual=[],
+        id2proj={1: "京阪南"}, id2cat={})
+    assert len(rows) == 1
+    label, row = rows[0]
+    assert label == "京阪南"
+    assert row["売上合計（税込）"] == 847502
+
+
+def test_build_bulk_rows_splits_advalue_and_labels_each_row():
+    rows = U.build_bulk_rows(
+        receivables=[{"project_id": 9, "other_label": "8-1", "amount": 544970},
+                    {"project_id": 9, "other_label": "8-2", "amount": 214466}],
+        petty=[{"project_id": 9, "other_label": "8-1", "category_id": 1, "amount": 6260}],
+        payables=[], contract_lines=[], manual=[],
+        id2proj={9: "アドバリュー"}, id2cat={1: "駐車場代"})
+    labels = {label for label, _ in rows}
+    assert labels == {"アドバリュー　8-1", "アドバリュー　8-2"}
+    row_81 = next(row for label, row in rows if label == "アドバリュー　8-1")
+    assert row_81["交通費（駐車場代含）"] == 6260
+    row_82 = next(row for label, row in rows if label == "アドバリュー　8-2")
+    assert row_82["交通費（駐車場代含）"] is None

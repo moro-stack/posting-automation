@@ -55,6 +55,43 @@ def build_row(*, hakko_gou, ban_mei, uriage_zeikomi, genka_goukei_zeikomi,
     }
 
 
+def build_bulk_rows(*, receivables, petty, payables, contract_lines, manual, id2proj, id2cat):
+    """月次の全案件ぶんを、会議用売上表の行としてまとめて作る(依頼②・2026-08-20)。
+
+    グルーピングは posting_logic.company_summary_by_project と同じ
+    (アドバリューだけ案件区分(8-1等)ごとに分ける)。戻り値は
+    [(見出しラベル, build_row()の戻り値), ...]。ラベルは実物の
+    「ｱﾄﾞ・バリュー　8-1」のような結合セル1つぶんの表示名。
+    """
+    from common import posting_logic as _pl
+
+    summary = _pl.company_summary_by_project(
+        receivables=receivables, payables=payables, petty=petty,
+        contract_lines=contract_lines, manual=manual, id2proj=id2proj)
+
+    koutsuhi, nomimono = {}, {}
+    for r in petty:
+        pname = id2proj.get(r.get("project_id"), "")
+        label = (str(r.get("other_label") or "").strip() or None) if pname == "アドバリュー" else None
+        key = (pname, label)
+        cat = id2cat.get(r.get("category_id"))
+        amt = int(r.get("amount") or 0)
+        if cat == "駐車場代":
+            koutsuhi[key] = koutsuhi.get(key, 0) + amt
+        elif cat == "飲み物代":
+            nomimono[key] = nomimono.get(key, 0) + amt
+
+    out = []
+    for s in summary:
+        key = (s["案件"], s["区分"])
+        label = f'{s["案件"]}　{s["区分"]}' if s["区分"] else s["案件"]
+        row = build_row(hakko_gou=None, ban_mei=None,
+                        uriage_zeikomi=s["売上"], genka_goukei_zeikomi=s["原価"],
+                        koutsuhi=koutsuhi.get(key, 0), nomimono=nomimono.get(key, 0))
+        out.append((label, row))
+    return out
+
+
 def build_workbook(rows) -> bytes:
     """会議用売上表と同じ列見出しのExcelを bytes で返す(コピー＆ペースト用)。"""
     wb = openpyxl.Workbook()
