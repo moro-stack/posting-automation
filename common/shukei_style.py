@@ -68,6 +68,20 @@ class ShukeiTemplate:
         copy_style(src, cell)
         return cell
 
+    def apply_name(self, cell, role, col):
+        """リーダー名セルに書式を当てる。罫線・揃えは役割どおり複写するが、
+        フォント(サイズ・太字)だけは area_first の見本で統一する。
+
+        🔴 2026-08-19 大橋様ご指摘: 実物テンプレートは名前欄のフォントが
+        area_first(16pt太字)と area_middle/area_last(11pt細字)でバラバラ
+        (人が手で作った帳票で、たまたま名前が書かれていた行とそうでない行の
+        違いがそのまま残っている)。統一しないと、エリア内で1人目のリーダー
+        だけ大きく、2人目以降が小さく見えてしまう。
+        """
+        self.apply(cell, role, col)
+        cell.font = copy(self._ws.cell(ROLE_ROWS["area_first"], col).font)
+        return cell
+
     def apply_bottom(self, cell, rel_row, col):
         """下部集計の相対位置(0始まり)に対応する書式を複写する。"""
         src_row = min(BOTTOM_FIRST_ROW + rel_row, BOTTOM_LAST_ROW)

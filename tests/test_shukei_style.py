@@ -374,6 +374,52 @@ def test_only_labels_that_need_it_are_wrapped(tpl):
             assert h and h >= 32, f"{lab} は折り返すのに行高が {h}"
 
 
+def _build_with_three_leaders_in_one_area():
+    """1エリアに3人のリーダーがいるデータ(area_first/area_middle/area_last が
+    すべて登場する)を作る。"""
+    table = [
+        ["配送管理表", "2026/08/21", "(1213号)"],
+        ["配布日", "号数", "ルート", "異動", "配送順位", "ぱどんな", "住所", "電話番号",
+         "担当地区", "チラシコード", "配送物", "配布部数", "配送備考", "町界名",
+         "街区（番地）名称", "受注種別", "チラシサイズ"],
+    ]
+    for chiku, name, code, butsu, bu in [
+        ("911001", "リーダーA", None, "91 ぱど", 4380),
+        ("912001", "リーダーB", None, "91 ぱど", 3080),
+        ("913001", "リーダーC", None, "91 ぱど", 2000),
+    ]:
+        table.append(["2026/08/21", "1213", 0, "", "", name, "", None, chiku,
+                      code, butsu, bu, "", "", "", "", ""])
+    rows = A.rows_from_table(table)
+    groups = A.group_by_chiku(rows)
+    version = A.detect_version(groups)
+    data = A.shukei_data(groups, version)
+    raw = A.build_shukei_daishi_workbook(data, version, "1213", "2026/08/21")
+    return openpyxl.load_workbook(io.BytesIO(raw))
+
+
+def test_leader_name_font_is_uniform_regardless_of_position_in_area(tpl):
+    """🔴 大橋様ご指摘(2026-08-19): リーダー名の文字サイズがバラバラで見づらい。
+
+    実物テンプレートは名前欄(B列)のフォントが行の役割(area_first/middle/last)
+    によって 16pt太字 だったり 11pt細字 だったりする(人が手で作った帳票の
+    サンプルにたまたま名前が書かれていた行とそうでない行の違い)。
+    そのままだと、エリア内で1人目のリーダーだけ大きく、2人目以降が小さく
+    表示されてしまう。名前は全員 area_first の見本(16pt太字)で統一する。
+    """
+    ws = _build_with_three_leaders_in_one_area()["集計表"]
+    names = {"リーダーA", "リーダーB", "リーダーC"}
+    found = {}
+    for row in ws.iter_rows():
+        for c in row:
+            if c.value in names:
+                found[c.value] = (c.font.sz, c.font.b)
+    assert set(found) == names, f"見つからないリーダーがある: {names - set(found)}"
+    sizes = {v for v in found.values()}
+    assert len(sizes) == 1, f"リーダー名のフォントが揃っていない: {found}"
+    assert sizes == {(16.0, True)}, f"想定と違うフォント: {sizes}"
+
+
 def test_shrink_to_fit_is_off_in_bottom_block(tpl):
     """🔴 縮小表示は必ず切る（14ptでも表示だけ小さくなる元凶）。"""
     ws = _build_from_real_like_data()["集計表"]

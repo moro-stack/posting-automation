@@ -647,7 +647,10 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
                             cell.font = Font(color="FFFF0000")
             lbot = r
             bcell = ws.cell(ltop, 2, leader["name"])
-            _style(bcell, role, 2)
+            if tpl is not None:
+                tpl.apply_name(bcell, role, 2)
+            else:
+                _style(bcell, role, 2)
             ag = _style(ws.cell(ltop, 33, leader["busuu"]), role, 33)
             ah = _style(ws.cell(ltop, 34, leader["chiku"]), role, 34)
             if tpl is not None:
