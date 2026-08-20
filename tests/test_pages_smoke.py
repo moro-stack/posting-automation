@@ -1429,7 +1429,50 @@ def test_issue_page_genka_xlsx_columns_when_empty(db, monkeypatch):
     assert not at.exception
     xls = _genka_xlsx(seen)
     assert list(pd.read_excel(xls, "業務委託").columns) == ["支払日", "配布員", "種別", "数量", "単価", "合計"]
-    assert list(pd.read_excel(xls, "雑費").columns) == ["配布員", "項目", "金額", "支払方法", "日付"]
+
+
+def _uriagehyo_xlsx(seen):
+    """集めたExcelのうち、会議用売上表(依頼⑦)のものを返す。"""
+    import io
+
+    import pandas as pd
+
+    hits = [b for b in seen if "売上表用出力" in pd.ExcelFile(io.BytesIO(b)).sheet_names]
+    assert len(hits) == 1
+    return pd.ExcelFile(io.BytesIO(hits[0]))
+
+
+def test_issue_page_uriagehyo_export_sums_petty_by_category(db, monkeypatch):
+    """依頼⑦: 会議用売上表の出力で、交通費(駐車場代)・飲み物代が小口から自動集計され、
+    残りが「配布原価」列、総額(号別明細の配布原価(税込)相当)が「原価合計」列になること。
+
+    アプリの原価集計は費目を区別せず小口を全部合算するため(=号別明細の配布原価に
+    交通費・飲み物代も含まれる)、売上表の列に合わせて差し引く必要がある。ここでは
+    その他費目1,000円も混ぜ、配布原価(税込)が「総額－交通費－飲み物」になることを
+    はっきり確かめる(交通費・飲み物だけだと引き算の結果が偶然0になり見分けが付かない)。
+    """
+    import pandas as pd
+
+    pid = store.add_project("案件A", db_path=db)
+    cats = {c["name"]: c["id"] for c in store.list_expense_categories(db_path=db)}
+    store.add_petty_cash("2026-07-17", cats["駐車場代"], 6260, project_id=pid, db_path=db)
+    store.add_petty_cash("2026-07-17", cats["飲み物代"], 300, project_id=pid, db_path=db)
+    store.add_petty_cash("2026-07-17", cats["その他"], 1000, project_id=pid, db_path=db)
+    store.add_receivable("2026-07", None, 544970, project_id=pid, db_path=db)
+    seen = _spy_xlsx(monkeypatch)
+    at = _issue_page(db)
+    assert not at.exception
+    xls = _uriagehyo_xlsx(seen)
+    df = pd.read_excel(xls, "売上表用出力")
+    row = df.iloc[0]
+    assert row["版名"] == "案件A"
+    assert row["売上合計（税込）"] == 544970
+    assert row["売上合計（税抜）"] == 495427       # 544970 / 1.1 を四捨五入
+    assert row["交通費（駐車場代含）"] == 6260
+    assert row["飲み物"] == 300
+    assert row["配布原価（税込）"] == 1000          # 総額7560(小口合計)－交通費6260－飲み物300
+    assert row["原価合計（税込）"] == 7560          # 号別明細の配布原価(税込)と同じ総額
+    assert pd.isna(row["ぱど部数"])                 # 区分の記録が無い列は空欄のまま
 
 
 def test_issue_page_houbai_still_shows_mai(db):

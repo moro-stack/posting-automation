@@ -1,0 +1,75 @@
+"""アプリのデータを、大阪支社の「会議で使う売上表」(手作りの月次台帳)と
+同じ列並びで書き出す(依頼⑦・2026-08-19 大橋様ご指摘)。
+
+会議用売上表(KPS大阪売上表.xlsx)は「ぱど」「チラシ」「仕分け」の3区分の
+部数・売上まで持つが、この区分はアプリのどこにも記録されていない。
+アプリが持っている値(売上合計・配布原価・交通費(駐車場代)・飲み物代)だけを
+同じ列に自動で入れ、区分の無い列と備考は空欄のまま出す。
+
+2026-08-20 オーナー判断＝実ファイル(19シートの財務台帳)への直接書き込みは
+せず、都度エクスポートしたものをコピー＆ペーストしてもらう運用にする。
+"""
+import io
+
+import openpyxl
+
+from common import excel_io
+
+HEADERS = [
+    "発行号", "版名", "ぱど部数", "ぱど売上（税抜）", "チラシ部数", "チラシ売上（税抜）",
+    "仕分け部数", "仕分け売上（税抜）", "その他", "売上合計（税抜）", "売上合計（税込）",
+    "備考", "交通費（駐車場代含）", "飲み物", "配布原価（税込）", "原価合計（税込）",
+]
+
+
+def build_row(*, hakko_gou, ban_mei, uriage_zeikomi, genka_goukei_zeikomi,
+             koutsuhi=0, nomimono=0):
+    """1号ぶんのデータを売上表の1行(dict)にする。
+
+    genka_goukei_zeikomi は号別明細の「配布原価(税込)」＝アプリの原価集計の
+    総額(小口の交通費・飲み物代も含む)をそのまま渡す。実物の売上表は
+    「配布原価」列を交通費・飲み物を除いた額、「原価合計」列をその総額に
+    分けているため、ここで差し引いて2列に振り分ける
+    (配布原価＝総額－交通費－飲み物、原価合計＝総額のまま)。
+
+    売上合計(税抜)は税込から逆算(10%)。
+    ぱど/チラシ/仕分け/その他/備考はアプリに区分の記録が無いため空欄で返す。
+    交通費/飲み物は実物の表にならい、0円(記録が無い)なら空欄にする。
+    """
+    uriage_zeikomi = int(uriage_zeikomi or 0)
+    genka_goukei = int(genka_goukei_zeikomi or 0)
+    koutsuhi = int(koutsuhi or 0)
+    nomimono = int(nomimono or 0)
+    uriage_zeinuki = round(uriage_zeikomi / 1.1)
+    haifu_genka = genka_goukei - koutsuhi - nomimono
+    return {
+        "発行号": hakko_gou, "版名": ban_mei,
+        "ぱど部数": None, "ぱど売上（税抜）": None,
+        "チラシ部数": None, "チラシ売上（税抜）": None,
+        "仕分け部数": None, "仕分け売上（税抜）": None,
+        "その他": None,
+        "売上合計（税抜）": uriage_zeinuki, "売上合計（税込）": uriage_zeikomi,
+        "備考": None,
+        "交通費（駐車場代含）": koutsuhi or None, "飲み物": nomimono or None,
+        "配布原価（税込）": haifu_genka, "原価合計（税込）": genka_goukei,
+    }
+
+
+def build_workbook(rows) -> bytes:
+    """会議用売上表と同じ列見出しのExcelを bytes で返す(コピー＆ペースト用)。"""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "売上表用出力"
+    for col, h in enumerate(HEADERS, start=1):
+        c = ws.cell(row=1, column=col, value=h)
+        c.font = openpyxl.styles.Font(bold=True)
+    for i, r in enumerate(rows):
+        for col, h in enumerate(HEADERS, start=1):
+            ws.cell(row=2 + i, column=col, value=r.get(h))
+    buf = io.BytesIO()
+    wb.save(buf)
+    return excel_io.freeze_xlsx_bytes(buf.getvalue())
+
+
+def uriagehyo_filename() -> str:
+    return "会議用売上表_出力.xlsx"
