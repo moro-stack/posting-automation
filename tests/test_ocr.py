@@ -223,3 +223,93 @@ def test_failed_reads_keeps_every_failure():
 def test_failed_reads_survives_missing_file_name():
     """カメラ撮影などでファイル名が無くても、原因は落とさない。"""
     assert ocr.failed_reads([{"_error": "E"}]) == [("", "E")]
+
+
+# ===== 金額の誤読を減らす（2026-08-27・大橋様ご指摘） =====
+# 「請求額」「合計」の近くにある数字を優先して金額に採る。
+# 取引先の誤読対策(717e123)と同じ方針＝プロンプトだけに頼らず、AIには候補を
+# ラベル付きで出させ、どれを採るかはコード側の決め打ちで決める。
+
+
+def test_pick_amount_prefers_seikyugaku_over_other_numbers():
+    """「請求額」ラベルの候補が最優先。小計・消費税に引っ張られない。"""
+    d = {"amount": 3000, "amount_candidates": [
+        {"label": "小計", "value": 30000},
+        {"label": "消費税", "value": 3000},
+        {"label": "ご請求額", "value": 33000},
+    ]}
+    assert ocr.pick_amount(d) == 33000
+
+
+def test_pick_amount_prefers_goukei_when_no_seikyugaku():
+    d = {"amount": 500, "amount_candidates": [
+        {"label": "小計", "value": 5000},
+        {"label": "合計", "value": 5500},
+    ]}
+    assert ocr.pick_amount(d) == 5500
+
+
+def test_pick_amount_ranks_seikyu_above_goukei():
+    """両方あるときは「請求額」を採る(請求書の総額はこちら)。"""
+    d = {"amount": 1, "amount_candidates": [
+        {"label": "合計", "value": 1000},
+        {"label": "請求金額", "value": 2000},
+    ]}
+    assert ocr.pick_amount(d) == 2000
+
+
+def test_pick_amount_ignores_excluded_labels_even_if_they_are_the_only_ones():
+    """お預り・お釣り・消費税だけしか無いなら候補は使わず、amount に落とす
+    (誤った値を確定させるより、AIの本命の値を人に確認してもらう方が安全)。"""
+    d = {"amount": 1200, "amount_candidates": [
+        {"label": "お預り", "value": 5000},
+        {"label": "お釣り", "value": 3800},
+    ]}
+    assert ocr.pick_amount(d) == 1200
+
+
+def test_pick_amount_falls_back_to_amount_when_no_candidates():
+    assert ocr.pick_amount({"amount": 1200}) == 1200
+    assert ocr.pick_amount({"amount": None}) is None
+
+
+def test_pick_amount_parses_string_values_with_yen_and_comma():
+    d = {"amount": None, "amount_candidates": [{"label": "合計", "value": "¥16,216"}]}
+    assert ocr.pick_amount(d) == 16216
+
+
+def test_pick_amount_skips_unreadable_candidate_values():
+    d = {"amount": 100, "amount_candidates": [
+        {"label": "合計", "value": "—"},
+        {"label": "合計", "value": 880},
+    ]}
+    assert ocr.pick_amount(d) == 880
+
+
+def test_extract_receipt_uses_the_goukei_candidate():
+    fake = _FakeClient('{"date":"2026-06-19","item":"駐車場代","amount":500,'
+                       '"amount_candidates":[{"label":"小計","value":500},'
+                       '{"label":"合計","value":1200}]}')
+    assert ocr.extract_receipt(b"x", client=fake)["amount"] == 1200
+
+
+def test_extract_invoice_uses_the_seikyugaku_candidate():
+    fake = _FakeClient('{"vendor":"関西電力株式会社","date":"2026-06-16","note":"電気",'
+                       '"amount":14742,'
+                       '"amount_candidates":[{"label":"小計","value":14742},'
+                       '{"label":"ご請求額","value":16216}]}')
+    assert ocr.extract_invoice(b"x", client=fake)["amount"] == 16216
+
+
+def test_extract_invoice_without_candidates_keeps_old_behaviour():
+    """候補を返さない旧応答でも従来どおり amount を使う(後方互換)。"""
+    fake = _FakeClient('{"vendor":"関西電力株式会社","amount":16216,"note":"電気"}')
+    assert ocr.extract_invoice(b"x", client=fake)["amount"] == 16216
+
+
+def test_prompts_tell_the_ai_to_look_near_the_amount_labels():
+    """プロンプト側でも「請求額」「合計」の近くの数字を採るよう指示していること。"""
+    for prompt in (ocr._RECEIPT_PROMPT, ocr._INVOICE_PROMPT):
+        assert "請求額" in prompt
+        assert "合計" in prompt
+        assert "amount_candidates" in prompt

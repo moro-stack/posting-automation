@@ -6,11 +6,15 @@ import streamlit as st
 from common import ocr
 from common import posting_logic
 from common import posting_store as store
-from common.ui import (apply_app_style, nice_table, period_picker,
+from common.ui import (apply_app_style, force_environment_camera, nice_table, period_picker,
                        flash, show_flash,
                        selectable_list, list_action_bar)
 
 apply_app_style()
+# 小口のレシート撮影は外カメラ(背面)で起動させる(2026-08-27 大橋様ご指摘)。
+# st.camera_input は描画された瞬間にカメラ許可を要求するため、
+# ページの先頭＝カメラを描くより前に仕込む。
+force_environment_camera()
 st.title("小口／買掛／売掛の登録")
 
 # 🔴 segmented_control は選択を解除でき、そのとき None を返す。None のまま下の

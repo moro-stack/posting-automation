@@ -428,6 +428,53 @@ _NO_TRANSLATE_JS = """
 """
 
 
+# 🔴 2026-08-27 大橋様ご指摘: レシートを撮るのに毎回カメラを切り替えるのが手間なので、
+# 外カメラ(背面)で起動してほしい。st.camera_input は facingMode を指定する引数を持たない
+# (Streamlit 1.58 時点)ため、親document の navigator.mediaDevices.getUserMedia を
+# 差し替えて facingMode を足す。
+#   ・exact ではなく ideal にする。exact だと背面カメラの無いPCで
+#     OverconstrainedError になり、カメラがまったく起動しなくなる。
+#   ・deviceId が明示されている呼び出しには手を出さない
+#     (Streamlit のカメラ切り替えでユーザーが選んだ端末を上書きしないため)。
+#   ・Streamlit は操作のたびに再実行するので、二重に包まないよう印を付ける。
+_REAR_CAMERA_JS = """
+<script>
+(function () {
+  var w = window.parent;
+  var md = w && w.navigator && w.navigator.mediaDevices;
+  if (!md || !md.getUserMedia || md.__kpsRearCameraPatched) return;
+  var original = md.getUserMedia.bind(md);
+  md.getUserMedia = function (constraints) {
+    try {
+      var c = constraints || {};
+      if (c.video) {
+        var v = (c.video === true) ? {} : Object.assign({}, c.video);
+        // 端末を名指しされていたら、その選択を尊重してそのまま通す
+        if (!v.deviceId) { v.facingMode = { ideal: "environment" }; }
+        c = Object.assign({}, c, { video: v });
+      }
+      return original(c);
+    } catch (e) {
+      return original(constraints);
+    }
+  };
+  md.__kpsRearCameraPatched = true;
+})();
+</script>
+"""
+
+
+def force_environment_camera():
+    """このページのカメラ(st.camera_input)を外カメラ(背面)で起動させる。
+
+    カメラを描画するより前に呼ぶこと。st.camera_input は描画された時点で
+    ブラウザにカメラ許可を要求するため、後から仕込んでも間に合わない。
+    背面カメラが無い端末(多くのPC)では ideal 指定が無視されて既定のカメラが
+    そのまま使われる(エラーにはならない)。
+    """
+    components.html(_REAR_CAMERA_JS, height=0)
+
+
 def apply_app_style():
     """モダン・水色ワンポイント・暗色サイドバーのスタイルを現在のページに適用する。
     あわせてブラウザの自動翻訳を止める(化け文字・removeChildエラーの防止)。"""
