@@ -11,6 +11,7 @@
 取りこぼしバグ（「1丁目・2丁目11～34」等で2丁目以降を落とす）を直して正確に判定する。
 出力=依頼表の列＋「担当地区(被り)」＋「被り/非被り」の報告書Excel。
 """
+import datetime as _dt
 import io
 import re
 
@@ -18,6 +19,119 @@ import openpyxl
 
 from common.atehagi import read_uploaded
 from common.excel_io import freeze_xlsx_bytes
+
+# ===== 週次の案件区分（依頼⑥・2026-08-27 大橋様ご指摘） =====
+# アドバリューは週ごとに依頼が来て「8-1」「8-2」…と区分して管理している。
+# 登録時に必ず週を選ばせ、9月になれば自動で「9-1」から始まるようにしたい。
+#
+# 🔴 設計判断: 画面で選ぶ選択肢は月に依存しない「1週目〜5週目」にし、
+# 月の部分は **登録する伝票自身の日付** から計算して "8-1" の形で保存する。
+#   ・選択肢に月を焼き込むと、Streamlit のフォームは日付を変えても再実行
+#     されないため「10月の伝票を入力しているのに選択肢は9月のまま」になる。
+#   ・保存する値の形は従来の手入力("8-1")と同じなので、8/20以前に登録した
+#     データとそのまま同じグループに並ぶ(移行作業が要らない)。
+#   ・月が変われば伝票の日付が変わるので、選択肢を作り直さなくても
+#     9-1 → 10-1 と自動で繰り上がる。
+WEEK_CHOICES = ("1週目", "2週目", "3週目", "4週目", "5週目")
+WEEK_PLACEHOLDER = "（選択してください）"
+_WEEK_LABEL_RE = re.compile(r"^\s*(\d{1,2})\s*-\s*([1-9])\s*$")
+
+
+def week_label(month, week) -> str:
+    """月と週から案件区分の文字列を作る。8月の1週目→"8-1"。"""
+    return f"{int(month)}-{int(week)}"
+
+
+def week_index(choice):
+    """「3週目」→3。未選択・プレースホルダ・読めない値は None。"""
+    m = re.match(r"^\s*([1-9])\s*週目\s*$", str(choice or ""))
+    return int(m.group(1)) if m else None
+
+
+def month_of(value, *, today=None) -> int:
+    """伝票の日付(YYYY-MM-DD / YYYY-MM / date)から月を取り出す。
+
+    読めないときは登録日(today)の月に倒す。ここで例外を投げると
+    「日付を空にしたまま登録しようとしたら画面が落ちた」になるため。
+    """
+    if isinstance(value, (_dt.date, _dt.datetime)):
+        return value.month
+    m = re.match(r"^\s*(\d{4})\D(\d{1,2})", str(value or ""))
+    if m:
+        month = int(m.group(2))
+        if 1 <= month <= 12:
+            return month
+    if today is None:
+        return _dt.date.today().month
+    if isinstance(today, (_dt.date, _dt.datetime)):
+        return today.month
+    return int(str(today)[5:7])
+
+
+def week_label_for(date_value, choice, *, today=None):
+    """伝票の日付と選んだ週から案件区分を作る。週が未選択なら None。"""
+    week = week_index(choice)
+    if week is None:
+        return None
+    return week_label(month_of(date_value, today=today), week)
+
+
+def parse_week_label(label):
+    """"8-1" → (8, 1)。週の区分でない文字列(手入力の案件名など)は None。"""
+    m = _WEEK_LABEL_RE.match(str(label or ""))
+    if not m:
+        return None
+    month = int(m.group(1))
+    return (month, int(m.group(2))) if 1 <= month <= 12 else None
+
+
+def sort_week_labels(labels):
+    """案件区分を 月→週 の順に並べる。
+
+    🔴 素の文字列順だと "10-1" が "8-1" より前に来て、月をまたいだ瞬間に
+    並びが壊れる。週として読めないラベル(手入力の案件名)は末尾に五十音順で置く
+    (捨てない＝どこにも出ない区分を作らない)。
+    """
+    weeks = sorted((l for l in labels if parse_week_label(l)),
+                   key=lambda l: parse_week_label(l))
+    others = sorted(l for l in labels if not parse_week_label(l))
+    return weeks + others
+
+
+ADVALUE_PROJECT = "アドバリュー"
+SONOTA_PROJECT = "その他"
+# 登録画面で案件区分(other_label)を使う案件。ここに無い案件では区分を保存しない。
+CASE_LABEL_PROJECTS = (ADVALUE_PROJECT, SONOTA_PROJECT)
+WEEK_REQUIRED_MESSAGE = "アドバリューは週（1週目〜5週目）を選んでください。"
+
+
+def resolve_case_label(project_name, *, date_value, week_choice, free_text, today=None):
+    """登録する行の案件区分(other_label)を決めて (値, エラー文) で返す。
+
+    ・アドバリュー … 週の選択が必須。伝票の日付の月と組み合わせて "8-1" にする。
+      自由入力は使わない(「8-1」「8月1週」「8_1」と表記が割れるのを防ぐため)。
+    ・その他 … これまでどおり自由入力(何の案件か)をそのまま。空でもよい。
+    ・それ以外の案件 … 区分は持たない(None)。
+    エラー文が返ったときは登録してはいけない。
+    """
+    name = str(project_name or "").strip()
+    if name == ADVALUE_PROJECT:
+        label = week_label_for(date_value, week_choice, today=today)
+        if label is None:
+            return None, WEEK_REQUIRED_MESSAGE
+        return label, None
+    if name == SONOTA_PROJECT:
+        return (str(free_text or "").strip() or None), None
+    return None, None
+
+
+def week_display(label) -> str:
+    """画面に出すときの表記。"8-1" → "8月 1週目"。週でなければそのまま。"""
+    parsed = parse_week_label(label)
+    if not parsed:
+        return str(label or "")
+    month, week = parsed
+    return f"{month}月 {week}週目"
 
 _ZEN2HAN = str.maketrans("０１２３４５６７８９", "0123456789")
 

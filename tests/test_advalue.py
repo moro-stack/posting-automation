@@ -127,3 +127,131 @@ def test_advalue_filename_with_case_label():
 def test_advalue_filename_strips_characters_unsafe_for_filenames():
     """案件名に / などが入っても壊れたファイル名にならないこと。"""
     assert "/" not in V.advalue_filename("8/1")
+
+
+# ===== 週次の案件区分（依頼⑥・2026-08-27 大橋様ご指摘） =====
+# アドバリューは週ごとに案件が来るので、登録時に必ず週を選ばせる。
+# 月をまたいだら自動で「9-1」「10-1」になること。
+
+
+def test_week_choices_are_month_independent():
+    """画面で選ぶのは月に依存しない『1週目〜5週目』。
+    月の部分は登録する伝票自身の日付から決めるので、9月になれば黙って
+    9-1 になり、10月なら 10-1 になる(選択肢を作り直す必要が無い)。"""
+    assert V.WEEK_CHOICES == ("1週目", "2週目", "3週目", "4週目", "5週目")
+
+
+def test_week_label_builds_the_month_dash_week_form():
+    assert V.week_label(8, 1) == "8-1"
+    assert V.week_label(9, 3) == "9-3"
+    assert V.week_label(10, 5) == "10-5"
+
+
+def test_week_index_from_choice():
+    assert V.week_index("1週目") == 1
+    assert V.week_index("5週目") == 5
+    assert V.week_index("") is None
+    assert V.week_index(None) is None
+    assert V.week_index("（選択してください）") is None
+
+
+def test_month_of_reads_a_date_string():
+    assert V.month_of("2026-09-03") == 9
+    assert V.month_of("2026-10") == 10
+
+
+def test_month_of_reads_a_date_object():
+    import datetime
+    assert V.month_of(datetime.date(2026, 10, 1)) == 10
+
+
+def test_month_of_falls_back_to_today_when_the_date_is_missing_or_broken():
+    """日付が未入力・読めないときに登録を止めるのはやり過ぎなので、
+    登録日の月に倒す(あとから号別明細で直せる)。"""
+    assert V.month_of("", today="2026-09-15") == 9
+    assert V.month_of(None, today="2026-09-15") == 9
+    assert V.month_of("ぐちゃぐちゃ", today="2026-11-01") == 11
+
+
+def test_week_label_for_uses_the_month_of_the_voucher_not_of_today():
+    """🔴 9月の伝票を10月に入力しても「9-1」。登録日ではなく伝票の日付で決める。"""
+    assert V.week_label_for("2026-09-04", "1週目", today="2026-10-20") == "9-1"
+
+
+def test_week_label_for_rolls_over_the_month_automatically():
+    assert V.week_label_for("2026-08-04", "1週目") == "8-1"
+    assert V.week_label_for("2026-09-01", "1週目") == "9-1"
+    assert V.week_label_for("2026-10-01", "1週目") == "10-1"
+
+
+def test_week_label_for_returns_none_when_no_week_is_chosen():
+    """週が未選択なら区分は作らない(呼び出し側が『選んでください』を出す)。"""
+    assert V.week_label_for("2026-08-04", None) is None
+    assert V.week_label_for("2026-08-04", "（選択してください）") is None
+
+
+def test_parse_week_label_reads_existing_labels():
+    """8/20以前に手入力された「8-1」もそのまま読めること(過去データ互換)。"""
+    assert V.parse_week_label("8-1") == (8, 1)
+    assert V.parse_week_label("10-5") == (10, 5)
+    assert V.parse_week_label("配夢") is None
+    assert V.parse_week_label(None) is None
+
+
+def test_sort_week_labels_orders_by_month_then_week_not_by_string():
+    """🔴 文字列順だと「10-1」が「8-1」より前に来て、月をまたぐと並びが壊れる。"""
+    assert V.sort_week_labels(["10-1", "8-2", "9-1", "8-1"]) == [
+        "8-1", "8-2", "9-1", "10-1"]
+
+
+def test_sort_week_labels_keeps_non_week_labels_at_the_end():
+    """アドバリュー以外の使い方(手入力の案件名)が混ざっても落とさない。"""
+    assert V.sort_week_labels(["9-1", "配夢", "8-1"]) == ["8-1", "9-1", "配夢"]
+
+
+def test_week_display_is_readable_in_the_issue_page():
+    assert V.week_display("8-1") == "8月 1週目"
+    assert V.week_display("10-5") == "10月 5週目"
+    assert V.week_display("配夢") == "配夢"     # 週でないものはそのまま
+
+
+# ----- 案件区分の決定（登録画面が使う唯一の入口） -----
+
+
+def test_resolve_case_label_requires_a_week_for_advalue():
+    """🔴 依頼⑥の肝: アドバリューは週を選ばないと登録させない。"""
+    label, err = V.resolve_case_label(
+        "アドバリュー", date_value="2026-08-04", week_choice=None, free_text="")
+    assert label is None
+    assert err and "週" in err
+
+
+def test_resolve_case_label_builds_the_week_label_for_advalue():
+    label, err = V.resolve_case_label(
+        "アドバリュー", date_value="2026-09-04", week_choice="2週目", free_text="")
+    assert (label, err) == ("9-2", None)
+
+
+def test_resolve_case_label_ignores_free_text_for_advalue():
+    """アドバリューでは自由入力ではなく必ず週から作る(表記ゆれを作らない)。"""
+    label, _ = V.resolve_case_label(
+        "アドバリュー", date_value="2026-08-04", week_choice="1週目", free_text="八月一週")
+    assert label == "8-1"
+
+
+def test_resolve_case_label_uses_free_text_for_sonota():
+    label, err = V.resolve_case_label(
+        "その他", date_value="2026-08-04", week_choice=None, free_text=" 買取専科 ")
+    assert (label, err) == ("買取専科", None)
+
+
+def test_resolve_case_label_sonota_without_text_is_none_but_not_an_error():
+    """「その他」の案件名は今までどおり任意(空でも登録できる)。"""
+    assert V.resolve_case_label(
+        "その他", date_value="2026-08-04", week_choice=None, free_text="") == (None, None)
+
+
+def test_resolve_case_label_is_none_for_other_projects():
+    for name in ("関西ぱど：京阪北版", "リビングプロシード", "(なし)", None):
+        assert V.resolve_case_label(
+            name, date_value="2026-08-04", week_choice="1週目", free_text="x") == (None, None)

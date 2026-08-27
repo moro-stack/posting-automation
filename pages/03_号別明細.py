@@ -5,6 +5,7 @@ import io
 import pandas as pd
 import streamlit as st
 
+from common import advalue
 from common import posting_logic
 from common import posting_store as store
 from common import uriagehyo as U
@@ -68,10 +69,16 @@ if sel == "アドバリュー":
         store.list_receivables(project_id=pid),
         store.list_issue_manual_costs(project_id=pid),
         [ln for ln in _all_contract if ln.get("project_id") == pid])
+    # 🔴 依頼⑥(2026-08-27 大橋様): 週ごとに分けて見られるようにする。
+    # 素の文字列順だと「10-1」が「8-1」より前に来て、月をまたいだ瞬間に
+    # 並びが壊れるため、月→週の順に並べ直す(週でないラベルは末尾に残す)。
+    _labels = advalue.sort_week_labels(_labels)
     if _labels:
         _sub_sel = st.pills("案件区分", ["全体"] + _labels, selection_mode="single",
                             default="全体", key="adv_sub_pills")
         sub_label = None if (not _sub_sel or _sub_sel == "全体") else _sub_sel
+        if sub_label:
+            st.caption(f"表示中の週：{advalue.week_display(sub_label)}")
 
 # ===== 期間指定：全期間 / 今月 / 今週 / 期間指定 を同じ並びのボタンで =====
 lo, hi, period_note = period_picker(key="issue_period")

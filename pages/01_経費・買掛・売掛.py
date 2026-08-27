@@ -3,6 +3,7 @@ from datetime import date as _date, datetime as _datetime
 import pandas as pd
 import streamlit as st
 
+from common import advalue
 from common import ocr
 from common import posting_logic
 from common import posting_store as store
@@ -24,8 +25,16 @@ _MODES = ["小口", "買掛", "売掛", "車両"]
 
 # 🔴 依頼①(2026-08-19大橋様→2026-08-20詳細確認): アドバリューは週ごとに案件が来て
 # 「8-1」「8-2」「8-3」のように区分して管理している。「その他」向けに元々あった
-# 案件区分の自由入力欄(other_label)を、アドバリューでも使えるようにする。
-_OTHER_LABEL_PROJECTS = ("その他", "アドバリュー")
+# 案件区分の自由入力欄(other_label)を、アドバリューでも使えるようにした。
+# 🔴 依頼⑥(2026-08-27 大橋様): アドバリューは自由入力ではなく**必ず週を選ばせる**。
+# 月の部分は伝票の日付から自動で決まる(9月なら9-1、10月なら10-1)。
+# どの区分になるかの判断は common/advalue.resolve_case_label に集約する
+# (小口・買掛・売掛の3か所に同じifを書くと、片方だけ直して食い違うため)。
+_OTHER_LABEL_PROJECTS = advalue.CASE_LABEL_PROJECTS
+_WEEK_OPTIONS = [advalue.WEEK_PLACEHOLDER] + list(advalue.WEEK_CHOICES)
+_CASE_LABEL_HELP = ("案件を『アドバリュー』にしたときは週の選択が必須です"
+                    "（月は伝票の日付から自動で決まります）。"
+                    "『その他』のときだけ案件名を自由入力できます。")
 mode = st.segmented_control("入力の種類", _MODES, default=_MODES[0],
                             key="entry_mode") or _MODES[0]
 
@@ -228,28 +237,38 @@ if mode == "小口":
                 st.rerun()
 
         with st.form("petty", clear_on_submit=True):
-            date = st.text_input("日付（例：2026-07-05）", value=draft.get("date") or "")
+            date = st.text_input("日付（例：2026-07-05）", value=draft.get("date") or "",
+                                 key="petty_date")
             cats = {c["name"]: c["id"] for c in store.list_expense_categories(only_active=True)}
-            cat = st.selectbox("費目", list(cats.keys()) or ["(費目マスタを登録)"])
+            cat = st.selectbox("費目", list(cats.keys()) or ["(費目マスタを登録)"],
+                               key="petty_cat")
             amount = st.number_input("金額(税込)", min_value=0,
-                                     value=int(draft.get("amount") or 0), step=1)
+                                     value=int(draft.get("amount") or 0), step=1,
+                                     key="petty_amount")
             projs = _project_options()
-            proj = st.selectbox("案件(任意)", ["(なし)"] + list(projs.keys()))
+            proj = st.selectbox("案件(任意)", ["(なし)"] + list(projs.keys()), key="petty_proj")
             dists = _distributor_options()
             dist = st.selectbox("配布員(任意)", ["(なし)"] + list(dists.keys()),
+                                key="petty_dist",
                                 help="この費用が誰の分か。号別明細の雑費の内訳に出ます。")
+            week = st.selectbox("アドバリューの週（必須）", _WEEK_OPTIONS, key="petty_week",
+                                help=_CASE_LABEL_HELP)
             other_label = st.text_input(
-                "案件区分", placeholder="「その他」なら何の案件か／「アドバリュー」なら8-1等の区分",
-                help="案件を『その他』『アドバリュー』にしたときだけ使われます。"
-                     "号別明細の内訳・案件切り替えで確認できます。")
-            memo = st.text_input("メモ", value=draft.get("item") or "")
+                "案件区分（「その他」のときの案件名）", key="petty_other",
+                placeholder="例：買取専科（案件が「その他」のときだけ使われます）",
+                help=_CASE_LABEL_HELP)
+            memo = st.text_input("メモ", value=draft.get("item") or "", key="petty_memo")
             if st.form_submit_button("登録") and amount > 0:
+                case_label, case_error = advalue.resolve_case_label(
+                    proj, date_value=date, week_choice=week, free_text=other_label)
+                if case_error:
+                    st.error(case_error)
+                    st.stop()
                 payload = {"date": date or None, "category_id": cats.get(cat), "amount": int(amount),
                            "project_id": projs.get(proj), "memo": memo or None,
                            "source": "ocr" if ups else "manual",
                            "distributor_id": dists.get(dist),
-                           "other_label": (other_label.strip() or None)
-                                          if proj in _OTHER_LABEL_PROJECTS else None}
+                           "other_label": case_label}
                 if store.find_duplicate_petty(payload["date"], payload["category_id"], payload["amount"]):
                     st.session_state["petty_pending"] = payload
                     st.rerun()
@@ -358,9 +377,11 @@ elif mode == "買掛":
         with st.form("payable", clear_on_submit=True):
             inv_date = st.date_input("請求書の日付",
                                      value=_to_date(draft.get("date")) or _date.today())
-            vendor = st.text_input("取引先（請求元の会社名）", value=draft.get("vendor") or "")
+            vendor = st.text_input("取引先（請求元の会社名）", value=draft.get("vendor") or "",
+                                   key="pay_vendor")
             amount = st.number_input("金額(税込)", min_value=0,
-                                     value=int(draft.get("amount") or 0), step=1)
+                                     value=int(draft.get("amount") or 0), step=1,
+                                     key="pay_amount")
             _vendors = store.list_payables_vendors()
             _auto = posting_logic.resolve_original_status(vendor, _vendors)
             original = st.selectbox(
@@ -372,19 +393,26 @@ elif mode == "買掛":
             if _auto in _ORIGINAL_STATUSES:
                 st.caption(f"✔️ 買掛先マスタの既定「{_auto}」を反映しました（変更できます）。")
             pay_projs = _project_options()
-            pay_proj = st.selectbox("案件(任意)", ["(なし)"] + list(pay_projs.keys()))
+            pay_proj = st.selectbox("案件(任意)", ["(なし)"] + list(pay_projs.keys()),
+                                    key="pay_proj")
+            pay_week = st.selectbox("アドバリューの週（必須）", _WEEK_OPTIONS, key="pay_week",
+                                    help=_CASE_LABEL_HELP)
             pay_other = st.text_input(
-                "案件区分", placeholder="「その他」なら何の案件か／「アドバリュー」なら8-1等の区分",
-                help="案件を『その他』『アドバリュー』にしたときだけ使われます。"
-                     "号別明細の内訳・案件切り替えで確認できます。")
+                "案件区分（「その他」のときの案件名）", key="pay_other",
+                placeholder="例：買取専科（案件が「その他」のときだけ使われます）",
+                help=_CASE_LABEL_HELP)
             note = st.text_input("備考", value=draft.get("note") or "")
             if st.form_submit_button("登録") and amount > 0:
+                case_label, case_error = advalue.resolve_case_label(
+                    pay_proj, date_value=inv_date, week_choice=pay_week, free_text=pay_other)
+                if case_error:
+                    st.error(case_error)
+                    st.stop()
                 payload = {"date": str(inv_date), "vendor_name": vendor or None,
                            "amount": int(amount), "original_status": original, "note": note or None,
                            "source": "ocr" if ups else "manual",
                            "project_id": pay_projs.get(pay_proj),
-                           "other_label": (pay_other.strip() or None)
-                                          if pay_proj in _OTHER_LABEL_PROJECTS else None}
+                           "other_label": case_label}
                 if store.find_duplicate_payable(payload["date"], None, payload["amount"],
                                                 vendor_name=payload["vendor_name"]):
                     st.session_state["pay_pending"] = payload
@@ -441,22 +469,29 @@ elif mode == "売掛":
                 st.rerun()
 
         with st.form("receivable", clear_on_submit=True):
-            month = st.text_input("月度（例：2026-07）")
+            month = st.text_input("月度（例：2026-07）", key="recv_month")
             clients = {c["name"]: c["id"] for c in store.list_receivables_clients(only_active=True)}
-            client = st.selectbox("売掛先", list(clients.keys()) or ["(売掛先マスタを登録)"])
-            amount = st.number_input("金額(税込)", min_value=0, step=1)
-            note = st.text_input("備考(号)")
+            client = st.selectbox("売掛先", list(clients.keys()) or ["(売掛先マスタを登録)"],
+                                  key="recv_client")
+            amount = st.number_input("金額(税込)", min_value=0, step=1, key="recv_amount")
+            note = st.text_input("備考(号)", key="recv_note")
             projs = _project_options()
-            proj = st.selectbox("案件(任意)", ["(なし)"] + list(projs.keys()))
+            proj = st.selectbox("案件(任意)", ["(なし)"] + list(projs.keys()), key="recv_proj")
+            recv_week = st.selectbox("アドバリューの週（必須）", _WEEK_OPTIONS, key="recv_week",
+                                     help=_CASE_LABEL_HELP)
             recv_other = st.text_input(
-                "案件区分", placeholder="「その他」なら何の案件か／「アドバリュー」なら8-1等の区分",
-                help="案件を『その他』『アドバリュー』にしたときだけ使われます。"
-                     "号別明細の内訳・案件切り替えで確認できます。")
+                "案件区分（「その他」のときの案件名）", key="recv_other",
+                placeholder="例：買取専科（案件が「その他」のときだけ使われます）",
+                help=_CASE_LABEL_HELP)
             if st.form_submit_button("登録") and amount > 0:
+                case_label, case_error = advalue.resolve_case_label(
+                    proj, date_value=month, week_choice=recv_week, free_text=recv_other)
+                if case_error:
+                    st.error(case_error)
+                    st.stop()
                 payload = {"month": month or None, "client_id": clients.get(client),
                            "amount": int(amount), "note": note or None, "project_id": projs.get(proj),
-                           "other_label": (recv_other.strip() or None)
-                                          if proj in _OTHER_LABEL_PROJECTS else None}
+                           "other_label": case_label}
                 if store.find_duplicate_receivable(payload["month"], payload["client_id"], payload["amount"]):
                     st.session_state["recv_pending"] = payload
                     st.rerun()
