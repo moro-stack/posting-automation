@@ -418,3 +418,62 @@ def test_print_total_returns_none_if_any_row_is_unparsable():
 
 def test_print_total_returns_none_for_empty_rows():
     assert L.print_total([]) is None
+
+
+# ===== 車両使用履歴の車種別表示（2026-08-27・大橋様ご指摘） =====
+# 「ハイエース」「軽バン」「レンタカー」で見るところを分けたい。
+
+
+def test_vehicle_kinds_are_the_three_asked_for():
+    assert L.VEHICLE_KINDS == ("ハイエース", "軽バン", "レンタカー")
+
+
+def test_split_vehicle_logs_groups_by_vehicle():
+    rows = [
+        {"id": 1, "vehicle": "ハイエース"},
+        {"id": 2, "vehicle": "軽バン"},
+        {"id": 3, "vehicle": "レンタカー"},
+        {"id": 4, "vehicle": "ハイエース"},
+    ]
+    got = L.split_vehicle_logs(rows)
+    assert [k for k, _ in got] == ["ハイエース", "軽バン", "レンタカー"]
+    assert [r["id"] for r in dict(got)["ハイエース"]] == [1, 4]
+
+
+def test_split_vehicle_logs_always_shows_the_three_kinds_even_when_empty():
+    """まだ登録が無い車種でもタブは出す(「どこに入れるんだ」を作らない)。"""
+    got = L.split_vehicle_logs([])
+    assert [k for k, _ in got] == ["ハイエース", "軽バン", "レンタカー"]
+    assert all(rows == [] for _, rows in got)
+
+
+def test_split_vehicle_logs_puts_unknown_vehicles_in_a_sonota_bucket():
+    """🔴 取りこぼしゼロ。3車種に当てはまらない車が消えてはいけない
+    (登録画面は「その他」で任意の車両名を入れられる)。"""
+    rows = [{"id": 1, "vehicle": "ハイエース"}, {"id": 2, "vehicle": "軽トラ"}]
+    got = L.split_vehicle_logs(rows)
+    assert [k for k, _ in got] == ["ハイエース", "軽バン", "レンタカー", "その他"]
+    assert [r["id"] for r in dict(got)["その他"]] == [2]
+
+
+def test_split_vehicle_logs_hides_the_sonota_bucket_when_empty():
+    got = L.split_vehicle_logs([{"vehicle": "軽バン"}])
+    assert "その他" not in [k for k, _ in got]
+
+
+def test_split_vehicle_logs_loses_no_row():
+    rows = [{"vehicle": v} for v in
+            ["ハイエース", "軽バン", "レンタカー", "軽トラ", None, "", "ハイエース"]]
+    got = L.split_vehicle_logs(rows)
+    assert sum(len(r) for _, r in got) == len(rows)
+
+
+def test_split_vehicle_logs_treats_blank_vehicle_as_sonota():
+    got = dict(L.split_vehicle_logs([{"id": 1, "vehicle": None}, {"id": 2, "vehicle": ""}]))
+    assert [r["id"] for r in got["その他"]] == [1, 2]
+
+
+def test_split_vehicle_logs_keeps_original_order_inside_each_kind():
+    rows = [{"id": i, "vehicle": "軽バン"} for i in (5, 3, 9)]
+    got = dict(L.split_vehicle_logs(rows))
+    assert [r["id"] for r in got["軽バン"]] == [5, 3, 9]

@@ -520,20 +520,31 @@ else:  # 車両
     with tab_list:
         show_flash("vehicle")
         st.markdown("**登録済みの車両使用履歴**")
-        lo, hi, note = period_picker(key="vehicle_period")
-        _rows = posting_logic.filter_rows_by_period(store.list_vehicle_logs(), "date", lo, hi)
-        st.caption(f"表示期間: {note}（{len(_rows)}件）")
-        _disp = [{"No.": r["id"], "日付": r.get("date") or "",
-                  "車両": r.get("vehicle") or "",
-                  "ドライバー": r.get("driver") or "",
-                  "走行距離": f'{r["distance"]}km' if r.get("distance") is not None else "",
-                  "使用用途": r.get("purpose") or "",
-                  "給油量": f'{r["fuel_liters"]}L' if r.get("fuel_liters") is not None else "",
-                  "登録日": (r.get("created_at") or "")[:10]} for r in _rows]
-        if not _disp:
-            st.caption("車両使用履歴の登録はまだありません。")
-        else:
-            edited, selected_ids = selectable_list(_disp, key="vehicle")
-            list_action_bar(edited, key="vehicle", title="車両使用履歴",
-                            filename="車両使用履歴_選択一覧", section="vehicle",
-                            delete_fn=store.delete_vehicle_log)
+        # 🔴 2026-08-27 大橋様ご指摘(依頼⑤): ハイエース/軽バン/レンタカーで
+        # 見るところを分ける。3車種に当てはまらない車両(登録画面の「その他」で
+        # 自由入力したもの)は「その他」タブにまとめる＝どのタブにも出ない行を作らない。
+        # 期間の絞り込みはタブごとに独立させる(片方を絞ると他方も動く、を避けるため
+        # period_picker の key に車種を入れて別々の状態にする)。
+        _kind_rows = posting_logic.split_vehicle_logs(store.list_vehicle_logs())
+        _v_tabs = st.tabs([kind for kind, _ in _kind_rows])
+
+        for _tab, (_kind, _all_rows) in zip(_v_tabs, _kind_rows):
+            with _tab:
+                lo, hi, note = period_picker(key=f"vehicle_period_{_kind}")
+                _rows = posting_logic.filter_rows_by_period(_all_rows, "date", lo, hi)
+                st.caption(f"表示期間: {note}（{len(_rows)}件）")
+                _disp = [{"No.": r["id"], "日付": r.get("date") or "",
+                          "車両": r.get("vehicle") or "",
+                          "ドライバー": r.get("driver") or "",
+                          "走行距離": f'{r["distance"]}km' if r.get("distance") is not None else "",
+                          "使用用途": r.get("purpose") or "",
+                          "給油量": f'{r["fuel_liters"]}L' if r.get("fuel_liters") is not None else "",
+                          "登録日": (r.get("created_at") or "")[:10]} for r in _rows]
+                if not _disp:
+                    st.caption(f"{_kind}の使用履歴はまだありません。")
+                    continue
+                edited, selected_ids = selectable_list(_disp, key=f"vehicle_{_kind}")
+                list_action_bar(edited, key=f"vehicle_{_kind}",
+                                title=f"車両使用履歴（{_kind}）",
+                                filename=f"車両使用履歴_{_kind}_選択一覧", section="vehicle",
+                                delete_fn=store.delete_vehicle_log)

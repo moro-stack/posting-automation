@@ -348,6 +348,37 @@ def company_summary_by_project(*, receivables, payables, petty, contract_lines, 
     return out
 
 
+# 車両使用履歴を見るときの車種の分け方(2026-08-27 大橋様ご指摘＝
+# 「ハイエース」「軽バン」「レンタカー」でページを分けたい)。
+# 登録画面(pages/01)の _VEHICLE_PRESETS と同じ並び。
+VEHICLE_KINDS = ("ハイエース", "軽バン", "レンタカー")
+VEHICLE_OTHER = "その他"
+
+
+def split_vehicle_logs(rows):
+    """車両使用履歴を車種ごとに分けて [(車種, 行), ...] で返す。
+
+    ・3車種はまだ登録が無くても必ず出す(タブが消えて「どこに入れるんだ」に
+      ならないように)。
+    ・3車種に当てはまらない車両名(登録画面の「その他」で自由入力したもの・
+      未入力)は「その他」にまとめ、行数が0のときだけ出さない。
+      🔴 ここで捨てると、登録したのにどのタブにも出ない行が静かに生まれる。
+    ・各車種の中の並びは元のまま(並べ替えは呼び出し側の責任)。
+    """
+    buckets = {k: [] for k in VEHICLE_KINDS}
+    other = []
+    for r in rows or []:
+        name = str((r or {}).get("vehicle") or "").strip()
+        if name in buckets:
+            buckets[name].append(r)
+        else:
+            other.append(r)
+    out = [(k, buckets[k]) for k in VEHICLE_KINDS]
+    if other:
+        out.append((VEHICLE_OTHER, other))
+    return out
+
+
 def company_summary_rows(*, receivables, payables, petty, contract_lines, manual,
                          id2proj, id2vendor, id2cat, id2client, id2dist):
     """区分・日付・項目・案件・金額 に正規化した明細行のリスト（原価・売上まとめ用）。"""
