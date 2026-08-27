@@ -22,6 +22,12 @@ def db(tmp_path, monkeypatch):
 
 def _run(page):
     at = AppTest.from_file(os.path.join(ROOT, "pages", page), default_timeout=30)
+    # 🔴 依頼⑧(2026-08-27)で 06「大阪支社売上」の既定の期間が「今月」になった。
+    # このファイルのテストは日付を 2026-08 固定で作っているため、既定のままだと
+    # 「今日が9月になった瞬間に全部落ちる」時限爆弾になる。明示的に全期間で見る。
+    # (既定が今月であること自体は tests/test_pages_osaka_uriage.py が守る)
+    if page.startswith("06_"):
+        at.session_state["summary_period_pills"] = "全期間"
     at.run()
     return at
 

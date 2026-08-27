@@ -486,17 +486,23 @@ _PERIOD_PRESETS = {"全期間": "all", "今月": "month", "今週": "week"}
 _PERIOD_CUSTOM = "期間指定"
 
 
-def period_picker(*, key: str):
+def period_picker(*, key: str, default: str = "全期間"):
     """全期間 / 今月 / 今週 / 期間指定 を同じ並びのボタンで選ばせる共通の期間フィルタ。
     「期間指定」を選んだ時だけカレンダーを出す。(lo, hi, 表示ラベル) を返す。
-    lo/hi は 'YYYY-MM-DD' 文字列、全期間なら (None, None)。"""
+    lo/hi は 'YYYY-MM-DD' 文字列、全期間なら (None, None)。
+
+    default: 最初に選ばれている期間。「大阪支社売上」は開いた瞬間に今月の
+    売上が見えていてほしい(依頼⑧・2026-08-27 大橋様)ので "今月" を渡す。
+    """
     from common import posting_logic
 
     options = list(_PERIOD_PRESETS.keys()) + [_PERIOD_CUSTOM]
-    sel = st.pills("期間", options, selection_mode="single", default="全期間",
+    if default not in options:
+        default = "全期間"
+    sel = st.pills("期間", options, selection_mode="single", default=default,
                    label_visibility="collapsed", key=f"{key}_pills")
     if not sel:
-        sel = "全期間"
+        sel = default
 
     if sel == _PERIOD_CUSTOM:
         custom = st.date_input(":material/calendar_month: 期間を指定（クリックでカレンダー）",

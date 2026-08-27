@@ -47,10 +47,12 @@ if os.environ.get("APP_PASSWORD") and not auth.is_authenticated(st.session_state
     _render_login()
     st.stop()
 
+# サイドバーの表示名は st.Page(title=...) が決める(ファイル名ではない)。
+# 依頼⑧(2026-08-27 大橋様): 01 は「原価・売上登録」、06 は「大阪支社売上」に改称。
 pages = [
-    st.Page("pages/06_原価・売上まとめ.py", title="原価・売上まとめ", icon=":material/summarize:"),
+    st.Page("pages/06_原価・売上まとめ.py", title="大阪支社売上", icon=":material/summarize:"),
     st.Page("pages/03_号別明細.py", title="号別明細", icon=":material/table_chart:", default=True),
-    st.Page("pages/01_経費・買掛・売掛.py", title="小口・買掛・売掛", icon=":material/receipt_long:"),
+    st.Page("pages/01_経費・買掛・売掛.py", title="原価・売上登録", icon=":material/receipt_long:"),
     st.Page("pages/02_業務委託登録.py", title="業務委託登録", icon=":material/description:"),
     st.Page("pages/05_マスタ管理.py", title="マスタ管理", icon=":material/settings:"),
     st.Page("pages/07_資料作成・変換表.py", title="資料作成・変換表", icon=":material/transform:"),

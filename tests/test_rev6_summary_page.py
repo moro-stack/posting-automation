@@ -32,6 +32,9 @@ def _seed(db, monkeypatch):
 def test_summary_page_shows_sales_cost_profit_and_payable_as_cost(tmp_path, monkeypatch):
     db = os.path.join(tmp_path, "t.db"); _seed(db, monkeypatch)
     at = AppTest.from_file(os.path.join(ROOT, "pages", "06_原価・売上まとめ.py"), default_timeout=30)
+    # 🔴 依頼⑧(2026-08-27)で既定の期間が「今月」になった。このテストのデータは
+    # 2026-07 固定なので、明示的に全期間へ切り替えてから見る。
+    at.session_state["summary_period_pills"] = "全期間"
     at.run()
     assert not at.exception
     parts = []

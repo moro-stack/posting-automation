@@ -146,3 +146,80 @@ def test_split_summary_rows_keeps_original_order():
     rows = _all_kinds_rows()
     cost, _ = L.split_summary_rows(rows)
     assert [r["区分"] for r in cost] == [r["区分"] for r in rows if r["区分"] != "売上"]
+
+
+# ===== 大阪支社売上ページ（依頼⑧・2026-08-27 大橋様） =====
+
+
+def test_delivery_counts_sums_haifu_and_hasamikomi_separately():
+    """配布部数（冊子・チラシ）と挟み込み数を分けて数える。"""
+    lines = [
+        {"remark": "配布", "report_qty": 3000, "pay_type": "歩合"},
+        {"remark": "配布", "report_qty": 1500, "pay_type": "歩合"},
+        {"remark": "挟み込み", "report_qty": 800, "pay_type": "歩合"},
+    ]
+    assert L.delivery_counts(lines) == {"配布": 4500, "挟み込み": 800}
+
+
+def test_delivery_counts_ignores_rows_that_are_not_deliveries():
+    """交通費・手当・その他は部数ではないので数えない。"""
+    lines = [
+        {"remark": "配布", "report_qty": 100, "pay_type": "歩合"},
+        {"remark": "交通費", "report_qty": 5, "pay_type": "歩合"},
+        {"remark": "手当", "report_qty": 3, "pay_type": "歩合"},
+        {"remark": "その他", "report_qty": 9, "pay_type": "歩合"},
+    ]
+    assert L.delivery_counts(lines) == {"配布": 100, "挟み込み": 0}
+
+
+def test_delivery_counts_uses_copies_for_non_commission_pay_types():
+    """🔴 日当・時給・月給は数量が日数/時間なので、部数は copies 列を使う。
+    ここを report_qty のまま数えると「3日＝3部」という嘘の部数になる。"""
+    lines = [{"remark": "配布", "report_qty": 3, "copies": 1800, "pay_type": "日当"}]
+    assert L.delivery_counts(lines)["配布"] == 1800
+
+
+def test_delivery_counts_on_empty_input():
+    assert L.delivery_counts([]) == {"配布": 0, "挟み込み": 0}
+    assert L.delivery_counts(None) == {"配布": 0, "挟み込み": 0}
+
+
+def _rows(*pairs):
+    return [{"案件": name, "区分": label, "売上": 0, "原価": 0, "利益": 0}
+            for name, label in pairs]
+
+
+def test_sort_project_summary_rows_uses_the_order_ohashi_san_asked_for():
+    """関西ぱど → アドバリュー → リビング → その他 → 空白（区分未設定）。"""
+    rows = _rows(("その他", None), ("リビングプロシード", None),
+                 ("アドバリュー", "8-1"), ("関西ぱど：京阪北版", None), ("", None))
+    got = [r["案件"] for r in L.sort_project_summary_rows(rows)]
+    assert got == ["関西ぱど：京阪北版", "アドバリュー", "リビングプロシード", "その他", ""]
+
+
+def test_sort_project_summary_rows_keeps_kansai_pado_versions_together():
+    rows = _rows(("関西ぱど：京阪南版", None), ("アドバリュー", "8-1"),
+                 ("関西ぱど：京阪北版", None))
+    got = [r["案件"] for r in L.sort_project_summary_rows(rows)]
+    assert got[:2] == ["関西ぱど：京阪北版", "関西ぱど：京阪南版"]
+
+
+def test_sort_project_summary_rows_orders_advalue_weeks_by_month_then_week():
+    """🔴 文字列順だと 10-1 が 8-1 より前に来る。"""
+    rows = _rows(("アドバリュー", "10-1"), ("アドバリュー", "8-2"),
+                 ("アドバリュー", "9-1"), ("アドバリュー", "8-1"))
+    got = [r["区分"] for r in L.sort_project_summary_rows(rows)]
+    assert got == ["8-1", "8-2", "9-1", "10-1"]
+
+
+def test_sort_project_summary_rows_puts_unknown_projects_before_the_blank_one():
+    """🔴 取りこぼしゼロ。案件マスタが増えても行が消えない。"""
+    rows = _rows(("", None), ("新しい案件", None), ("その他", None))
+    got = [r["案件"] for r in L.sort_project_summary_rows(rows)]
+    assert got == ["その他", "新しい案件", ""]
+
+
+def test_sort_project_summary_rows_loses_no_row():
+    rows = _rows(("その他", None), ("", None), ("アドバリュー", "8-1"),
+                 ("関西ぱど：京阪北版", None), ("知らない", None))
+    assert len(L.sort_project_summary_rows(rows)) == len(rows)

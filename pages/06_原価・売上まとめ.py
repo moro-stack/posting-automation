@@ -12,14 +12,16 @@ from common.ui import (apply_app_style, nice_table, period_picker, show_flash,
 
 apply_app_style()
 show_flash()
-st.title("原価・売上まとめ（KPS大阪支社）")
+st.title("大阪支社売上")
 
 
 def _yen(v):
     return f"¥{posting_logic.fmt_num(v)}"
 
 
-lo, hi, note = period_picker(key="summary_period")
+# 🔴 依頼⑧(2026-08-27 大橋様): このページは開いたら「今月の売上」がまず見えること。
+# 既定の期間を「今月」にする(他の期間に切り替えれば今までどおり見られる)。
+lo, hi, note = period_picker(key="summary_period", default="今月")
 st.caption(f"表示期間: {note}")
 
 # 全案件横断で集める（project_id 指定なし＝全件）
@@ -38,6 +40,8 @@ for inv in store.list_contract_invoices():
         ln = dict(ln)
         ln["issue_date"] = inv.get("issue_date")
         ln["distributor_id"] = inv.get("distributor_id")
+        # 登録時点の支払形態。配布部数の数え方(数量が部数か日数か)がこれで変わる。
+        ln["pay_type"] = inv.get("pay_type")
         contract_lines.append(ln)
 
 id2proj = {p["id"]: p["name"] for p in store.list_projects()}
@@ -55,17 +59,41 @@ rows = posting_logic.company_summary_rows(
     id2proj=id2proj, id2vendor=id2vendor, id2cat=id2cat,
     id2client=id2client, id2dist=id2dist)
 
-s1, s2, s3 = st.columns(3)
-s1.markdown(f'<div style="color:#67788a;font-weight:700;font-size:.9rem">売上（税込）</div>'
-            f'<div style="color:#1f2d3a;font-weight:800;font-size:2.2rem">{_yen(totals["sales"])}</div>',
-            unsafe_allow_html=True)
-s2.markdown(f'<div style="color:#67788a;font-weight:700;font-size:.9rem">原価（税込）</div>'
-            f'<div style="color:#1f2d3a;font-weight:800;font-size:2.2rem">{_yen(totals["cost"])}</div>',
-            unsafe_allow_html=True)
 _pc = "#0f87b8" if totals["profit"] >= 0 else "#c0392b"
-s3.markdown(f'<div style="color:#67788a;font-weight:700;font-size:.9rem">利益</div>'
-            f'<div style="color:{_pc};font-weight:800;font-size:2.2rem">{_yen(totals["profit"])}</div>',
-            unsafe_allow_html=True)
+# 利益率。売上0のときに割り算をすると落ちるので、そのときは「—」を出す
+# (0%と書くと「利益率がゼロだった」という別の意味になってしまう)。
+_rate = (f'{totals["profit"] / totals["sales"] * 100:.1f}%'
+         if totals["sales"] else "—")
+
+
+def _kpi(col, label, value, color="#1f2d3a"):
+    col.markdown(
+        f'<div class="metric-lines" style="line-height:1.15">'
+        f'<div style="color:#67788a;font-weight:700;font-size:.9rem">{label}</div>'
+        f'<div style="color:{color};font-weight:800;font-size:2.2rem">{value}</div></div>',
+        unsafe_allow_html=True)
+
+
+s1, s2, s3, s4 = st.columns(4)
+_kpi(s1, "売上（税込）", _yen(totals["sales"]))
+_kpi(s2, "原価（税込）", _yen(totals["cost"]))
+_kpi(s3, "利益", _yen(totals["profit"]), _pc)
+_kpi(s4, "利益率", _rate, _pc)
+
+# 🔴 依頼⑧(2026-08-27 大橋様): 配布部数(冊子・チラシ)と挟み込み数も合算して出す。
+# 「どれだけ配ったか」が見えるとモチベーションになる、という位置づけの副次的な
+# 情報なので、売上・原価・利益・利益率よりも**小さい表示**にする。
+_counts = posting_logic.delivery_counts(contract_lines)
+d1, d2, _d3 = st.columns([1, 1, 2])
+for _col, _label, _value in (
+        (d1, "配布部数（冊子・チラシ）", _counts["配布"]),
+        (d2, "挟み込み数", _counts["挟み込み"])):
+    _col.markdown(
+        f'<div class="metric-lines" style="line-height:1.15">'
+        f'<div style="color:#8b98a6;font-weight:600;font-size:.78rem">{_label}</div>'
+        f'<div style="color:#67788a;font-weight:700;font-size:1.15rem">'
+        f'{posting_logic.fmt_num(_value)} 部</div></div>',
+        unsafe_allow_html=True)
 
 st.divider()
 
@@ -79,6 +107,9 @@ _by_proj = posting_logic.company_summary_by_project(
 if not _by_proj:
     st.caption("この期間のデータはありません。")
 else:
+    # 🔴 依頼⑧(2026-08-27 大橋様): 並び順は
+    # 関西ぱど → アドバリュー → リビング → その他 → 空白(区分未設定) で固定。
+    _by_proj = posting_logic.sort_project_summary_rows(_by_proj)
     _disp = [{"案件": (f'{r["案件"]}　{r["区分"]}' if r["区分"] else r["案件"]),
               "売上（税込）": _yen(r["売上"]), "原価（税込）": _yen(r["原価"]),
               "利益": _yen(r["利益"])} for r in _by_proj]

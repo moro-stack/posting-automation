@@ -400,6 +400,59 @@ def split_vehicle_logs(rows):
     return out
 
 
+# 🔴 依頼⑧(2026-08-27 大橋様): 大阪支社売上ページの案件別表示は、
+# 「関西ぱど → アドバリュー → リビング → その他 → 空白(区分未設定)」の順に固定する。
+# 案件名の前方一致で判定する(マスタ名は「関西ぱど：京阪北版」のように版が付くため)。
+_PROJECT_ORDER_PREFIXES = ("関西ぱど", "アドバリュー", "リビング", "その他")
+_PROJECT_ORDER_UNKNOWN = len(_PROJECT_ORDER_PREFIXES)        # 知らない案件はその他の後
+_PROJECT_ORDER_BLANK = _PROJECT_ORDER_UNKNOWN + 1            # 案件未設定は最後
+
+
+def _project_order(name) -> int:
+    n = str(name or "").strip()
+    if not n:
+        return _PROJECT_ORDER_BLANK
+    for i, prefix in enumerate(_PROJECT_ORDER_PREFIXES):
+        if n.startswith(prefix):
+            return i
+    return _PROJECT_ORDER_UNKNOWN
+
+
+def sort_project_summary_rows(rows):
+    """案件別の集計行を、大阪支社の見たい順に並べ替える。
+
+    知らない案件名は捨てずに「その他」と「空白」のあいだに置く
+    (案件マスタが増えたときに行が消えないように)。
+    同じ案件の中はアドバリューの週(8-1→8-2→9-1→10-1)を月→週の順に並べる
+    (素の文字列順だと 10-1 が 8-1 より前に来てしまう)。
+    """
+    from common import advalue
+
+    def _key(r):
+        label = r.get("区分") or ""
+        week = advalue.parse_week_label(label)
+        return (_project_order(r.get("案件")), str(r.get("案件") or ""),
+                (0, week[0], week[1], "") if week else (1, 0, 0, label))
+
+    return sorted(rows or [], key=_key)
+
+
+def delivery_counts(contract_lines) -> dict:
+    """配布部数（冊子・チラシ）と挟み込み数を、種別ごとに合算する。
+
+    依頼⑧(2026-08-27 大橋様)＝売上・原価・利益に加えて、どれだけ配ったかも
+    出したい(モチベーション向上のための副次的な情報)。
+    交通費・手当・その他は部数を数えない。日当・時給・月給は数量が日数/時間なので
+    line_copies が copies 列を見る(3日を3部と数えない)。
+    """
+    out = {"配布": 0.0, "挟み込み": 0.0}
+    for ln in contract_lines or []:
+        remark = (ln or {}).get("remark")
+        if remark in out:
+            out[remark] += line_copies(ln, (ln or {}).get("pay_type"))
+    return {k: (int(v) if v == int(v) else v) for k, v in out.items()}
+
+
 def company_summary_rows(*, receivables, payables, petty, contract_lines, manual,
                          id2proj, id2vendor, id2cat, id2client, id2dist):
     """区分・日付・項目・案件・金額 に正規化した明細行のリスト（原価・売上まとめ用）。"""

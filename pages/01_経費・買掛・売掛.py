@@ -16,7 +16,9 @@ apply_app_style()
 # st.camera_input は描画された瞬間にカメラ許可を要求するため、
 # ページの先頭＝カメラを描くより前に仕込む。
 force_environment_camera()
-st.title("小口／買掛／売掛の登録")
+# 依頼⑧(2026-08-27 大橋様): ページ名を「原価・売上登録」に変更
+# (サイドバーの表示名は app.py の st.Page(title=...) 側で合わせている)。
+st.title("原価・売上登録")
 
 # 🔴 segmented_control は選択を解除でき、そのとき None を返す。None のまま下の
 # if/elif/else に流すと else に落ちて「売掛」の画面が開いてしまうため、
