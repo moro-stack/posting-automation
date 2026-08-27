@@ -55,11 +55,53 @@ def build_row(*, hakko_gou, ban_mei, uriage_zeikomi, genka_goukei_zeikomi,
     }
 
 
+# ===== 会議用売上表のセクション（依頼⑦・2026-08-27 大橋様） =====
+# 新テンプレート(KPS(大阪)原価売上表テンプレート.xlsx)は
+#   京阪南／京阪北 → 単独チラシ → アド・バリュー(週ごと) → リビング → 集計
+# というセクション構成になっている。案件マスタの名前をこのセクションに割り当てる。
+SECTION_PADO_MINAMI = "京阪南"
+SECTION_PADO_KITA = "京阪北"
+SECTION_TANDOKU = "単独"        # 単独チラシ＝案件「その他」(件数ぶん行を増やす)
+SECTION_ADVALUE = "アドバリュー"
+SECTION_LIVING = "リビング"
+SECTION_UNKNOWN = "未分類"      # どれにも当てはまらない案件・案件未設定
+
+_PROJECT_SECTIONS = {
+    "関西ぱど：京阪南版": SECTION_PADO_MINAMI,
+    "関西ぱど：京阪北版": SECTION_PADO_KITA,
+    "その他": SECTION_TANDOKU,
+    "アドバリュー": SECTION_ADVALUE,
+    "リビングプロシード": SECTION_LIVING,
+}
+
+
+def section_of(label) -> str:
+    """売上表の見出しラベルから、どのセクションの行かを決める。
+
+    ラベルは build_bulk_rows が作る「案件名」または「案件名　区分」。
+    🔴 知らない案件名は捨てずに SECTION_UNKNOWN に入れる。案件マスタが増えた
+    ときに「どのセクションにも出ない行」が静かに生まれるのを防ぐため。
+    """
+    name = str(label or "").split("　")[0].strip()
+    return _PROJECT_SECTIONS.get(name, SECTION_UNKNOWN)
+
+
+def case_label_of(label) -> str:
+    """見出しラベルの「区分」部分(アドバリューの 8-1 等)。無ければ空文字。"""
+    parts = str(label or "").split("　", 1)
+    return parts[1].strip() if len(parts) > 1 else ""
+
+
+# 会議用売上表では「その他」(単独チラシ)も案件ごとに行を分ける
+# (依頼⑦・2026-08-27＝単独案件が複数あれば行を増やす)。
+BULK_SPLIT_LABEL_PROJECTS = ("アドバリュー", "その他")
+
+
 def build_bulk_rows(*, receivables, petty, payables, contract_lines, manual, id2proj, id2cat):
     """月次の全案件ぶんを、会議用売上表の行としてまとめて作る(依頼②・2026-08-20)。
 
     グルーピングは posting_logic.company_summary_by_project と同じ
-    (アドバリューだけ案件区分(8-1等)ごとに分ける)。戻り値は
+    (アドバリューと「その他」を案件区分ごとに分ける)。戻り値は
     [(見出しラベル, build_row()の戻り値), ...]。ラベルは実物の
     「ｱﾄﾞ・バリュー　8-1」のような結合セル1つぶんの表示名。
     """
@@ -67,13 +109,13 @@ def build_bulk_rows(*, receivables, petty, payables, contract_lines, manual, id2
 
     summary = _pl.company_summary_by_project(
         receivables=receivables, payables=payables, petty=petty,
-        contract_lines=contract_lines, manual=manual, id2proj=id2proj)
+        contract_lines=contract_lines, manual=manual, id2proj=id2proj,
+        split_labels_for=BULK_SPLIT_LABEL_PROJECTS)
 
     koutsuhi, nomimono = {}, {}
     for r in petty:
         pname = id2proj.get(r.get("project_id"), "")
-        label = (str(r.get("other_label") or "").strip() or None) if pname == "アドバリュー" else None
-        key = (pname, label)
+        key = _pl.project_group_key(pname, r.get("other_label"), BULK_SPLIT_LABEL_PROJECTS)
         cat = id2cat.get(r.get("category_id"))
         amt = int(r.get("amount") or 0)
         if cat == "駐車場代":

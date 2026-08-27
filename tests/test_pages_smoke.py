@@ -1840,7 +1840,12 @@ def test_summary_page_bulk_export_lists_expected_cases(db):
 
 
 def test_summary_page_bulk_export_workbook_matches_real_style(db, monkeypatch):
-    """依頼②: ダウンロードされる内容が実物と同じ列見出し・デザインであること。"""
+    """依頼②: ダウンロードされる内容が実物と同じ列見出し・デザインであること。
+
+    🔴 依頼⑦(2026-08-27)でレイアウトを新テンプレートに合わせた。
+    京阪南は「版名(B列)＝京阪南」の固定行になり、売上は J列(税抜)に入る
+    (K列は =ROUND(J*1.1,0) の数式)。
+    """
     import io
 
     import openpyxl
@@ -1848,7 +1853,7 @@ def test_summary_page_bulk_export_workbook_matches_real_style(db, monkeypatch):
 
     # ⚠️ 既定の年月(今日の日付)と被ると、既定表示分の生成も同じシート名で
     # 捕まってヒットが2件になる。今日と絶対に被らない過去月を選ぶ。
-    pid = store.add_project("京阪南", db_path=db)
+    pid = store.add_project("関西ぱど：京阪南版", db_path=db)
     store.add_receivable("2025-12", None, 847502, project_id=pid, db_path=db)
     store.add_petty_cash("2025-12-01", None, 324505, project_id=pid, db_path=db)
     seen = _spy_xlsx(monkeypatch)
@@ -1865,8 +1870,10 @@ def test_summary_page_bulk_export_workbook_matches_real_style(db, monkeypatch):
     ws = wb.active
     assert ws["A1"].value == "㈱ケイピーエス　大阪支社　　2025年 12月度 売上表"
     assert ws["A2"].value == "発行号"
-    assert ws["A4"].value == "京阪南"
-    assert ws["K4"].value == 847502
+    assert ws["B4"].value == "京阪南"
+    assert ws["J4"].value == round(847502 / 1.1)   # 売上合計(税抜)
+    assert ws["K4"].value == "=ROUND(J4*1.1,0)"    # 税込はテンプレートの数式
+    assert ws["O4"].value == 324505                # 配布原価(税込)
 
 
 def test_issue_page_renders_with_action_bars(db):

@@ -308,20 +308,41 @@ def split_summary_rows(rows):
     return cost, sales
 
 
-def company_summary_by_project(*, receivables, payables, petty, contract_lines, manual, id2proj):
+# 案件別集計で「区分(other_label)ごとに行を分ける」案件。
+# 既定はアドバリューだけ＝画面(06 大阪支社売上)の案件別表は今までどおりの見え方。
+# 会議用売上表(依頼⑦)は「その他」も案件ごとに行を分けたいので、呼び出し側で
+# split_labels_for=("アドバリュー", "その他") を渡す。
+SPLIT_LABEL_PROJECTS = ("アドバリュー",)
+
+
+def project_group_key(project_name, other_label, split_labels_for=SPLIT_LABEL_PROJECTS):
+    """案件別集計のグループキー (案件名, 区分)。
+
+    🔴 集計側と、小口の交通費/飲み物の振り分け側でこの規則が食い違うと、
+    「行はあるのに交通費だけ別の行に付く」という静かなズレが起きる。
+    必ずこの関数を通すこと。
+    """
+    name = project_name or ""
+    label = str(other_label or "").strip() or None
+    return (name, label if name in (split_labels_for or ()) else None)
+
+
+def company_summary_by_project(*, receivables, payables, petty, contract_lines, manual, id2proj,
+                               split_labels_for=SPLIT_LABEL_PROJECTS):
     """案件別(アドバリューだけ号別明細と同じく区分ごと)に、売上・原価・利益を集計する。
 
     依頼②(2026-08-20): 原価・売上まとめで「細かい内訳は号別明細で見る、こちらは
     案件別の売上・原価だけで良い」というオーナー方針に沿った、シンプルな案件別集計。
     会議用売上表の一括出力も、この集計を土台にする。
+
+    split_labels_for に案件名を足すと、その案件も区分ごとに行を分ける
+    (依頼⑦・2026-08-27＝単独チラシ「その他」が複数あるとき行を増やすため)。
     """
     def _proj(pid):
         return id2proj.get(pid, "") if pid is not None else ""
 
     def _key(pid, other_label):
-        name = _proj(pid)
-        label = str(other_label or "").strip() or None
-        return (name, label if name == "アドバリュー" else None)
+        return project_group_key(_proj(pid), other_label, split_labels_for)
 
     agg = {}
 
