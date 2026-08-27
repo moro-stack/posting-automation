@@ -82,4 +82,36 @@ def test_issue_summary_metrics_have_overlap_fix_marker(tmp_path, monkeypatch):
 
     from common.ui import _STYLE
     assert "metric-lines" in _STYLE
-    assert "margin-bottom:0 !important" in _STYLE
+
+
+def test_overlap_fix_does_not_depend_on_has_pseudo_class():
+    """🔴 2026-08-27 再点検: 当初の修正は
+       [data-testid="stMarkdownContainer"]:has(.metric-lines){margin-bottom:0!important}
+    だった。:has() は iOS Safari 15.6 未満では効かない(caniuse: css-has)。
+    大橋様はiPhoneで見ているため、端末が古いと修正そのものが無効になる。
+
+    Streamlit の markdown コンテナは marginBottom:-1rem(spacing.lg) 固定なので、
+    子である .metric-lines 自身に padding-bottom:1rem を持たせれば
+    「内容+1rem、外側マージン-1rem」で相殺され、:has() 無しで同じ高さになる。
+    セレクタは単純なクラスセレクタだけになり、全ブラウザで確実に効く。
+    """
+    from common.ui import _STYLE
+
+    # .metric-lines 自身への padding での相殺になっていること
+    assert ".metric-lines{" in _STYLE.replace(" ", "")
+    assert "padding-bottom:1rem" in _STYLE.replace(" ", "")
+    # :has(.metric-lines) に頼っていないこと(古いiOS Safariで無効になるため)
+    assert ":has(.metric-lines)" not in _STYLE.replace(" ", "")
+
+
+def test_metric_lines_blocks_do_not_carry_inline_margin_that_reopens_the_gap():
+    """CSSで相殺した高さを、ページ側のインラインstyleが打ち消していないこと。
+    .metric-lines を持つdivに margin-bottom / padding-bottom を直接書くと
+    CSSより後勝ちで相殺が壊れる(同じバグの再発経路)。"""
+    import re
+
+    src = open(os.path.join(ROOT, "pages", "03_号別明細.py"), encoding="utf-8").read()
+    for m in re.finditer(r'<div class="metric-lines" style="([^"]*)"', src):
+        style = m.group(1)
+        assert "margin-bottom" not in style, f"インラインstyleで相殺が壊れる: {style}"
+        assert "padding-bottom" not in style, f"インラインstyleで相殺が壊れる: {style}"

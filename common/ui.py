@@ -237,8 +237,18 @@ div[data-baseweb="popover"]:has([data-baseweb="calendar"]) label{ display:none !
    縦積みになると、既定の stMarkdownContainer{margin-bottom:-1rem} が
    display:flex;align-items:center の親のクロスサイズ計算を1rem分短くし、
    次のカラムがその欠けた分だけめり込んで文字が重なって見える(2026-08-20)。
-   metric-lines クラスを付けた要素だけ margin-bottom を打ち消して防ぐ。 */
-[data-testid="stMarkdownContainer"]:has(.metric-lines){ margin-bottom:0 !important; }
+
+   🔴 2026-08-27 再修正: 当初は stMarkdownContainer 側を :has() で選び、
+   margin-bottom を 0 に打ち消していた。しかし :has() は
+   iOS Safari 15.6 未満では効かない(caniuse: css-has)。
+   大橋様はiPhoneで確認されているため、端末が古いと修正そのものが無効になる。
+   Streamlit の markdown コンテナのマージンは marginBottom:-1rem(theme.spacing.lg)で
+   固定なので、子の .metric-lines 自身に同じ 1rem の padding を持たせれば
+   「内容+1rem／外側マージン-1rem」で相殺され、見た目の高さは :has() 版と同じになる。
+   セレクタが単純なクラスセレクタだけになるので、どのブラウザでも確実に効く。
+   ⚠️ ページ側で .metric-lines の div に margin-bottom / padding-bottom を
+      インライン指定すると、この相殺が壊れて同じバグが再発する。 */
+.metric-lines{ display:block; padding-bottom:1rem; }
 
 /* ファイルアップローダーを日本語化 */
 [data-testid="stFileUploaderDropzoneInstructions"]{ display:none !important; }
