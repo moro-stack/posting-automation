@@ -431,3 +431,110 @@ def test_shrink_to_fit_is_off_in_bottom_block(tpl):
                 vals = [x for x in ws[c.row] if x.column > c.column
                         and x.value is not None]
                 assert not vals[0].alignment.shrink_to_fit,                     f"{c.value} の数字に縮小が残っている"
+
+
+# ===== B列(名前)の折り返し（2026-08-27・大橋様ご指摘） =====
+# 「フィールドサービス」「クローバージャパン」のような長い配布員名(外注先)が
+# B列(幅10.7≒全角5文字)からはみ出して読めない。セル内で折り返して全文を見せる。
+
+
+def test_name_line_count_counts_wrapped_lines_by_column_width():
+    """全角1文字＝列幅2の換算。幅10.7なら1行5文字。"""
+    assert S.name_line_count("枡田", 10.7) == 1
+    assert S.name_line_count("aim", 10.7) == 1
+    assert S.name_line_count("フィールドサービス", 10.7) == 2      # 9文字
+    assert S.name_line_count("クローバージャパン", 10.7) == 2      # 9文字
+    assert S.name_line_count("あ" * 11, 10.7) == 3
+
+
+def test_name_line_count_handles_empty_and_none():
+    assert S.name_line_count("", 10.7) == 1
+    assert S.name_line_count(None, 10.7) == 1
+
+
+def test_name_line_count_never_divides_by_zero_on_a_tiny_column():
+    assert S.name_line_count("あいう", 0.5) == 3
+
+
+def test_wrapped_name_height_keeps_the_template_height_for_short_names():
+    """短い名前は今までどおり。テンプレートの行高を勝手に変えない。"""
+    assert S.wrapped_name_height("枡田", col_width=10.7, font_size=16,
+                                 base_height=42.0) == 42.0
+
+
+def test_wrapped_name_height_grows_for_long_names():
+    """3行になる名前は42ptでは入りきらないので、行高を伸ばす。"""
+    h = S.wrapped_name_height("あ" * 13, col_width=10.7, font_size=16, base_height=42.0)
+    assert h > 42.0
+    assert h >= 3 * 16  # 3行ぶんの高さは最低でも確保されている
+
+
+def test_apply_name_turns_on_wrap_text(tpl):
+    """🔴 テンプレートの area_middle/area_last は wrap_text が付いていない。
+    複写しただけだと2人目以降の長い名前がはみ出したまま。"""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    for role in ("area_first", "area_middle", "area_last"):
+        cell = ws.cell(1, 2)
+        tpl.apply_name(cell, role, 2)
+        assert cell.alignment.wrap_text is True, f"{role} で折り返しが付いていない"
+
+
+def test_apply_name_keeps_border_and_font_unchanged(tpl):
+    """折り返しを足すだけ。罫線とフォント統一(16pt太字)は変えない。"""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    cell = ws.cell(1, 2)
+    tpl.apply_name(cell, "area_last", 2)
+    src = tpl.ws.cell(S.ROLE_ROWS["area_last"], 2)
+    assert cell.border.left.style == src.border.left.style
+    assert cell.border.bottom.style == src.border.bottom.style
+    assert (cell.font.sz, cell.font.b) == (16.0, True)   # area_first の見本で統一
+    assert cell.alignment.horizontal == src.alignment.horizontal
+
+
+def _build_with_long_leader_names():
+    table = [
+        ["配送管理表", "2026/08/21", "(1213号)"],
+        ["配布日", "号数", "ルート", "異動", "配送順位", "ぱどんな", "住所", "電話番号",
+         "担当地区", "チラシコード", "配送物", "配布部数", "配送備考", "町界名",
+         "街区（番地）名称", "受注種別", "チラシサイズ"],
+    ]
+    for chiku, name, bu in [
+        ("911001", "フィールドサービス", 4380),
+        ("912001", "クローバージャパン", 3080),
+        ("913001", "枡田", 2000),
+    ]:
+        table.append(["2026/08/21", "1213", 0, "", "", name, "", None, chiku,
+                      None, "91 ぱど", bu, "", "", "", "", ""])
+    rows = A.rows_from_table(table)
+    groups = A.group_by_chiku(rows)
+    version = A.detect_version(groups)
+    data = A.shukei_data(groups, version)
+    raw = A.build_shukei_daishi_workbook(data, version, "1213", "2026/08/21")
+    return openpyxl.load_workbook(io.BytesIO(raw))["集計表"]
+
+
+def test_long_leader_names_are_wrapped_in_the_generated_sheet():
+    ws = _build_with_long_leader_names()
+    seen = {}
+    for row in ws.iter_rows(min_col=2, max_col=2):
+        for c in row:
+            if c.value in ("フィールドサービス", "クローバージャパン", "枡田"):
+                seen[c.value] = c
+    assert set(seen) == {"フィールドサービス", "クローバージャパン", "枡田"}
+    for name, c in seen.items():
+        assert c.alignment.wrap_text is True, f"{name} が折り返し設定になっていない"
+
+
+def test_long_leader_name_rows_are_tall_enough_to_show_every_line():
+    """折り返した2行目が行高に隠れて読めない、を防ぐ。"""
+    ws = _build_with_long_leader_names()
+    for row in ws.iter_rows(min_col=2, max_col=2):
+        for c in row:
+            if c.value == "フィールドサービス":
+                need = S.wrapped_name_height(
+                    c.value, col_width=ws.column_dimensions["B"].width,
+                    font_size=c.font.sz, base_height=0)
+                h = ws.row_dimensions[c.row].height
+                assert h is not None and h >= need, f"行高 {h} < 必要 {need}"

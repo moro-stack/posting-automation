@@ -691,10 +691,16 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
                 _style(bcell, role, 2)
             ag = _style(ws.cell(ltop, 33, leader["busuu"]), role, 33)
             ah = _style(ws.cell(ltop, 34, leader["chiku"]), role, 34)
-            if tpl is not None:
-                h = tpl.row_height(role)
-                if h:
-                    ws.row_dimensions[ltop].height = h
+            # 🔴 2026-08-27 大橋様ご指摘: 長い外注先名(フィールドサービス等)は
+            # B列に収まらず折り返すので、その分だけ行高を伸ばす。
+            # 短い名前ならテンプレートの行高のまま(見た目は変わらない)。
+            _bw = ws.column_dimensions["B"].width
+            _base_h = tpl.row_height(role) if tpl is not None else None
+            _need_h = SS.wrapped_name_height(
+                leader["name"], col_width=_bw, font_size=bcell.font.sz,
+                base_height=_base_h)
+            if _need_h:
+                ws.row_dimensions[ltop].height = _need_h
             if lbot > ltop:
                 ws.merge_cells(start_row=ltop, start_column=2, end_row=lbot, end_column=2)
                 ws.merge_cells(start_row=ltop, start_column=33, end_row=lbot, end_column=33)

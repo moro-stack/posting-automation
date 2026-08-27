@@ -15,6 +15,7 @@
 行数は号によって 5〜32行 と変わる(実データで確認済み)ため、
 テンプレートの行を「役割ごとの見本」として使い回す。
 """
+import math
 from copy import copy
 from pathlib import Path
 
@@ -77,9 +78,19 @@ class ShukeiTemplate:
         (人が手で作った帳票で、たまたま名前が書かれていた行とそうでない行の
         違いがそのまま残っている)。統一しないと、エリア内で1人目のリーダー
         だけ大きく、2人目以降が小さく見えてしまう。
+
+        🔴 2026-08-27 大橋様ご指摘: フォントを統一したら、今度は
+        「フィールドサービス」「クローバージャパン」のような長い外注先名が
+        B列(幅10.7≒全角5文字)からはみ出して読めなくなった。テンプレートは
+        area_first にだけ折り返しが付いていて middle/last には付いていないため、
+        複写しただけでは2人目以降が切れる。名前欄は役割によらず必ず折り返す。
+        罫線・揃え・フォントはそのまま(折り返しだけを足す)。
         """
         self.apply(cell, role, col)
         cell.font = copy(self._ws.cell(ROLE_ROWS["area_first"], col).font)
+        alignment = copy(cell.alignment)
+        alignment.wrap_text = True
+        cell.alignment = alignment
         return cell
 
     def apply_bottom(self, cell, rel_row, col):
@@ -114,6 +125,37 @@ def copy_style(src, dst):
     if src.fill is not None and src.fill.fill_type == "solid":
         dst.fill = copy(src.fill)
     return dst
+
+
+# 名前欄(B列)の折り返し計算。
+# Excel の列幅は「標準フォントの半角0の幅」が1。日本語は全角なので1文字＝幅2で数える。
+_CHAR_WIDTH = 2
+# 1行あたりの高さ(pt)は フォントサイズ×この係数。Excelの既定の行送りにほぼ一致する。
+_LINE_HEIGHT_RATIO = 1.35
+
+
+def name_line_count(name, col_width) -> int:
+    """その名前が col_width の列で何行に折り返されるか(最低1行)。"""
+    text = "" if name is None else str(name)
+    per_line = max(1, int(float(col_width or 0) // _CHAR_WIDTH))
+    lines = 0
+    for part in text.split("\n"):
+        lines += max(1, math.ceil(len(part) / per_line))
+    return max(1, lines)
+
+
+def wrapped_name_height(name, *, col_width, font_size, base_height=None) -> float:
+    """折り返した名前が全部見える行高(pt)を返す。
+
+    テンプレートの行高(base_height)で足りるならそのまま返す＝短い名前のときは
+    見た目を一切変えない。足りないときだけ必要な高さまで伸ばす。
+
+    縦結合している下の行の高さは足し込まない(既定の行高がいくつになるかは
+    Excelの設定・フォントで変わるため)。先頭行だけで確実に収まる高さを返す。
+    """
+    lines = name_line_count(name, col_width)
+    need = lines * float(font_size or 11) * _LINE_HEIGHT_RATIO
+    return max(float(base_height or 0), need)
 
 
 def leader_role(index, count):
