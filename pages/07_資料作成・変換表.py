@@ -93,8 +93,12 @@ with tab_atehagi:
                 courses = A.jisseki_courses(groups, version)
                 gou = next((r["gou"] for r in rows if r.get("gou")), None)
                 haifubi = next((r["haifubi"] for r in rows if r.get("haifubi")), "")
+                # 外注先/リーダーごとに別タブになる(2026-08-27 大橋様ご指摘)。
+                # 何枚のタブになるかを先に伝えて、印刷前に把握できるようにする。
+                _n_tabs = len({c.get("leader") for c in courses})
                 st.session_state["keihan_out"] = (
-                    f"挟み込み実績表（{len(courses)}コース）",
+                    f"挟み込み実績表（{len(courses)}コース／"
+                    f"外注先・リーダー別に{_n_tabs}タブ）",
                     A.build_jisseki_daishi_workbook(courses, version, gou, haifubi),
                     A.jisseki_filename(version, rows))
             if c3.button("集計表を生成", key="keihan_shukei"):

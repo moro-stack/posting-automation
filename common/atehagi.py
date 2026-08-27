@@ -12,7 +12,7 @@ from collections import OrderedDict
 import openpyxl
 from openpyxl.worksheet.properties import PageSetupProperties
 
-from common.excel_io import freeze_xlsx_bytes, sanitize_sheet_chars
+from common.excel_io import freeze_xlsx_bytes, safe_sheet_title, sanitize_sheet_chars
 
 KEIHAN_KITA = "北"
 KEIHAN_MINAMI = "南"
@@ -409,21 +409,17 @@ def _md_from(haifubi) -> str:
     return ""
 
 
-def build_jisseki_daishi_workbook(courses, version, gou, haifubi, per_row=4) -> bytes:
-    """実績表を実物台紙スタイルで出力。1コース=ヘッダー行(コース名)+本文行
+_JISSEKI_DEFAULT_SHEET = "実績表"
+
+
+def _fill_jisseki_sheet(ws, courses, *, title, per_row):
+    """1シート分の実績表を書く。1コース=ヘッダー行(コース名)+本文行
     (案件名/枚数を1チラシ1行)+サイン行(横線付き)。per_row コース/行で折り返す。"""
     from openpyxl.styles import Alignment, Font, Border, Side
     from openpyxl.worksheet.properties import PageSetupProperties
 
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "実績表"
     ncol = per_row * 2
 
-    label = _VERSION_LABEL.get(version, "京阪")
-    md = _md_from(haifubi)
-    gou_part = f"{gou}号" if gou else "号"
-    title = f"{md} ／ {gou_part}　{label}"
     ws.cell(row=1, column=1, value=title)
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncol)
     t = ws.cell(row=1, column=1)
@@ -439,57 +435,42 @@ def build_jisseki_daishi_workbook(courses, version, gou, haifubi, per_row=4) -> 
     signalign = Alignment(horizontal="left", vertical="bottom")
 
     ROWS_PER = 3  # ヘッダー・本文・サイン
-    LEADER_ROW_H = 22
-
-    # 🔴 2026-08-19 大橋様ご指摘: 「リーダー名」「外注先」ごとに分けて表示したい。
-    # jisseki_courses が付ける leader(=ぱどんな。個人名も外注先の会社名も同じ欄)
-    # ごとにコースをまとめ、グループの先頭にその名前を見出し行として出す。
-    # leader を持たないコース(このテストのように手作りしたデータ等)は
-    # 見出し行を出さず、以前どおりの表示に留める(後方互換)。
     row = 2
-    for leader, group_courses in _group_by_leader(courses):
-        if leader:
-            lcell = ws.cell(row=row, column=1, value=leader)
-            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=ncol)
-            lcell.font = Font(bold=True, size=13)
-            lcell.alignment = Alignment(horizontal="left", vertical="center")
-            ws.row_dimensions[row].height = LEADER_ROW_H
-            row += 1
 
-        for i, c in enumerate(group_courses):
-            grp, col = divmod(i, per_row)
-            top = row + grp * ROWS_PER
-            rh, rb, rs = top, top + 1, top + 2
-            c0 = 1 + col * 2
-            c1 = c0 + 1
-            ws.merge_cells(start_row=rh, start_column=c0, end_row=rh, end_column=c1)
-            h = ws.cell(row=rh, column=c0, value=c["course_name"])
-            h.font = Font(bold=True, size=11)
-            h.alignment = center
-            names = "\n".join(f["name"] for f in c["flyers"])
-            counts = "\n".join(str(f["count"]) for f in c["flyers"])
-            ws.cell(row=rb, column=c0, value=names).alignment = topleft
-            ws.cell(row=rb, column=c1, value=counts).alignment = topright
-            ws.merge_cells(start_row=rs, start_column=c0, end_row=rs, end_column=c1)
-            s = ws.cell(row=rs, column=c0, value="サイン：")
-            s.alignment = signalign
-            for (r, cc) in [(rh, c0), (rh, c1), (rb, c0), (rb, c1), (rs, c0), (rs, c1)]:
-                ws.cell(row=r, column=cc).border = Border(
-                    left=thick if cc == c0 else thin,
-                    right=thick if cc == c1 else thin,
-                    top=thick if r == rh else thin,
-                    bottom=thick if r == rs else thin,
-                )
+    for i, c in enumerate(courses):
+        grp, col = divmod(i, per_row)
+        top = row + grp * ROWS_PER
+        rh, rb, rs = top, top + 1, top + 2
+        c0 = 1 + col * 2
+        c1 = c0 + 1
+        ws.merge_cells(start_row=rh, start_column=c0, end_row=rh, end_column=c1)
+        h = ws.cell(row=rh, column=c0, value=c["course_name"])
+        h.font = Font(bold=True, size=11)
+        h.alignment = center
+        names = "\n".join(f["name"] for f in c["flyers"])
+        counts = "\n".join(str(f["count"]) for f in c["flyers"])
+        ws.cell(row=rb, column=c0, value=names).alignment = topleft
+        ws.cell(row=rb, column=c1, value=counts).alignment = topright
+        ws.merge_cells(start_row=rs, start_column=c0, end_row=rs, end_column=c1)
+        s = ws.cell(row=rs, column=c0, value="サイン：")
+        s.alignment = signalign
+        for (r, cc) in [(rh, c0), (rh, c1), (rb, c0), (rb, c1), (rs, c0), (rs, c1)]:
+            ws.cell(row=r, column=cc).border = Border(
+                left=thick if cc == c0 else thin,
+                right=thick if cc == c1 else thin,
+                top=thick if r == rh else thin,
+                bottom=thick if r == rs else thin,
+            )
 
-        ngrp = (len(group_courses) + per_row - 1) // per_row
-        for grp in range(ngrp):
-            block = group_courses[grp * per_row:(grp + 1) * per_row]
-            max_lines = max(len(c["flyers"]) for c in block)
-            top = row + grp * ROWS_PER
-            ws.row_dimensions[top].height = 20
-            ws.row_dimensions[top + 1].height = max(36, max_lines * 18)
-            ws.row_dimensions[top + 2].height = 28
-        row += ngrp * ROWS_PER
+    ngrp = (len(courses) + per_row - 1) // per_row
+    for grp in range(ngrp):
+        block = courses[grp * per_row:(grp + 1) * per_row]
+        max_lines = max(len(c["flyers"]) for c in block)
+        top = row + grp * ROWS_PER
+        ws.row_dimensions[top].height = 20
+        ws.row_dimensions[top + 1].height = max(36, max_lines * 18)
+        ws.row_dimensions[top + 2].height = 28
+    row += ngrp * ROWS_PER
 
     for col in range(per_row):
         ws.column_dimensions[openpyxl.utils.get_column_letter(1 + col * 2)].width = 24
@@ -501,7 +482,45 @@ def build_jisseki_daishi_workbook(courses, version, gou, haifubi, per_row=4) -> 
     ws.page_setup.orientation = "landscape"
     ws.page_setup.fitToWidth = 1
     ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+    return ws
 
+
+def build_jisseki_daishi_workbook(courses, version, gou, haifubi, per_row=4) -> bytes:
+    """実績表を実物台紙スタイルで出力する。
+
+    🔴 2026-08-27 大橋様ご指摘(依頼④): 印刷して現場で使うので、外注先/リーダー
+    ごとに **別々のシート(タブ)** に分ける。1枚のシートの中で見出し行を挟んで
+    並べる方式(2026-08-19の対応)は、印刷すると1枚に混ざってしまい使いにくかった。
+    タブ名は外注先/リーダー名そのもの。Excelのシート名禁止文字・31文字制限・
+    重複は excel_io の共通処理(safe_sheet_title)に任せる
+    (2026-08-10 の仕分け表と同じ「シート名でExcelが修復に入る」事故を防ぐため)。
+
+    leader を持たないコース(手作りデータ・古い呼び出し)は、以前どおり
+    「実績表」1枚にまとめる(後方互換)。
+    """
+    wb = openpyxl.Workbook()
+    base = wb.active
+
+    label = _VERSION_LABEL.get(version, "京阪")
+    md = _md_from(haifubi)
+    gou_part = f"{gou}号" if gou else "号"
+    base_title = f"{md} ／ {gou_part}　{label}"
+
+    used = set()
+    for leader, group_courses in _group_by_leader(courses):
+        raw_title = leader or _JISSEKI_DEFAULT_SHEET
+        sheet_title = safe_sheet_title(raw_title, existing=used)
+        used.add(sheet_title)
+        ws = wb.create_sheet(title=sheet_title)
+        # 印刷したとき誰の紙か分かるよう、見出しにも名前を出す
+        title = f"{base_title}　{leader}" if leader else base_title
+        _fill_jisseki_sheet(ws, group_courses, title=title, per_row=per_row)
+
+    if not used:   # コースが1件も無いとき。空のブックにしない。
+        ws = wb.create_sheet(title=_JISSEKI_DEFAULT_SHEET)
+        _fill_jisseki_sheet(ws, [], title=base_title, per_row=per_row)
+
+    wb.remove(base)
     buf = io.BytesIO()
     wb.save(buf)
     return freeze_xlsx_bytes(buf.getvalue())

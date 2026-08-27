@@ -137,7 +137,7 @@ def sanitize_sheet_chars(title, replacement="_") -> str:
                    for ch in str(title))
 
 
-def _safe_sheet_title(title: str, existing=()) -> str:
+def safe_sheet_title(title: str, existing=()) -> str:
     """Excelのシート名禁止文字を除き31文字に丸め、既存名と重複しないようにする。"""
     cleaned = sanitize_sheet_chars(title, "").strip() or "Sheet"
     cleaned = cleaned[:31]
@@ -152,6 +152,11 @@ def _safe_sheet_title(title: str, existing=()) -> str:
     return cleaned
 
 
+# 旧名。シート名を作る処理はこの1つに集約する方針(2026-08-10 f00515c)なので、
+# 既存の呼び出し・テストが動くよう別名を残す。
+_safe_sheet_title = safe_sheet_title
+
+
 def append_dataframe_sheet(workbook, title: str, df: "pd.DataFrame", row_height=None):
     """DataFrame を新しいシートとして workbook に追加する(1行目=ヘッダー)。
 
@@ -160,7 +165,7 @@ def append_dataframe_sheet(workbook, title: str, df: "pd.DataFrame", row_height=
     先頭0が消えないよう、明示的にテキスト書式(@)で書き込む。row_height 指定で行高を統一。
     """
     from openpyxl.utils import get_column_letter
-    safe = _safe_sheet_title(title, existing=set(workbook.sheetnames))
+    safe = safe_sheet_title(title, existing=set(workbook.sheetnames))
     ws = workbook.create_sheet(title=safe)
     ws.append([str(c) for c in df.columns])
     for row in df.itertuples(index=False, name=None):
