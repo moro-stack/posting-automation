@@ -684,7 +684,16 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
 
     PER_ROW = 6
     r = 4
-    for area_block in _shukei_layout(data):
+    # 🔴 2026-08-28 大橋様: 折り返しても16ptでは行に収まらない長い外注先名があり
+    # (「ポスティングスタッフ」「クローバージャパン」)、文字が重なって読めなかった。
+    # 全員が行高に収まる一番大きいサイズを先に決め、名前は全部そのサイズで描く
+    # (人によって大きさが変わらないよう、シート内で1つに揃える)。
+    _layout = list(_shukei_layout(data))
+    _all_names = [l["name"] for b in _layout for l in b["leaders"]]
+    _name_size = SS.fit_name_font_size(
+        _all_names, col_width=ws.column_dimensions["B"].width,
+        base_height=(tpl.row_height("area_first") if tpl is not None else None) or 42.0)
+    for area_block in _layout:
         area_top = r
         n_leaders = len(area_block["leaders"])
         for li, leader in enumerate(area_block["leaders"]):
@@ -705,9 +714,12 @@ def build_shukei_daishi_workbook(data, version, gou, haifubi) -> bytes:
             lbot = r
             bcell = ws.cell(ltop, 2, leader["name"])
             if tpl is not None:
-                tpl.apply_name(bcell, role, 2)
+                tpl.apply_name(bcell, role, 2, font_size=_name_size)
             else:
                 _style(bcell, role, 2)
+                bcell.font = Font(bold=True, size=_name_size)
+                bcell.alignment = Alignment(horizontal="center", vertical="center",
+                                            wrap_text=True)
             ag = _style(ws.cell(ltop, 33, leader["busuu"]), role, 33)
             ah = _style(ws.cell(ltop, 34, leader["chiku"]), role, 34)
             # 🔴 2026-08-27 大橋様ご指摘: 長い外注先名(フィールドサービス等)は

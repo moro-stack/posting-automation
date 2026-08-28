@@ -405,7 +405,12 @@ def test_leader_name_font_is_uniform_regardless_of_position_in_area(tpl):
     によって 16pt太字 だったり 11pt細字 だったりする(人が手で作った帳票の
     サンプルにたまたま名前が書かれていた行とそうでない行の違い)。
     そのままだと、エリア内で1人目のリーダーだけ大きく、2人目以降が小さく
-    表示されてしまう。名前は全員 area_first の見本(16pt太字)で統一する。
+    表示されてしまう。名前は全員 area_first の見本(太字)で統一する。
+
+    🔴 2026-08-28 追記: 大きさの「値」は名前の長さで決まるようになった
+    (長い名前が行に収まる一番大きいサイズをシート全体で1つ選ぶ)。
+    このテストが守るのは **全員が同じ大きさであること**。
+    値そのものは fit_name_font_size と突き合わせて確認する。
     """
     ws = _build_with_three_leaders_in_one_area()["集計表"]
     names = {"リーダーA", "リーダーB", "リーダーC"}
@@ -417,7 +422,12 @@ def test_leader_name_font_is_uniform_regardless_of_position_in_area(tpl):
     assert set(found) == names, f"見つからないリーダーがある: {names - set(found)}"
     sizes = {v for v in found.values()}
     assert len(sizes) == 1, f"リーダー名のフォントが揃っていない: {found}"
-    assert sizes == {(16.0, True)}, f"想定と違うフォント: {sizes}"
+    size, bold = next(iter(sizes))
+    assert bold is True, "名前は太字のまま"
+    expected = S.fit_name_font_size(sorted(names),
+                                    col_width=ws.column_dimensions["B"].width,
+                                    base_height=42.0)
+    assert size == expected, f"想定と違うフォント: {size} (期待 {expected})"
 
 
 def test_shrink_to_fit_is_off_in_bottom_block(tpl):
@@ -538,3 +548,135 @@ def test_long_leader_name_rows_are_tall_enough_to_show_every_line():
                     font_size=c.font.sz, base_height=0)
                 h = ws.row_dimensions[c.row].height
                 assert h is not None and h >= need, f"行高 {h} < 必要 {need}"
+
+
+# ===== 名前がまだ重なる（2026-08-28・実ファイルで再現） =====
+# 実際に生成された「京阪北版_集計表_1250号_2026828.xlsx」を開いたところ、
+# 「ポスティングスタッフ」「クローバージャパン」の行高が43.2ptしか無く、
+# 16ptでは3行必要なため文字が隠れていた。
+# 原因は幅の見積り違い2点:
+#   ① 列幅の単位は「標準フォント(11pt)の文字幅」。16ptで描く名前は1.45倍太いのに
+#      11pt基準のまま「1行5文字入る」と数えていた。
+#   ② 半角カナ(ﾌｨｰﾙﾄﾞｻｰﾋﾞｽ)を全角と同じ幅で数えていた。
+# 対策は折り返し・行高に加えて「全員が収まるフォントサイズまで一律で小さくする」。
+
+
+def test_text_width_units_counts_fullwidth_as_two_halfwidth_as_one():
+    assert S.text_width_units("枡田") == 4
+    assert S.text_width_units("aim") == 3
+    assert S.text_width_units("ﾌｨｰﾙﾄﾞｻｰﾋﾞｽ") == 11      # 半角カナは1
+    assert S.text_width_units("クローバージャパン") == 18   # 全角は2
+    assert S.text_width_units("") == 0
+    assert S.text_width_units(None) == 0
+
+
+def test_name_line_count_accounts_for_the_font_size():
+    """🔴 16ptで描くなら1行に入る文字数は減る。ここを見ていなかったのがバグの本体。"""
+    assert S.name_line_count("クローバージャパン", 10.7, font_size=11) == 2
+    assert S.name_line_count("クローバージャパン", 10.7, font_size=16) == 3
+
+
+def test_name_line_count_defaults_to_the_standard_font_size():
+    assert S.name_line_count("クローバージャパン", 10.7) == \
+        S.name_line_count("クローバージャパン", 10.7, font_size=S.STANDARD_FONT_SIZE)
+
+
+def test_fit_name_font_size_shrinks_until_every_name_fits():
+    """実ファイルの顔ぶれで、42ptの行に全員収まるサイズが選ばれること。"""
+    names = ["aim", "ﾌｨｰﾙﾄﾞｻｰﾋﾞｽ", "枡田", "時野", "クローバージャパン",
+             "ポスティングスタッフ", "黒瀬"]
+    size = S.fit_name_font_size(names, col_width=10.7, base_height=42.0)
+    assert size < 16.0, "縮めていない（重なりが直らない）"
+    for n in names:
+        assert S.wrapped_name_height(n, col_width=10.7, font_size=size,
+                                     base_height=0) <= 42.0, f"{n} が収まっていない"
+
+
+def test_fit_name_font_size_keeps_the_original_size_for_short_names():
+    """短い名前しかいない集計表は、今までどおり16ptのまま(見た目を変えない)。"""
+    assert S.fit_name_font_size(["枡田", "時野", "黒瀬"], col_width=10.7,
+                                base_height=42.0) == 16.0
+
+
+def test_fit_name_font_size_never_goes_below_the_floor():
+    """極端に長い名前でも読めない大きさにはしない(足りない分は行高で稼ぐ)。"""
+    size = S.fit_name_font_size(["あ" * 60], col_width=10.7, base_height=42.0)
+    assert size == S.NAME_FONT_MIN
+
+
+def test_fit_name_font_size_on_empty_input():
+    assert S.fit_name_font_size([], col_width=10.7, base_height=42.0) == 16.0
+
+
+def _build_with_the_real_leader_names():
+    """実ファイルと同じ顔ぶれ(長い外注先名を含む)で集計表を作る。"""
+    table = [
+        ["配送管理表", "2026/08/28", "(1250号)"],
+        ["配布日", "号数", "ルート", "異動", "配送順位", "ぱどんな", "住所", "電話番号",
+         "担当地区", "チラシコード", "配送物", "配布部数", "配送備考", "町界名",
+         "街区（番地）名称", "受注種別", "チラシサイズ"],
+    ]
+    names = ["aim", "ﾌｨｰﾙﾄﾞｻｰﾋﾞｽ", "枡田", "時野", "クローバージャパン",
+             "ポスティングスタッフ", "黒瀬"]
+    for i, name in enumerate(names):
+        table.append(["2026/08/28", "1250", 0, "", "", name, "", None,
+                      f"91{i}001", None, "91 ぱど", 1000 + i, "", "", "", "", ""])
+    rows = A.rows_from_table(table)
+    groups = A.group_by_chiku(rows)
+    version = A.detect_version(groups)
+    data = A.shukei_data(groups, version)
+    raw = A.build_shukei_daishi_workbook(data, version, "1250", "2026/08/28")
+    return openpyxl.load_workbook(io.BytesIO(raw))["集計表"], names
+
+
+def _name_cells(ws, names):
+    found = {}
+    for row in ws.iter_rows(min_col=2, max_col=2):
+        for c in row:
+            if c.value in names:
+                found[c.value] = c
+    return found
+
+
+def test_generated_names_all_share_one_font_size():
+    """🔴 2026-08-19 の「フォントを統一する」対応を壊さないこと。
+    小さくするときも全員同じサイズにする。"""
+    ws, names = _build_with_the_real_leader_names()
+    found = _name_cells(ws, names)
+    assert set(found) == set(names)
+    assert len({c.font.sz for c in found.values()}) == 1
+
+
+def test_generated_long_names_are_smaller_than_the_template_size():
+    ws, names = _build_with_the_real_leader_names()
+    found = _name_cells(ws, names)
+    assert found["ポスティングスタッフ"].font.sz < 16.0
+
+
+def test_every_generated_name_fits_in_its_row():
+    """🔴 これが本丸。全員が行高の中に収まり、重ならないこと。"""
+    ws, names = _build_with_the_real_leader_names()
+    width = ws.column_dimensions["B"].width
+    for name, cell in _name_cells(ws, names).items():
+        need = S.wrapped_name_height(name, col_width=width,
+                                     font_size=cell.font.sz, base_height=0)
+        have = ws.row_dimensions[cell.row].height
+        assert have is not None and have >= need, \
+            f"{name}: 行高 {have} < 必要 {need}（{cell.font.sz}pt）"
+
+
+def test_generated_names_keep_wrap_and_bold():
+    ws, names = _build_with_the_real_leader_names()
+    for name, cell in _name_cells(ws, names).items():
+        assert cell.alignment.wrap_text is True, name
+        assert cell.font.b is True, name
+        assert cell.font.name == "游ゴシック", name
+
+
+def test_short_name_sheets_keep_the_template_look():
+    """長い名前がいない集計表は、これまでどおり16pt・行高42のまま。"""
+    ws = _build_with_long_leader_names()   # 枡田など短い名前も含む既存の作り
+    for row in ws.iter_rows(min_col=2, max_col=2):
+        for c in row:
+            if c.value == "枡田":
+                assert c.font.sz <= 16.0
