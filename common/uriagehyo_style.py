@@ -135,7 +135,7 @@ def advalue_slot_labels(month, n=ADVALUE_SLOTS):
     """その月のアドバリュー週枠のラベル。8月なら 8-1〜8-5、10月なら 10-1〜10-5。"""
     from common import advalue
 
-    return [advalue.week_label(month, w) for w in range(1, n + 1)]
+    return advalue.week_labels_for_month(month, n)
 
 
 def plan_sections(bulk_rows, month):

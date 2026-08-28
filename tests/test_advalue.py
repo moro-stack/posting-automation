@@ -255,3 +255,55 @@ def test_resolve_case_label_is_none_for_other_projects():
     for name in ("関西ぱど：京阪北版", "リビングプロシード", "(なし)", None):
         assert V.resolve_case_label(
             name, date_value="2026-08-04", week_choice="1週目", free_text="x") == (None, None)
+
+
+# ===== 業務委託明細の週（2026-08-28 バグ: 1周目しか出ない） =====
+# 実データを見ると、アドバリューの配布員代(contract_invoice_lines)は
+# other_label が全部 None だった。業務委託登録の週欄が自由入力で、
+# 空のまま登録されていたため。どの週にも属さない＝どの週にも表示されない。
+
+
+def test_week_labels_for_month_lists_the_five_weeks():
+    assert V.week_labels_for_month(8) == ["8-1", "8-2", "8-3", "8-4", "8-5"]
+    assert V.week_labels_for_month(9)[0] == "9-1"
+    assert V.week_labels_for_month(10)[-1] == "10-5"
+
+
+def test_normalize_week_label_accepts_the_canonical_form():
+    assert V.normalize_week_label("8-1") == "8-1"
+    assert V.normalize_week_label(" 10-5 ") == "10-5"
+
+
+def test_normalize_week_label_rejects_anything_that_is_not_a_week():
+    for bad in ("", None, "1週目", "買取専科", "13-1", "8-0"):
+        assert V.normalize_week_label(bad) is None, bad
+
+
+def test_case_label_for_line_requires_a_week_for_advalue():
+    """🔴 これが空のまま登録できていたのが今回のバグの入口。"""
+    label, err = V.case_label_for_line("アドバリュー", week_label_value=None, free_text="")
+    assert label is None and err and "週" in err
+
+
+def test_case_label_for_line_takes_the_week_as_is():
+    assert V.case_label_for_line("アドバリュー", week_label_value="8-3",
+                                 free_text="") == ("8-3", None)
+
+
+def test_case_label_for_line_uses_free_text_for_sonota():
+    assert V.case_label_for_line("その他", week_label_value=None,
+                                 free_text=" 買取専科 ") == ("買取専科", None)
+
+
+def test_case_label_for_line_is_none_for_other_projects():
+    assert V.case_label_for_line("関西ぱど：京阪北版", week_label_value="8-1",
+                                 free_text="x") == (None, None)
+
+
+def test_case_label_for_line_and_resolve_case_label_agree():
+    """🔴 入口が2つ(01の小口等 / 02の業務委託)あるので、同じ週なら同じ値になること。
+    ここがズレると『同じ8-2のはずなのに号別明細で別の区分に分かれる』が起きる。"""
+    a, _ = V.resolve_case_label("アドバリュー", date_value="2026-08-04",
+                                week_choice="2週目", free_text="")
+    b, _ = V.case_label_for_line("アドバリュー", week_label_value="8-2", free_text="")
+    assert a == b == "8-2"

@@ -110,11 +110,27 @@ def distinct_other_labels(*row_lists):
     return sorted(values)
 
 
+# 区分(other_label)が入っていない行を選ぶための印。
+# 🔴 2026-08-28: アドバリューの配布員代が区分なしで登録されていて、どの週にも
+# 表示されず「1週目しか無い」ように見えた。未設定の行にも画面から辿り着けるよう、
+# 「未設定」という選択肢を作れるようにする(消えた行を人が見つけられる状態にする)。
+LABEL_UNSET = "（未設定）"
+
+
 def filter_rows_by_label(rows, label):
-    """label が指定されていれば other_label が一致する行だけに絞る。未指定ならそのまま。"""
+    """label が指定されていれば other_label が一致する行だけに絞る。未指定ならそのまま。
+    label に LABEL_UNSET を渡すと、区分が入っていない行だけを返す。"""
     if not label:
         return rows
+    if label == LABEL_UNSET:
+        return [r for r in rows if not str(r.get("other_label") or "").strip()]
     return [r for r in rows if str(r.get("other_label") or "").strip() == label]
+
+
+def has_unlabeled_rows(*row_lists) -> bool:
+    """区分(other_label)が入っていない行が1つでもあるか。"""
+    return any(not str(r.get("other_label") or "").strip()
+               for rows in row_lists for r in rows)
 
 
 def line_copies(line, pay_type=None):

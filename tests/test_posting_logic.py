@@ -477,3 +477,31 @@ def test_split_vehicle_logs_keeps_original_order_inside_each_kind():
     rows = [{"id": i, "vehicle": "軽バン"} for i in (5, 3, 9)]
     got = dict(L.split_vehicle_logs(rows))
     assert [r["id"] for r in got["軽バン"]] == [5, 3, 9]
+
+
+# ===== 区分が未設定の行を見つけられるようにする（2026-08-28） =====
+# アドバリューの配布員代が区分なしで登録されていたため、どの週にも出ず
+# 「1週目しか無い」ように見えた。未設定の行も画面から辿れるようにする。
+
+
+def test_filter_rows_by_label_unset_returns_rows_without_a_label():
+    rows = [{"other_label": "8-1"}, {"other_label": None},
+            {"other_label": ""}, {"other_label": "  "}, {}]
+    got = L.filter_rows_by_label(rows, L.LABEL_UNSET)
+    assert len(got) == 4          # 8-1 以外はすべて「未設定」
+
+
+def test_filter_rows_by_label_still_matches_a_real_label():
+    rows = [{"other_label": "8-1"}, {"other_label": "8-2"}, {"other_label": None}]
+    assert L.filter_rows_by_label(rows, "8-2") == [{"other_label": "8-2"}]
+
+
+def test_filter_rows_by_label_none_returns_everything():
+    rows = [{"other_label": "8-1"}, {"other_label": None}]
+    assert L.filter_rows_by_label(rows, None) == rows
+
+
+def test_has_unlabeled_rows_detects_costs_that_belong_to_no_week():
+    assert L.has_unlabeled_rows([{"other_label": "8-1"}], [{"other_label": None}])
+    assert not L.has_unlabeled_rows([{"other_label": "8-1"}], [{"other_label": "8-2"}])
+    assert not L.has_unlabeled_rows([], [])

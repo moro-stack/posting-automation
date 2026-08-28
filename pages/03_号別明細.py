@@ -63,21 +63,36 @@ if sel == "アドバリュー":
     _all_contract = []
     for _inv in store.list_contract_invoices():
         _all_contract.extend(store.get_contract_invoice(_inv["id"])["lines"])
-    _labels = posting_logic.distinct_other_labels(
-        store.list_petty_cash(project_id=pid),
-        store.list_receivables(project_id=pid),
-        store.list_issue_manual_costs(project_id=pid),
-        [ln for ln in _all_contract if ln.get("project_id") == pid])
+    _own = [store.list_petty_cash(project_id=pid),
+            store.list_receivables(project_id=pid),
+            store.list_issue_manual_costs(project_id=pid),
+            [ln for ln in _all_contract if ln.get("project_id") == pid]]
+    _labels = posting_logic.distinct_other_labels(*_own)
     # 🔴 依頼⑥(2026-08-27 大橋様): 週ごとに分けて見られるようにする。
     # 素の文字列順だと「10-1」が「8-1」より前に来て、月をまたいだ瞬間に
     # 並びが壊れるため、月→週の順に並べ直す(週でないラベルは末尾に残す)。
     _labels = advalue.sort_week_labels(_labels)
+    # 🔴 2026-08-28 バグ(大橋様＝1週目しか出ない)の再発防止:
+    # 週が付いていない行(古いデータ・業務委託の入れ忘れ)は、どの週にも出ないため
+    # 画面から存在ごと消えてしまう。「（未設定）」の選択肢を出して必ず辿れるようにし、
+    # 直すべきデータがあることに気づけるようにする。
+    # 週を1つも使っていないうちは今までどおり選択肢を出さない(「全体」と同じ意味に
+    # なるだけで邪魔)。週の登録が始まっていて、なお週なしの行が混ざっているときだけ出す。
+    _has_unset = bool(_labels) and posting_logic.has_unlabeled_rows(*_own)
+    if _has_unset:
+        _labels = _labels + [posting_logic.LABEL_UNSET]
     if _labels:
         _sub_sel = st.pills("案件区分", ["全体"] + _labels, selection_mode="single",
                             default="全体", key="adv_sub_pills")
         sub_label = None if (not _sub_sel or _sub_sel == "全体") else _sub_sel
-        if sub_label:
+        if sub_label == posting_logic.LABEL_UNSET:
+            st.warning("週が設定されていない行です。『業務委託登録』『小口／買掛／売掛』で"
+                       "登録し直すと、その週の集計に入ります。")
+        elif sub_label:
             st.caption(f"表示中の週：{advalue.week_display(sub_label)}")
+    if _has_unset:
+        st.caption("※ 週が未設定の登録があります。「全体」には含まれますが、"
+                   "各週の集計には出ません。")
 
 # ===== 期間指定：全期間 / 今月 / 今週 / 期間指定 を同じ並びのボタンで =====
 lo, hi, period_note = period_picker(key="issue_period")

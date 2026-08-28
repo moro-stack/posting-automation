@@ -76,6 +76,23 @@ def week_label_for(date_value, choice, *, today=None):
     return week_label(month_of(date_value, today=today), week)
 
 
+WEEKS_PER_MONTH = 5   # 実物の売上表がアドバリューに用意している枠(8-1〜8-5)
+
+
+def week_labels_for_month(month, n=WEEKS_PER_MONTH):
+    """その月の週次案件区分を並べて返す。8月なら ["8-1".."8-5"]。"""
+    return [week_label(month, w) for w in range(1, n + 1)]
+
+
+def normalize_week_label(value):
+    """"8-1" 形式の週区分に揃える。週として読めない値は None。
+
+    業務委託登録(pages/02)は週を "8-1" の形で直接選ばせるので、その受け口。
+    """
+    parsed = parse_week_label(value)
+    return week_label(*parsed) if parsed else None
+
+
 def parse_week_label(label):
     """"8-1" → (8, 1)。週の区分でない文字列(手入力の案件名など)は None。"""
     m = _WEEK_LABEL_RE.match(str(label or ""))
@@ -117,6 +134,28 @@ def resolve_case_label(project_name, *, date_value, week_choice, free_text, toda
     name = str(project_name or "").strip()
     if name == ADVALUE_PROJECT:
         label = week_label_for(date_value, week_choice, today=today)
+        if label is None:
+            return None, WEEK_REQUIRED_MESSAGE
+        return label, None
+    if name == SONOTA_PROJECT:
+        return (str(free_text or "").strip() or None), None
+    return None, None
+
+
+def case_label_for_line(project_name, *, week_label_value, free_text):
+    """業務委託(pages/02)の明細1行ぶんの案件区分を決めて (値, エラー文) で返す。
+
+    🔴 2026-08-28 バグ(大橋様ご報告＝号別明細で1週目しか出ない):
+    業務委託登録の週欄は自由入力で、空のまま登録できてしまっていた。実データを見ると
+    アドバリューの配布員代はすべて区分が空で、どの週にも表示されない状態だった。
+    アドバリューの行は週の選択を必須にする。
+
+    resolve_case_label(pages/01用)と規則を揃えること。入口が2つあるので、
+    片方だけ直すと「同じ週なのに別の区分に分かれる」という静かなズレが起きる。
+    """
+    name = str(project_name or "").strip()
+    if name == ADVALUE_PROJECT:
+        label = normalize_week_label(week_label_value)
         if label is None:
             return None, WEEK_REQUIRED_MESSAGE
         return label, None

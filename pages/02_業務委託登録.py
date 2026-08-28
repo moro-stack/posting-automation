@@ -5,6 +5,7 @@ from datetime import date as _date
 import pandas as pd
 import streamlit as st
 
+from common import advalue
 from common import invoice_excel
 from common import posting_logic
 from common import posting_store as store
@@ -21,7 +22,10 @@ projs = {p["name"]: p["id"] for p in store.list_projects(only_active=True)}
 # 🔴 依頼①(2026-08-19大橋様→2026-08-20詳細確認): アドバリューは週ごとに案件が来て
 # 「8-1」「8-2」「8-3」のように区分して管理している。「その他」向けに元々あった
 # 案件区分の自由入力欄(other_label)を、アドバリューでも使えるようにする。
-_OTHER_LABEL_PROJECTS = ("その他", "アドバリュー")
+# 🔴 2026-08-28 バグ修正: その自由入力は空のまま登録できてしまい、実データでは
+# アドバリューの配布員代が全部「区分なし」になっていた(＝号別明細のどの週にも
+# 出ず「1週目しか無い」ように見えた)。週は選択式にして必須にする。
+_OTHER_LABEL_PROJECTS = advalue.CASE_LABEL_PROJECTS
 
 if not dists:
     st.warning("先に『マスタ管理』の「業務委託」タブで配布員を登録してください。")
@@ -60,9 +64,15 @@ with tab_reg:
         pay_type, "数量(枚)")
     _needs_copies = pay_type != "歩合"
 
+    # アドバリューの週は「8-1」の形で直接選ばせる。月は配布業務期間(開始)から決まる
+    # ので、選択肢を見た瞬間にどの月の週か分かる(9月なら9-1〜9-5になる)。
+    _week_month = advalue.month_of(pfrom or issue)
+    _week_options = [""] + advalue.week_labels_for_month(_week_month)
+
     _base = {"案件": "", "種別": "配布", "単価": _default_price,
-             "数量": 1.0 if pay_type == "月給" else 0.0, "その他の案件名": ""}
-    _cols = ["案件", "種別", "単価", "数量", "その他の案件名"]
+             "数量": 1.0 if pay_type == "月給" else 0.0,
+             "アドバリューの週": "", "その他の案件名": ""}
+    _cols = ["案件", "種別", "単価", "数量", "アドバリューの週", "その他の案件名"]
     _conf = {
         "案件": st.column_config.SelectboxColumn(options=list(projs.keys())),
         "種別": st.column_config.SelectboxColumn(
@@ -70,13 +80,17 @@ with tab_reg:
         "単価": st.column_config.NumberColumn(min_value=0.0, step=0.5, format="%g"),
         "数量": st.column_config.NumberColumn(_qty_label, min_value=0.0, step=0.5,
                                              format="%g"),
+        "アドバリューの週": st.column_config.SelectboxColumn(
+            options=_week_options,
+            help="案件が『アドバリュー』の行は必須です。号別明細の週ごとの集計に使います。"),
         "その他の案件名": st.column_config.TextColumn(
-            help="案件が『その他』なら何の案件か、『アドバリュー』なら8-1等の区分"),
+            help="案件が『その他』なら何の案件かを入力してください"),
     }
     if pay_type == "日当":
         _base = {"案件": "", "種別": "配布", "業務": "", "単価": 0.0, "数量": 0.0,
-                 "部数": 0, "その他の案件名": ""}
-        _cols = ["案件", "種別", "業務", "単価", "数量", "部数", "その他の案件名"]
+                 "部数": 0, "アドバリューの週": "", "その他の案件名": ""}
+        _cols = ["案件", "種別", "業務", "単価", "数量", "部数",
+                 "アドバリューの週", "その他の案件名"]
         _conf["業務"] = st.column_config.SelectboxColumn(
             options=list(_rates.keys()),
             help="マスタに登録した業務名。選ぶと単価に日当額が入ります。")
@@ -89,8 +103,10 @@ with tab_reg:
             help="報告書の報告数に使います。報酬の計算には使いません。")
 
     st.markdown(f"**明細**（案件・種別・単価・{_qty_label}）｜数量と単価は小数点も入力できます")
-    st.caption("案件を「その他」「アドバリュー」にした行は、右の『その他の案件名』に"
-               "何の案件か・8-1等の区分を入力してください（号別明細で確認できます）。")
+    st.caption(f"案件を「アドバリュー」にした行は『アドバリューの週』（{_week_month}月の"
+               f"{_week_month}-1〜{_week_month}-5）を必ず選んでください。"
+               "選ばないと号別明細のどの週にも出ません。"
+               "「その他」にした行は『その他の案件名』に何の案件かを入力してください。")
     editor = st.data_editor(
         pd.DataFrame([_base]), num_rows="dynamic", column_config=_conf,
         column_order=_cols, use_container_width=True, key=f"line_editor_{pay_type}")
@@ -108,15 +124,22 @@ with tab_reg:
             if pd.notna(work):
                 price = _rates.get(str(work), 0)
         remark = row["種別"] if pd.notna(row["種別"]) else "配布"
-        olabel = row.get("その他の案件名") if "その他の案件名" in row else None
-        olabel = (str(olabel).strip() or None) if (
-            pd.notna(olabel) and row["案件"] in _OTHER_LABEL_PROJECTS) else None
+
+        def _cell(name):
+            v = row.get(name) if name in row else None
+            return "" if v is None or not pd.notna(v) else str(v).strip()
+
+        # 案件区分の決め方は common/advalue に集約する(01の小口等と同じ規則)。
+        olabel, olabel_error = advalue.case_label_for_line(
+            row["案件"], week_label_value=_cell("アドバリューの週"),
+            free_text=_cell("その他の案件名"))
         copies = None
         if _needs_copies and "部数" in row and pd.notna(row["部数"]):
             copies = int(row["部数"] or 0)
         lines.append({"project_id": projs.get(row["案件"]), "project_name": row["案件"],
                       "report_qty": qty, "unit_price": price, "amount": qty * price,
-                      "remark": remark, "other_label": olabel, "copies": copies})
+                      "remark": remark, "other_label": olabel, "copies": copies,
+                      "label_error": olabel_error})
 
     if lines:
         st.markdown("**明細（確認）**")
@@ -134,8 +157,15 @@ with tab_reg:
         m2.metric("配布部数(配布+挟み込み)",
                   f"{posting_logic.fmt_num(posting_logic.delivered_copies(lines, pay_type))} 部")
 
+    # 🔴 週が空の行があるまま登録させない。ここを素通りさせていたせいで、
+    # アドバリューの配布員代が区分なしで貯まり、号別明細のどの週にも出なかった。
+    _label_errors = sorted({l["label_error"] for l in lines if l.get("label_error")})
+    for _err in _label_errors:
+        st.error(_err)
+
     col_save, col_dl = st.columns(2)
-    if col_save.button("この請求を登録", type="primary", disabled=not lines):
+    if col_save.button("この請求を登録", type="primary",
+                       disabled=(not lines or bool(_label_errors))):
         store.add_contract_invoice(
             dists[dist_name], str(issue), str(pfrom), str(pto),
             [{"project_id": l["project_id"], "report_qty": l["report_qty"],
