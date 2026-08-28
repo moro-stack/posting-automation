@@ -44,7 +44,7 @@ def test_petty_ocr_draft_lands_in_the_form(tmp_path, monkeypatch):
     at.session_state["petty_draft"] = {"date": "2015-02-12", "amount": 900,
                                        "item": "駐車場"}
     at.run()
-    assert at.text_input(key="petty_date").value == "2015-02-12"
+    assert at.date_input(key="petty_date").value == _dt.date(2015, 2, 12)
     assert at.number_input(key="petty_amount").value == 900
     assert at.text_input(key="petty_memo").value == "駐車場"
 
@@ -78,7 +78,7 @@ def test_petty_user_edit_wins_over_the_draft(tmp_path, monkeypatch):
 
 def test_petty_form_is_empty_before_any_ocr(tmp_path, monkeypatch):
     at = _page(os.path.join(tmp_path, "t.db"), monkeypatch, "小口")
-    assert at.text_input(key="petty_date").value == ""
+    assert at.date_input(key="petty_date").value == _dt.date.today()
     assert at.number_input(key="petty_amount").value == 0
 
 
@@ -90,7 +90,7 @@ def test_petty_second_ocr_overwrites_the_first_draft(tmp_path, monkeypatch):
     at.session_state["petty_draft"] = {"date": "2026-08-01", "amount": 1500, "item": "飲み物"}
     at.run()
     assert at.number_input(key="petty_amount").value == 1500
-    assert at.text_input(key="petty_date").value == "2026-08-01"
+    assert at.date_input(key="petty_date").value == _dt.date(2026, 8, 1)
 
 
 # ===== 買掛（請求書） =====

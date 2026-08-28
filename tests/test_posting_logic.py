@@ -505,3 +505,72 @@ def test_has_unlabeled_rows_detects_costs_that_belong_to_no_week():
     assert L.has_unlabeled_rows([{"other_label": "8-1"}], [{"other_label": None}])
     assert not L.has_unlabeled_rows([{"other_label": "8-1"}], [{"other_label": "8-2"}])
     assert not L.has_unlabeled_rows([], [])
+
+
+# ===== 日付の表記をISOに揃える（2026-08-28 オーナー指示） =====
+# 実DBに "2026-07/06"(小口の日付) や "2026/8/28"(売掛の月度) が入っていた。
+# 期間の絞り込みは文字列比較なので、表記が揺れると静かに範囲から外れる。
+# 画面はカレンダー入力に統一したうえで、保存の直前でもISOに正規化する。
+
+
+def test_iso_date_passes_through_a_proper_iso_string():
+    assert L.iso_date("2026-07-05") == "2026-07-05"
+
+
+def test_iso_date_fixes_the_shapes_found_in_the_real_database():
+    assert L.iso_date("2026-07/06") == "2026-07-06"
+    assert L.iso_date("2026/8/28") == "2026-08-28"
+    assert L.iso_date("2026/08/28") == "2026-08-28"
+    assert L.iso_date("2026.8.3") == "2026-08-03"
+
+
+def test_iso_date_accepts_date_and_datetime_objects():
+    import datetime
+
+    assert L.iso_date(datetime.date(2026, 8, 3)) == "2026-08-03"
+    assert L.iso_date(datetime.datetime(2026, 8, 3, 12, 30)) == "2026-08-03"
+
+
+def test_iso_date_keeps_none_and_blank_as_none():
+    assert L.iso_date(None) is None
+    assert L.iso_date("") is None
+    assert L.iso_date("   ") is None
+
+
+def test_iso_date_leaves_unreadable_values_alone():
+    """🔴 読めない値を勝手に捨てない。過去データを壊すより、そのまま残す
+    (画面はカレンダー入力なので、新規登録でここに来ることはない)。"""
+    assert L.iso_date("不明") == "不明"
+    assert L.iso_date("2026年8月") == "2026年8月"
+
+
+def test_iso_date_drops_a_time_part():
+    assert L.iso_date("2026-08-03 09:15:00") == "2026-08-03"
+    assert L.iso_date("2026-08-03T09:15:00") == "2026-08-03"
+
+
+def test_iso_month_normalises_to_year_dash_month():
+    assert L.iso_month("2026-07") == "2026-07"
+    assert L.iso_month("2026/8/28") == "2026-08"
+    assert L.iso_month("2026-08-28") == "2026-08"
+    assert L.iso_month("2026/8") == "2026-08"
+
+
+def test_iso_month_accepts_date_objects():
+    import datetime
+
+    assert L.iso_month(datetime.date(2026, 8, 28)) == "2026-08"
+
+
+def test_iso_month_keeps_none_and_leaves_unreadable_alone():
+    assert L.iso_month(None) is None
+    assert L.iso_month("") is None
+    assert L.iso_month("不明") == "不明"
+
+
+def test_normalised_dates_sort_the_way_period_filters_compare_them():
+    """🔴 これが表記ゆれの実害。文字列比較で '2026/8/28' は '2026-09-01' より
+    後ろに来てしまい、8月の絞り込みから外れる。ISOに揃えば正しく並ぶ。"""
+    assert "2026/8/28" > "2026-09-01"          # 揺れたままだと逆転する
+    assert L.iso_date("2026/8/28") < "2026-09-01"
+    assert L.in_period(L.iso_date("2026/8/28"), "2026-08-01", "2026-08-31")

@@ -1,5 +1,6 @@
 """画面のスモークテスト。Streamlit AppTest でページが例外なく描画されることを見る。
 実DBを触らないよう、各テストで POSTING_DB_PATH に一時DBを指す。"""
+import datetime as _dt
 import os
 
 import pytest
@@ -976,12 +977,14 @@ def test_receivable_list_deletes_the_right_row_and_announces(db):
 def test_vehicle_registration_computes_distance_and_shows_in_list(db):
     at = _run(_EXPENSE_PAGE)
     at.segmented_control[0].set_value("車両").run()
-    at.text_input[0].set_value("2026-06-19")       # 日付
+    # 日付はカレンダー入力(2026-08-28にテキスト入力から置き換え)。
+    # 残るテキスト欄は 0=車両名 1=ドライバー 2=使用用途。
+    at.date_input(key="vehicle_date").set_value(_dt.date(2026, 6, 19))
     _sel(at, "車両").set_value("ハイエース")
-    at.text_input[2].set_value("時野")             # ドライバー(0=日付,1=車両名,2=ドライバー)
+    at.text_input[1].set_value("時野")             # ドライバー
     at.number_input[0].set_value(55876)            # 開始メーター
     at.number_input[1].set_value(55908)            # 終了メーター
-    at.text_input[3].set_value("DOMOぱどポスト")    # 使用用途
+    at.text_input[2].set_value("DOMOぱどポスト")    # 使用用途
     [b for b in at.button if b.label == "登録"][0].click().run()
 
     assert not at.exception

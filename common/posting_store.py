@@ -33,6 +33,24 @@ def _now(now):
     return now if now is not None else datetime.now().isoformat(timespec="seconds")
 
 
+# 🔴 2026-08-28 オーナー指示: 日付の表記ゆれを止める。
+# 実DBに "2026-07/06"(小口の日付) "2026/8/28"(売掛の月度) が入っていた。
+# 期間の絞り込みは文字列比較なので、揺れると静かに範囲から外れる。
+# 画面はカレンダー入力(st.date_input)に統一したが、保存の直前でもここで
+# ISO(YYYY-MM-DD / YYYY-MM)に揃えて二重に守る。読めない値はそのまま通す
+# (過去データを勝手に壊さない)。
+def _iso_date(value):
+    from common.posting_logic import iso_date
+
+    return iso_date(value)
+
+
+def _iso_month(value):
+    from common.posting_logic import iso_month
+
+    return iso_month(value)
+
+
 def _int_or_none(value):
     return None if value is None else int(value)
 
@@ -403,8 +421,9 @@ def add_petty_cash(date, category_id, amount, *, project_id=None, memo=None,
     return _add("petty_cash",
                 ["date", "category_id", "amount", "project_id", "memo", "source",
                  "other_label", "distributor_id", "created_at"],
-                [date, _int_or_none(category_id), int(amount), _int_or_none(project_id),
-                 memo, source, other_label, _int_or_none(distributor_id), _now(now)], db_path)
+                [_iso_date(date), _int_or_none(category_id), int(amount),
+                 _int_or_none(project_id), memo, source, other_label,
+                 _int_or_none(distributor_id), _now(now)], db_path)
 
 
 def list_petty_cash(*, project_id=None, date_from=None, date_to=None, db_path=None):
@@ -440,7 +459,7 @@ def add_vehicle_log(date, vehicle, driver, odo_start, odo_end, *, purpose=None,
     return _add("vehicle_logs",
                 ["date", "vehicle", "driver", "odo_start", "odo_end", "distance",
                  "purpose", "fuel_liters", "created_at"],
-                [date, vehicle, driver or None, start, end, distance,
+                [_iso_date(date), vehicle, driver or None, start, end, distance,
                  purpose or None, fuel, _now(now)], db_path)
 
 
@@ -470,8 +489,8 @@ def add_payable(month, vendor_id, amount, *, date=None, vendor_name=None,
                 original_status=None, note=None, project_id=None, source="manual",
                 other_label=None, db_path=None, now=None):
     # 請求書の日付(date)があれば月度(month)はそこから導出する(#12)
-    if date and not month:
-        month = str(date)[:7]
+    date = _iso_date(date)
+    month = _iso_month(month) if month else (_iso_month(date) if date else None)
     return _add("payables",
                 ["month", "date", "vendor_id", "vendor_name", "amount", "original_status",
                  "note", "project_id", "source", "other_label", "created_at"],
@@ -551,7 +570,7 @@ def add_receivable(month, client_id, amount, *, note=None, project_id=None,
     return _add("receivables",
                 ["month", "client_id", "amount", "note", "project_id",
                  "other_label", "created_at"],
-                [month, _int_or_none(client_id), int(amount), note,
+                [_iso_month(month), _int_or_none(client_id), int(amount), note,
                  _int_or_none(project_id), other_label, _now(now)], db_path)
 
 
@@ -583,8 +602,8 @@ def add_contract_invoice(distributor_id, issue_date, period_from, period_to, lin
             "INSERT INTO contract_invoices"
             " (distributor_id, issue_date, period_from, period_to, pay_type, created_at)"
             " VALUES (?,?,?,?,?,?)",
-            (_int_or_none(distributor_id), issue_date, period_from, period_to,
-             pay_type, _now(now)))
+            (_int_or_none(distributor_id), _iso_date(issue_date), _iso_date(period_from),
+             _iso_date(period_to), pay_type, _now(now)))
         invoice_id = int(cur.lastrowid)
         for ln in lines:
             qty = float(ln.get("report_qty") or 0)
@@ -650,7 +669,7 @@ def add_issue_manual_cost(project_id, content, amount, *, work_date=None, other_
                           db_path=None, now=None):
     return _add("issue_manual_costs",
                 ["project_id", "content", "amount", "work_date", "other_label", "created_at"],
-                [_int_or_none(project_id), content, int(amount), work_date or None,
+                [_int_or_none(project_id), content, int(amount), _iso_date(work_date),
                  other_label or None, _now(now)],
                 db_path)
 
@@ -672,7 +691,8 @@ def list_issue_manual_costs(*, project_id=None, db_path=None):
 
 def update_issue_manual_cost(row_id, *, work_date=_UNSET, content=_UNSET, amount=_UNSET,
                              other_label=_UNSET, db_path=None):
-    fields = {"work_date": work_date, "content": content, "other_label": other_label,
+    fields = {"work_date": (_iso_date(work_date) if work_date is not _UNSET else _UNSET),
+              "content": content, "other_label": other_label,
               "amount": (int(amount) if amount is not _UNSET else _UNSET)}
     _update("issue_manual_costs", row_id, fields, db_path)
 

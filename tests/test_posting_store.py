@@ -601,3 +601,111 @@ def test_count_master_usage_rejects_unknown_master(tmp_path):
     db = os.path.join(tmp_path, "t.db")
     with pytest.raises(ValueError):
         store.count_master_usage("知らないマスタ", 1, db_path=db)
+
+
+# ===== 保存時に日付をISOへ揃える（2026-08-28 オーナー指示） =====
+# 画面はカレンダー入力に統一したが、保存の直前でも正規化して二重に守る。
+# 実DBにあった "2026-07/06"(小口) "2026/8/28"(売掛の月度) のような値を
+# これ以上増やさないため。
+
+
+def test_add_petty_cash_stores_the_date_in_iso(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    rid = store.add_petty_cash("2026/8/28", None, 100, db_path=db)
+    row = [r for r in store.list_petty_cash(db_path=db) if r["id"] == rid][0]
+    assert row["date"] == "2026-08-28"
+
+
+def test_add_petty_cash_accepts_a_date_object(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    import datetime
+
+    rid = store.add_petty_cash(datetime.date(2026, 8, 3), None, 100, db_path=db)
+    row = [r for r in store.list_petty_cash(db_path=db) if r["id"] == rid][0]
+    assert row["date"] == "2026-08-03"
+
+
+def test_add_petty_cash_keeps_none(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    rid = store.add_petty_cash(None, None, 100, db_path=db)
+    row = [r for r in store.list_petty_cash(db_path=db) if r["id"] == rid][0]
+    assert row["date"] is None
+
+
+def test_add_receivable_stores_the_month_in_iso(tmp_path):
+    """🔴 実DBに入っていた "2026/8/28" の形。月度は YYYY-MM に丸める。"""
+    db = os.path.join(tmp_path, "t.db")
+    rid = store.add_receivable("2026/8/28", None, 100, db_path=db)
+    row = [r for r in store.list_receivables(db_path=db) if r["id"] == rid][0]
+    assert row["month"] == "2026-08"
+
+
+def test_add_receivable_accepts_a_date_object_as_the_month(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    import datetime
+
+    rid = store.add_receivable(datetime.date(2026, 8, 28), None, 100, db_path=db)
+    row = [r for r in store.list_receivables(db_path=db) if r["id"] == rid][0]
+    assert row["month"] == "2026-08"
+
+
+def test_add_payable_stores_iso_date_and_month(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    rid = store.add_payable(None, None, 100, date="2026/8/28", db_path=db)
+    row = [r for r in store.list_payables(db_path=db) if r["id"] == rid][0]
+    assert row["date"] == "2026-08-28"
+    assert row["month"] == "2026-08"       # 日付から導出する月度も揃うこと
+
+
+def test_add_vehicle_log_stores_the_date_in_iso(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    rid = store.add_vehicle_log("2026/8/28", "ハイエース", "山田", 0, 10, db_path=db)
+    row = [r for r in store.list_vehicle_logs(db_path=db) if r["id"] == rid][0]
+    assert row["date"] == "2026-08-28"
+
+
+def test_add_issue_manual_cost_stores_the_work_date_in_iso(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    pid = store.add_project("案件A", db_path=db)
+    rid = store.add_issue_manual_cost(pid, "配布", 100, work_date="2026/8/28", db_path=db)
+    row = [r for r in store.list_issue_manual_costs(db_path=db) if r["id"] == rid][0]
+    assert row["work_date"] == "2026-08-28"
+
+
+def test_update_issue_manual_cost_stores_the_work_date_in_iso(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    pid = store.add_project("案件A", db_path=db)
+    rid = store.add_issue_manual_cost(pid, "配布", 100, work_date="2026-08-01", db_path=db)
+    store.update_issue_manual_cost(rid, work_date="2026/8/28", db_path=db)
+    row = [r for r in store.list_issue_manual_costs(db_path=db) if r["id"] == rid][0]
+    assert row["work_date"] == "2026-08-28"
+
+
+def test_add_contract_invoice_stores_iso_dates(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    did = store.add_distributor("山田", db_path=db)
+    iid = store.add_contract_invoice(did, "2026/8/28", "2026/8/1", "2026/8/7", [],
+                                     db_path=db)
+    head = store.get_contract_invoice(iid, db_path=db)["invoice"]
+    assert head["issue_date"] == "2026-08-28"
+    assert head["period_from"] == "2026-08-01"
+    assert head["period_to"] == "2026-08-07"
+
+
+def test_store_does_not_destroy_an_unreadable_date(tmp_path):
+    """🔴 読めない値を勝手に消さない。過去データを壊すより残す方が安全。"""
+    db = os.path.join(tmp_path, "t.db")
+    rid = store.add_petty_cash("不明", None, 100, db_path=db)
+    row = [r for r in store.list_petty_cash(db_path=db) if r["id"] == rid][0]
+    assert row["date"] == "不明"
+
+
+def test_normalised_dates_are_found_by_a_month_filter(tmp_path):
+    """🔴 表記ゆれの実害そのもの。'2026/8/28' のままだと8月の絞り込みから漏れる。"""
+    db = os.path.join(tmp_path, "t.db")
+    from common import posting_logic
+
+    store.add_petty_cash("2026/8/28", None, 100, db_path=db)
+    rows = store.list_petty_cash(db_path=db)
+    got = posting_logic.filter_rows_by_period(rows, "date", "2026-08-01", "2026-08-31")
+    assert len(got) == 1

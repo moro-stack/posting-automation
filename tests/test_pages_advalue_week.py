@@ -38,7 +38,8 @@ def _submit(at, form="petty"):
 
 
 def _petty(at, *, date, proj, week=None, amount=1000):
-    at.text_input(key="petty_date").set_value(date)
+    """date は datetime.date（2026-08-28 にカレンダー入力へ統一）。"""
+    at.date_input(key="petty_date").set_value(date)
     at.selectbox(key="petty_proj").set_value(proj)
     at.number_input(key="petty_amount").set_value(amount)
     if week is not None:
@@ -49,7 +50,7 @@ def _petty(at, *, date, proj, week=None, amount=1000):
 def test_petty_advalue_without_a_week_is_refused(tmp_path, monkeypatch):
     db = os.path.join(tmp_path, "t.db")
     at = _at(db, monkeypatch, "小口")
-    _petty(at, date="2026-08-04", proj="アドバリュー")
+    _petty(at, date=_dt.date(2026, 8, 4), proj="アドバリュー")
     _submit(at)
     assert any("週" in str(e.value) for e in at.error), "週の未選択が知らされていない"
     assert store.list_petty_cash(db_path=db) == [], "週を選ばずに登録されてしまった"
@@ -58,7 +59,7 @@ def test_petty_advalue_without_a_week_is_refused(tmp_path, monkeypatch):
 def test_petty_advalue_with_a_week_saves_the_month_dash_week_label(tmp_path, monkeypatch):
     db = os.path.join(tmp_path, "t.db")
     at = _at(db, monkeypatch, "小口")
-    _petty(at, date="2026-08-04", proj="アドバリュー", week="1週目")
+    _petty(at, date=_dt.date(2026, 8, 4), proj="アドバリュー", week="1週目")
     _submit(at)
     rows = store.list_petty_cash(db_path=db)
     assert len(rows) == 1
@@ -70,7 +71,7 @@ def test_petty_advalue_rolls_the_month_over_automatically(tmp_path, monkeypatch)
     伝票の日付から月が決まる。"""
     db = os.path.join(tmp_path, "t.db")
     at = _at(db, monkeypatch, "小口")
-    _petty(at, date="2026-10-02", proj="アドバリュー", week="1週目")
+    _petty(at, date=_dt.date(2026, 10, 2), proj="アドバリュー", week="1週目")
     _submit(at)
     assert store.list_petty_cash(db_path=db)[0]["other_label"] == "10-1"
 
@@ -79,7 +80,7 @@ def test_petty_non_advalue_project_is_unaffected_by_the_week(tmp_path, monkeypat
     """他の案件は週を選んでいなくても今までどおり登録できる。"""
     db = os.path.join(tmp_path, "t.db")
     at = _at(db, monkeypatch, "小口")
-    _petty(at, date="2026-08-04", proj="関西ぱど：京阪北版")
+    _petty(at, date=_dt.date(2026, 8, 4), proj="関西ぱど：京阪北版")
     _submit(at)
     rows = store.list_petty_cash(db_path=db)
     assert len(rows) == 1 and rows[0]["other_label"] is None
@@ -88,7 +89,7 @@ def test_petty_non_advalue_project_is_unaffected_by_the_week(tmp_path, monkeypat
 def test_petty_sonota_still_uses_the_free_text(tmp_path, monkeypatch):
     db = os.path.join(tmp_path, "t.db")
     at = _at(db, monkeypatch, "小口")
-    _petty(at, date="2026-08-04", proj="その他")
+    _petty(at, date=_dt.date(2026, 8, 4), proj="その他")
     at.text_input(key="petty_other").set_value("買取専科")
     _submit(at)
     assert store.list_petty_cash(db_path=db)[0]["other_label"] == "買取専科"
@@ -100,7 +101,7 @@ def test_petty_sonota_still_uses_the_free_text(tmp_path, monkeypatch):
 def test_receivable_advalue_without_a_week_is_refused(tmp_path, monkeypatch):
     db = os.path.join(tmp_path, "t.db")
     at = _at(db, monkeypatch, "売掛")
-    at.text_input(key="recv_month").set_value("2026-09")
+    at.date_input(key="recv_month").set_value(_dt.date(2026, 9, 15))
     at.selectbox(key="recv_proj").set_value("アドバリュー")
     at.number_input(key="recv_amount").set_value(50000)
     _submit(at, "receivable")
@@ -112,7 +113,7 @@ def test_receivable_advalue_uses_the_month_of_the_gedo(tmp_path, monkeypatch):
     """売掛は日付ではなく月度(2026-09)を持つ。そこから月を取ること。"""
     db = os.path.join(tmp_path, "t.db")
     at = _at(db, monkeypatch, "売掛")
-    at.text_input(key="recv_month").set_value("2026-09")
+    at.date_input(key="recv_month").set_value(_dt.date(2026, 9, 15))
     at.selectbox(key="recv_proj").set_value("アドバリュー")
     at.number_input(key="recv_amount").set_value(50000)
     at.selectbox(key="recv_week").set_value("3週目")

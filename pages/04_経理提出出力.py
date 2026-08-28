@@ -3,15 +3,18 @@ import streamlit as st
 
 from common import posting_logic
 from common import posting_store as store
-from common.ui import apply_app_style
+from common.ui import apply_app_style, period_picker
 
 apply_app_style()
 st.title("⬇️ 経理提出用データ出力")
 
 kind = st.selectbox("データ種別", ["小口一覧", "買掛一覧", "売掛一覧", "業務委託費一覧"])
-c1, c2 = st.columns(2)
-d_from = c1.text_input("期間 開始(YYYY-MM-DD もしくは 空)")
-d_to = c2.text_input("期間 終了(YYYY-MM-DD もしくは 空)")
+# 🔴 2026-08-28 オーナー指示: 日付の手入力をやめる。
+# ここは「期間 開始/終了(YYYY-MM-DD もしくは 空)」の自由入力だったが、
+# 他の画面と同じ共通の期間フィルタ(全期間/今月/今週/期間指定＝カレンダー)に揃える。
+# 既定の「全期間」は、これまでの「空欄＝絞り込みなし」と同じ動き。
+d_from, d_to, _period_note = period_picker(key="export_period")
+st.caption(f"対象期間: {_period_note}")
 
 
 def _within(value, lo, hi):
@@ -34,7 +37,7 @@ elif kind == "買掛一覧":
 elif kind == "売掛一覧":
     rows = [r for r in store.list_receivables() if _within(r.get("month"), d_from[:7], d_to[:7])] \
         if (d_from or d_to) else store.list_receivables()
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(rows)  # noqa: E501 - 月度は YYYY-MM なので先頭7文字で比較する
 else:  # 業務委託費一覧
     flat = []
     id2name = {d["id"]: d["name"] for d in store.list_distributors()}

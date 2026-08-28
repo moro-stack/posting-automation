@@ -239,7 +239,7 @@ if mode == "小口":
 
         # 下書きをフォームに載せる。必ず st.form より前に行うこと(上の注記参照)。
         if _apply_draft("petty_draft", {
-                "date": ("petty_date", lambda v: str(v or "")),
+                "date": ("petty_date", lambda v: _to_date(v) or _date.today()),
                 "amount": ("petty_amount", lambda v: int(v or 0)),
                 "item": ("petty_memo", lambda v: str(v or "")),
         }):
@@ -269,8 +269,11 @@ if mode == "小口":
         # AIの下書きは _apply_draft() が session_state に入れてあるので、
         # ここで value= を渡してはいけない(渡しても無視されるうえ、
         # 「反映されているつもり」の読み違いを生む)。
+        # 🔴 2026-08-28 オーナー指示: 日付は手入力だと必ず表記がズレる
+        # (実DBに "2026-07/06" が入っていた)。カレンダー入力に統一する。
+        st.session_state.setdefault("petty_date", _date.today())
         with st.form("petty", clear_on_submit=True):
-            date = st.text_input("日付（例：2026-07-05）", key="petty_date")
+            date = st.date_input("日付", key="petty_date", format="YYYY/MM/DD")
             cats = {c["name"]: c["id"] for c in store.list_expense_categories(only_active=True)}
             cat = st.selectbox("費目", list(cats.keys()) or ["(費目マスタを登録)"],
                                key="petty_cat")
@@ -295,7 +298,8 @@ if mode == "小口":
                 if case_error:
                     st.error(case_error)
                     st.stop()
-                payload = {"date": date or None, "category_id": cats.get(cat), "amount": int(amount),
+                payload = {"date": posting_logic.iso_date(date),
+                           "category_id": cats.get(cat), "amount": int(amount),
                            "project_id": projs.get(proj), "memo": memo or None,
                            "source": "ocr" if ups else "manual",
                            "distributor_id": dists.get(dist),
@@ -503,8 +507,14 @@ elif mode == "売掛":
                 del st.session_state["recv_pending"]
                 st.rerun()
 
+        # 月度もカレンダーで選ぶ(実DBに "2026/8/28" が入っていた欄)。
+        # 選んだ日の「月」を YYYY-MM として保存する。
+        st.session_state.setdefault("recv_month", _date.today())
         with st.form("receivable", clear_on_submit=True):
-            month = st.text_input("月度（例：2026-07）", key="recv_month")
+            month = st.date_input("月度（その月のどの日でも構いません）",
+                                  key="recv_month", format="YYYY/MM/DD")
+            st.caption(f"この売上は **{posting_logic.iso_month(st.session_state['recv_month'])}** "
+                       "の月度として登録されます。")
             clients = {c["name"]: c["id"] for c in store.list_receivables_clients(only_active=True)}
             client = st.selectbox("売掛先", list(clients.keys()) or ["(売掛先マスタを登録)"],
                                   key="recv_client")
@@ -524,7 +534,8 @@ elif mode == "売掛":
                 if case_error:
                     st.error(case_error)
                     st.stop()
-                payload = {"month": month or None, "client_id": clients.get(client),
+                payload = {"month": posting_logic.iso_month(month),
+                           "client_id": clients.get(client),
                            "amount": int(amount), "note": note or None, "project_id": projs.get(proj),
                            "other_label": case_label}
                 if store.find_duplicate_receivable(payload["month"], payload["client_id"], payload["amount"]):
@@ -562,8 +573,9 @@ else:  # 車両
 
     with tab_reg:
         show_flash()
+        st.session_state.setdefault("vehicle_date", _date.today())
         with st.form("vehicle", clear_on_submit=True):
-            v_date = st.text_input("日付（例：2026-07-05）")
+            v_date = st.date_input("日付", key="vehicle_date", format="YYYY/MM/DD")
             v_kind = st.selectbox("車両", _VEHICLE_PRESETS)
             v_other = st.text_input(
                 "車両名", placeholder="「その他」を選んだときだけ入力（例：新しく借りた軽トラ等）",
@@ -580,7 +592,8 @@ else:  # 車両
                     st.error("車両名を入力してください。")
                 else:
                     store.add_vehicle_log(
-                        v_date or None, vehicle_name, driver.strip() or None,
+                        posting_logic.iso_date(v_date), vehicle_name,
+                        driver.strip() or None,
                         odo_start or None, odo_end or None,
                         purpose=purpose.strip() or None,
                         fuel_liters=fuel or None)

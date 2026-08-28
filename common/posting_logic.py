@@ -1,5 +1,6 @@
 """配布コストの集計ロジック(純粋関数)。DB非依存でテスト可能。"""
 import calendar
+import re
 from datetime import date, datetime, timedelta
 
 _DELIVERY_REMARKS = ("配布", "挟み込み")
@@ -71,6 +72,55 @@ def period_range(preset, *, today=None):
         sunday = monday + timedelta(days=6)
         return (monday.isoformat(), sunday.isoformat())
     raise ValueError(f"unknown preset: {preset}")
+
+
+# ===== 日付の表記をISO(YYYY-MM-DD)に揃える =====
+# 🔴 2026-08-28 オーナー指示: 手入力だと必ず表記がズレる。実DBには
+#   ・小口の日付   "2026-07/06"
+#   ・売掛の月度   "2026/8/28"
+# が入っていた。期間の絞り込みは文字列比較なので、揺れると静かに範囲から外れる
+# （"2026/8/28" > "2026-09-01" になり、8月のデータが9月より後ろに並ぶ）。
+# 画面はカレンダー入力に統一したが、保存の直前でもここで正規化して二重に守る。
+_DATE_PARTS_RE = re.compile(r"^\s*(\d{4})\D+(\d{1,2})(?:\D+(\d{1,2}))?")
+
+
+def _date_parts(value):
+    """年・月・日を取り出す。読めなければ None。日が無ければ day は None。"""
+    if isinstance(value, (datetime, date)):
+        return (value.year, value.month, value.day)
+    m = _DATE_PARTS_RE.match(str(value or ""))
+    if not m:
+        return None
+    year, month = int(m.group(1)), int(m.group(2))
+    day = int(m.group(3)) if m.group(3) else None
+    if not 1 <= month <= 12 or (day is not None and not 1 <= day <= 31):
+        return None
+    return (year, month, day)
+
+
+def iso_date(value):
+    """日付を 'YYYY-MM-DD' に揃える。
+
+    None・空文字は None。読めない値(「不明」など)はそのまま返す
+    ＝過去データを勝手に壊さない(新規登録はカレンダー入力なのでここには来ない)。
+    """
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    parts = _date_parts(value)
+    if parts is None or parts[2] is None:
+        return value
+    year, month, day = parts
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
+
+def iso_month(value):
+    """月度を 'YYYY-MM' に揃える。日まで入っていても月に丸める。"""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    parts = _date_parts(value)
+    if parts is None:
+        return value
+    return f"{parts[0]:04d}-{parts[1]:02d}"
 
 
 def in_period(value, lo, hi) -> bool:
