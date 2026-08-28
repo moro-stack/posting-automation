@@ -8,7 +8,7 @@ from common import posting_logic
 from common import posting_store as store
 from common import uriagehyo, uriagehyo_style
 from common.ui import (apply_app_style, nice_table, period_picker, show_flash,
-                       selectable_list, list_action_bar)
+                       selectable_list, list_action_bar, PERIOD_ORDER_MONTH_FIRST)
 
 apply_app_style()
 show_flash()
@@ -21,7 +21,10 @@ def _yen(v):
 
 # 🔴 依頼⑧(2026-08-27 大橋様): このページは開いたら「今月の売上」がまず見えること。
 # 既定の期間を「今月」にする(他の期間に切り替えれば今までどおり見られる)。
-lo, hi, note = period_picker(key="summary_period", default="今月")
+# 🔴 2026-08-28 大橋様: 並び順も「今月 → 今週 → 全期間 → 期間指定」にして、
+# 先頭＝既定＝今月 が一目で分かるようにする。
+lo, hi, note = period_picker(key="summary_period", default="今月",
+                             order=PERIOD_ORDER_MONTH_FIRST)
 st.caption(f"表示期間: {note}")
 
 # 全案件横断で集める（project_id 指定なし＝全件）
@@ -117,39 +120,6 @@ else:
 
 st.divider()
 
-# 原価と売上が1つの一覧に混ざっていると、どちらを見ているのか分からない。
-# 区分→タブの対応は posting_logic に集約してある（区分が増えたときに
-# 「どちらのタブにも出ない行」が静かに生まれるのを防ぐため）。
-cost_rows, sales_rows = posting_logic.split_summary_rows(rows)
-
-
-def _render_tab(tab_rows, *, key, title, filename):
-    """1つのタブの中身。件数と小計を出してから一覧を描く。
-
-    集計を見るだけの画面なので、削除は灰色のまま(delete_fn=None)。
-    ここから消しても 01・02 の元データは消えない。
-    """
-    st.caption(f"{len(tab_rows)}件 ／ 小計 {_yen(sum(r['金額'] for r in tab_rows))}")
-    # 日付で並べ替え（空は末尾）
-    disp = sorted(tab_rows, key=lambda r: (r["日付"] == "", r["日付"]))
-    disp = [{"日付": r["日付"], "区分": r["区分"], "項目": r["項目"],
-             "案件": r["案件"], "金額": _yen(r["金額"])} for r in disp]
-    edited, _ = selectable_list(disp, key=key, id_col=None)
-    list_action_bar(edited, key=key, title=title, filename=filename, id_col=None,
-                    delete_fn=None,
-                    delete_note="この画面は集計を見るためのものです。"
-                                "元のデータは『小口／買掛／売掛』『業務委託登録』から"
-                                "削除してください。")
-
-
-tab_cost, tab_sales = st.tabs(["原価", "売上"])
-with tab_cost:
-    _render_tab(cost_rows, key="summary_cost", title="原価明細", filename="原価明細")
-with tab_sales:
-    _render_tab(sales_rows, key="summary_sales", title="売上明細", filename="売上明細")
-
-st.divider()
-
 # ===== 月次 売上表を一括生成（依頼②・2026-08-20 → 依頼⑦・2026-08-27で改修） =====
 # 🔴 大阪支社からもらった新テンプレート
 # (templates/KPS(大阪)原価売上表テンプレート.xlsx)のレイアウトそのままに、
@@ -202,3 +172,37 @@ with st.expander(":material/table_chart: 月次の会議用売上表を一括生
             file_name=uriagehyo_style.monthly_filename(int(_year), int(_month)),
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             icon=":material/download:", key="dl_uriage_bulk")
+
+st.divider()
+
+# 原価と売上が1つの一覧に混ざっていると、どちらを見ているのか分からない。
+# 区分→タブの対応は posting_logic に集約してある（区分が増えたときに
+# 「どちらのタブにも出ない行」が静かに生まれるのを防ぐため）。
+cost_rows, sales_rows = posting_logic.split_summary_rows(rows)
+
+
+def _render_tab(tab_rows, *, key, title, filename):
+    """1つのタブの中身。件数と小計を出してから一覧を描く。
+
+    集計を見るだけの画面なので、削除は灰色のまま(delete_fn=None)。
+    ここから消しても 01・02 の元データは消えない。
+    """
+    st.caption(f"{len(tab_rows)}件 ／ 小計 {_yen(sum(r['金額'] for r in tab_rows))}")
+    # 日付で並べ替え（空は末尾）
+    disp = sorted(tab_rows, key=lambda r: (r["日付"] == "", r["日付"]))
+    disp = [{"日付": r["日付"], "区分": r["区分"], "項目": r["項目"],
+             "案件": r["案件"], "金額": _yen(r["金額"])} for r in disp]
+    edited, _ = selectable_list(disp, key=key, id_col=None)
+    list_action_bar(edited, key=key, title=title, filename=filename, id_col=None,
+                    delete_fn=None,
+                    delete_note="この画面は集計を見るためのものです。"
+                                "元のデータは『小口／買掛／売掛』『業務委託登録』から"
+                                "削除してください。")
+
+
+tab_cost, tab_sales = st.tabs(["原価", "売上"])
+with tab_cost:
+    _render_tab(cost_rows, key="summary_cost", title="原価明細", filename="原価明細")
+with tab_sales:
+    _render_tab(sales_rows, key="summary_sales", title="売上明細", filename="売上明細")
+

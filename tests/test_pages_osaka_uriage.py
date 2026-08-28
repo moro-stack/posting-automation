@@ -202,3 +202,41 @@ def test_project_table_is_ordered_the_way_ohashi_san_asked(tmp_path, monkeypatch
              for head in ("関西ぱど", "アドバリュー", "リビング", "その他")]
     assert order == sorted(order), f"並びが依頼どおりでない: {names}"
     assert names[-1].strip() == "", f"区分未設定の行が最後に来ていない: {names}"
+
+
+# ===== 追加依頼1: 期間選択の並び順（2026-08-28） =====
+
+
+def test_period_filter_order_is_month_week_all_custom(tmp_path, monkeypatch):
+    """開いたとき一番上（先頭）に見えるのが「今月」であること。"""
+    at = _run("06_原価・売上まとめ.py", os.path.join(tmp_path, "t.db"), monkeypatch)
+    assert list(at.pills(key="summary_period_pills").options) == [
+        "今月", "今週", "全期間", "期間指定"]
+
+
+def test_period_filter_order_elsewhere_is_unchanged(tmp_path, monkeypatch):
+    """並び替えたのは大阪支社売上ページだけ。他の画面は今までどおり全期間が先頭。"""
+    at = _run("01_経費・買掛・売掛.py", os.path.join(tmp_path, "t.db"), monkeypatch)
+    assert list(at.pills(key="petty_period_pills").options)[0] == "全期間"
+
+
+# ===== 追加依頼2: 一括生成の位置（2026-08-28） =====
+
+
+def test_bulk_export_sits_right_below_the_project_table(tmp_path, monkeypatch):
+    """🔴 ページの一番下だと気づかれない（大橋様）。案件別 原価・売上の表のすぐ下に置く。
+
+    描画順は AppTest の要素リストからは取れないため、ページの記述順で固定する
+    （Streamlit は上から順に描くので記述順＝表示順）。
+    """
+    src = open(os.path.join(ROOT, "pages", "06_原価・売上まとめ.py"), encoding="utf-8").read()
+    i_proj = src.index("案件別 原価・売上")
+    i_bulk = src.index("月次の会議用売上表を一括生成")
+    i_tabs = src.index('st.tabs(["原価", "売上"])')
+    assert i_proj < i_bulk < i_tabs, "一括生成が案件別の表の直下に無い"
+
+    # 実際に描かれてもいること（記述順だけ直して壊すのを防ぐ）
+    at = _run("06_原価・売上まとめ.py", os.path.join(tmp_path, "t.db"), monkeypatch)
+    labels = [str(e.label) for e in at.get("expander")]
+    assert any("月次の会議用売上表" in l for l in labels)
+    assert [t.label for t in at.tabs][:2] == ["原価", "売上"]

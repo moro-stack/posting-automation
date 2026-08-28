@@ -485,20 +485,33 @@ def apply_app_style():
 _PERIOD_PRESETS = {"全期間": "all", "今月": "month", "今週": "week"}
 _PERIOD_CUSTOM = "期間指定"
 
+# 並び順は画面ごとに選べるようにしてある。
+# 既定は「全期間」が先頭(これまでの全画面の並び)。
+PERIOD_ORDER_DEFAULT = ("全期間", "今月", "今週", _PERIOD_CUSTOM)
+# 🔴 2026-08-28 大橋様: 大阪支社売上ページは開いた時に「今月」が先頭に見えてほしい。
+PERIOD_ORDER_MONTH_FIRST = ("今月", "今週", "全期間", _PERIOD_CUSTOM)
 
-def period_picker(*, key: str, default: str = "全期間"):
+
+def period_picker(*, key: str, default: str = "全期間",
+                  order=PERIOD_ORDER_DEFAULT):
     """全期間 / 今月 / 今週 / 期間指定 を同じ並びのボタンで選ばせる共通の期間フィルタ。
     「期間指定」を選んだ時だけカレンダーを出す。(lo, hi, 表示ラベル) を返す。
     lo/hi は 'YYYY-MM-DD' 文字列、全期間なら (None, None)。
 
     default: 最初に選ばれている期間。「大阪支社売上」は開いた瞬間に今月の
     売上が見えていてほしい(依頼⑧・2026-08-27 大橋様)ので "今月" を渡す。
+    order: ボタンの並び順。大阪支社売上は PERIOD_ORDER_MONTH_FIRST を渡して
+    「今月」を先頭にする(2026-08-28 大橋様)。
     """
     from common import posting_logic
 
-    options = list(_PERIOD_PRESETS.keys()) + [_PERIOD_CUSTOM]
+    # 🔴 並び順は order に従うが、増減があっても選択肢を落とさない
+    #    (order に書き忘れた期間が黙って選べなくなるのを防ぐ)。
+    known = list(_PERIOD_PRESETS.keys()) + [_PERIOD_CUSTOM]
+    options = [o for o in order if o in known]
+    options += [o for o in known if o not in options]
     if default not in options:
-        default = "全期間"
+        default = options[0]
     sel = st.pills("期間", options, selection_mode="single", default=default,
                    label_visibility="collapsed", key=f"{key}_pills")
     if not sel:
