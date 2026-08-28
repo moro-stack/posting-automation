@@ -8,7 +8,6 @@ import streamlit as st
 from common import advalue
 from common import posting_logic
 from common import posting_store as store
-from common import uriagehyo as U
 from common.excel_io import freeze_xlsx_bytes
 from common.ui import (apply_app_style, nice_table, period_picker, flash, show_flash,
                        selectable_list, list_action_bar)
@@ -276,31 +275,3 @@ st.download_button("号原価まとめをExcelで保存", data=freeze_xlsx_bytes
                    file_name=f"号原価まとめ_{sel}.xlsx",
                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                    icon=":material/download:", key="dl_genka")
-
-# ===== 会議用売上表 出力（依頼⑦・2026-08-19 大橋様ご指摘） =====
-# 🔴 会議用売上表(手作りの月次台帳)は「ぱど」「チラシ」「仕分け」の3区分売上まで
-# 持つが、この区分はアプリのどこにも記録が無い。アプリが持っている値(売上合計・
-# 配布原価・小口の駐車場代/飲み物代)だけを同じ列に自動で入れ、区分の無い列と
-# 備考は空欄のまま出す。実ファイルへの直接書き込みはせず、都度エクスポートした
-# ものをコピー＆ペーストしてもらう運用(2026-08-20 オーナー判断)。
-with st.expander(":material/table_chart: 会議用売上表に出力", expanded=False):
-    st.caption("大阪支社の会議で使う売上表と同じ列で書き出します。"
-               "「ぱど」「チラシ」「仕分け」の内訳・備考はアプリに記録が無いため"
-               "空欄のまま出ます。コピー＆ペーストしてお使いください。")
-    _hakko_gou = st.text_input("発行号（例：8/21）", value=sub_label or "", key="uriage_gou")
-    _koutsuhi = sum(posting_logic._num(r.get("amount")) for r in petty
-                    if _cats.get(r.get("category_id")) == "駐車場代")
-    _nomimono = sum(posting_logic._num(r.get("amount")) for r in petty
-                    if _cats.get(r.get("category_id")) == "飲み物代")
-    st.caption(f"交通費（駐車場代） ¥{posting_logic.fmt_num(_koutsuhi)} ／ "
-               f"飲み物 ¥{posting_logic.fmt_num(_nomimono)}（小口の費目から自動集計）")
-    _ban_mei = f"{sel} {sub_label}" if sub_label else sel
-    _uriage_row = U.build_row(hakko_gou=_hakko_gou or None, ban_mei=_ban_mei,
-                              uriage_zeikomi=receivable_total,
-                              genka_goukei_zeikomi=groups["genka"],
-                              koutsuhi=_koutsuhi, nomimono=_nomimono)
-    st.download_button("会議用売上表の行をダウンロード",
-                       data=U.build_workbook([_uriage_row]),
-                       file_name=U.uriagehyo_filename(),
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                       icon=":material/download:", key="dl_uriage")

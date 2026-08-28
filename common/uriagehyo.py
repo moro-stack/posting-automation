@@ -1,20 +1,21 @@
-"""アプリのデータを、大阪支社の「会議で使う売上表」(手作りの月次台帳)と
-同じ列並びで書き出す(依頼⑦・2026-08-19 大橋様ご指摘)。
+"""アプリのデータを、大阪支社の「会議で使う売上表」の列並びに変換する。
 
-会議用売上表(KPS大阪売上表.xlsx)は「ぱど」「チラシ」「仕分け」の3区分の
-部数・売上まで持つが、この区分はアプリのどこにも記録されていない。
-アプリが持っている値(売上合計・配布原価・交通費(駐車場代)・飲み物代)だけを
-同じ列に自動で入れ、区分の無い列と備考は空欄のまま出す。
+会議用売上表は「ぱど」「チラシ」「仕分け」の3区分の部数・売上まで持つが、
+この区分はアプリのどこにも記録されていない。アプリが持っている値
+(売上合計・配布原価・交通費(駐車場代)・飲み物代)だけを同じ列に自動で入れ、
+区分の無い列と備考は空欄のまま出す。
+
+実際のExcel生成は common/uriagehyo_style.py（新テンプレート準拠）が行う。
+ここは「1行ぶんの値を作る」「案件をセクションに振り分ける」までを受け持つ。
 
 2026-08-20 オーナー判断＝実ファイル(19シートの財務台帳)への直接書き込みは
 せず、都度エクスポートしたものをコピー＆ペーストしてもらう運用にする。
+
+🔴 2026-08-28 依頼5: 号別明細にあった旧エクスポート(1行だけの素の表を出す
+build_workbook / uriagehyo_filename)は、「大阪支社売上」ページの
+新テンプレート準拠の生成に一本化したため削除した。出力口を2つ残すと
+どちらが正か分からなくなる。
 """
-import io
-
-import openpyxl
-
-from common import excel_io
-
 HEADERS = [
     "発行号", "版名", "ぱど部数", "ぱど売上（税抜）", "チラシ部数", "チラシ売上（税抜）",
     "仕分け部数", "仕分け売上（税抜）", "その他", "売上合計（税抜）", "売上合計（税込）",
@@ -132,23 +133,3 @@ def build_bulk_rows(*, receivables, petty, payables, contract_lines, manual, id2
                         koutsuhi=koutsuhi.get(key, 0), nomimono=nomimono.get(key, 0))
         out.append((label, row))
     return out
-
-
-def build_workbook(rows) -> bytes:
-    """会議用売上表と同じ列見出しのExcelを bytes で返す(コピー＆ペースト用)。"""
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "売上表用出力"
-    for col, h in enumerate(HEADERS, start=1):
-        c = ws.cell(row=1, column=col, value=h)
-        c.font = openpyxl.styles.Font(bold=True)
-    for i, r in enumerate(rows):
-        for col, h in enumerate(HEADERS, start=1):
-            ws.cell(row=2 + i, column=col, value=r.get(h))
-    buf = io.BytesIO()
-    wb.save(buf)
-    return excel_io.freeze_xlsx_bytes(buf.getvalue())
-
-
-def uriagehyo_filename() -> str:
-    return "会議用売上表_出力.xlsx"

@@ -49,27 +49,6 @@ def test_build_row_zero_koutsuhi_and_nomimono_are_blank_not_zero():
     assert row["飲み物"] is None
 
 
-def test_build_workbook_headers_match_the_real_sheet():
-    rows = [U.build_row(hakko_gou="8/21", ban_mei="京阪南",
-                        uriage_zeikomi=847502, genka_goukei_zeikomi=324505)]
-    data = U.build_workbook(rows)
-    wb = openpyxl.load_workbook(io.BytesIO(data))
-    ws = wb.active
-    assert ws["A1"].value == "発行号"
-    assert ws["B1"].value == "版名"
-    assert ws["J1"].value == "売上合計（税抜）"
-    assert ws["K1"].value == "売上合計（税込）"
-    assert ws["O1"].value == "配布原価（税込）"
-    assert ws["P1"].value == "原価合計（税込）"
-    assert ws["A2"].value == "8/21"
-    assert ws["B2"].value == "京阪南"
-    assert ws["K2"].value == 847502
-
-
-def test_uriagehyo_filename():
-    assert U.uriagehyo_filename() == "会議用売上表_出力.xlsx"
-
-
 # ===== 月次一括生成（依頼②・2026-08-20） =====
 
 
