@@ -89,6 +89,27 @@ def _period_filter(rows, date_key, key, label):
     return rows
 
 
+def _apply_draft(slot, mapping):
+    """AIが読み取った下書きを、キー付きウィジェットの初期値として session_state に入れる。
+
+    🔴 2026-08-28 バグ(大橋様ご報告＝金額0円・日付も空):
+    Streamlit のキー付きウィジェットは、一度描画されると `value=` 引数を無視して
+    session_state の値を使う。2026-08-27 にテスト用の `key=` を付けたことで、
+    それまで動いていた「下書きを value= に渡す」経路が黙って効かなくなった。
+    下書きは必ず **ウィジェットを描くより前に session_state へ書く** こと。
+    （session_state はウィジェット生成後には書き換えられないので、この順番が要る）
+
+    slot     : 下書きの置き場(session_state のキー)。読んだら消す＝一度だけ反映する。
+    mapping  : {下書きの項目名: (ウィジェットのkey, 変換関数)}
+    """
+    draft = st.session_state.pop(slot, None)
+    if not draft:
+        return False
+    for field, (widget_key, convert) in mapping.items():
+        st.session_state[widget_key] = convert(draft.get(field))
+    return True
+
+
 def _ocr_files(files, reader, media_type=None):
     """複数ファイルをAIで読み取り、下書きリストを返す。失敗しても止めない(#7の保険)。
 
@@ -216,8 +237,14 @@ if mode == "小口":
                 del st.session_state["petty_bulk"]
                 st.rerun()
 
-        draft = st.session_state.get("petty_draft", {"date": None, "amount": None, "item": None})
-        if st.session_state.get("petty_draft"):
+        # 下書きをフォームに載せる。必ず st.form より前に行うこと(上の注記参照)。
+        if _apply_draft("petty_draft", {
+                "date": ("petty_date", lambda v: str(v or "")),
+                "amount": ("petty_amount", lambda v: int(v or 0)),
+                "item": ("petty_memo", lambda v: str(v or "")),
+        }):
+            st.session_state["petty_draft_shown"] = True
+        if st.session_state.get("petty_draft_shown"):
             st.caption("✏️ AIが読み取った値は下のフォームで自由に修正できます。")
 
         # 重複の確認待ち(#11)
@@ -238,14 +265,16 @@ if mode == "小口":
                 del st.session_state["petty_pending"]
                 st.rerun()
 
+        # ⚠️ 下のウィジェットは値を session_state で持つ(キー付き)。
+        # AIの下書きは _apply_draft() が session_state に入れてあるので、
+        # ここで value= を渡してはいけない(渡しても無視されるうえ、
+        # 「反映されているつもり」の読み違いを生む)。
         with st.form("petty", clear_on_submit=True):
-            date = st.text_input("日付（例：2026-07-05）", value=draft.get("date") or "",
-                                 key="petty_date")
+            date = st.text_input("日付（例：2026-07-05）", key="petty_date")
             cats = {c["name"]: c["id"] for c in store.list_expense_categories(only_active=True)}
             cat = st.selectbox("費目", list(cats.keys()) or ["(費目マスタを登録)"],
                                key="petty_cat")
-            amount = st.number_input("金額(税込)", min_value=0,
-                                     value=int(draft.get("amount") or 0), step=1,
+            amount = st.number_input("金額(税込)", min_value=0, step=1,
                                      key="petty_amount")
             projs = _project_options()
             proj = st.selectbox("案件(任意)", ["(なし)"] + list(projs.keys()), key="petty_proj")
@@ -259,7 +288,7 @@ if mode == "小口":
                 "案件区分（「その他」のときの案件名）", key="petty_other",
                 placeholder="例：買取専科（案件が「その他」のときだけ使われます）",
                 help=_CASE_LABEL_HELP)
-            memo = st.text_input("メモ", value=draft.get("item") or "", key="petty_memo")
+            memo = st.text_input("メモ", key="petty_memo")
             if st.form_submit_button("登録") and amount > 0:
                 case_label, case_error = advalue.resolve_case_label(
                     proj, date_value=date, week_choice=week, free_text=other_label)
@@ -354,9 +383,15 @@ elif mode == "買掛":
                 del st.session_state["pay_bulk"]
                 st.rerun()
 
-        draft = st.session_state.get("pay_draft",
-                                     {"vendor": None, "amount": None, "date": None, "note": None})
-        if st.session_state.get("pay_draft"):
+        # 下書きをフォームに載せる。必ず st.form より前に行うこと(_apply_draft の注記参照)。
+        if _apply_draft("pay_draft", {
+                "date": ("pay_date", lambda v: _to_date(v) or _date.today()),
+                "vendor": ("pay_vendor", lambda v: str(v or "")),
+                "amount": ("pay_amount", lambda v: int(v or 0)),
+                "note": ("pay_note", lambda v: str(v or "")),
+        }):
+            st.session_state["pay_draft_shown"] = True
+        if st.session_state.get("pay_draft_shown"):
             st.caption("✏️ AIが読み取った値は下のフォームで自由に修正できます。")
 
         if "pay_pending" in st.session_state:
@@ -376,14 +411,12 @@ elif mode == "買掛":
                 del st.session_state["pay_pending"]
                 st.rerun()
 
+        # ⚠️ 小口と同じく、値は session_state で持つ。value= は渡さないこと。
+        st.session_state.setdefault("pay_date", _date.today())
         with st.form("payable", clear_on_submit=True):
-            inv_date = st.date_input("請求書の日付",
-                                     value=_to_date(draft.get("date")) or _date.today())
-            vendor = st.text_input("取引先（請求元の会社名）", value=draft.get("vendor") or "",
-                                   key="pay_vendor")
-            amount = st.number_input("金額(税込)", min_value=0,
-                                     value=int(draft.get("amount") or 0), step=1,
-                                     key="pay_amount")
+            inv_date = st.date_input("請求書の日付", key="pay_date")
+            vendor = st.text_input("取引先（請求元の会社名）", key="pay_vendor")
+            amount = st.number_input("金額(税込)", min_value=0, step=1, key="pay_amount")
             _vendors = store.list_payables_vendors()
             _auto = posting_logic.resolve_original_status(vendor, _vendors)
             original = st.selectbox(
@@ -403,7 +436,7 @@ elif mode == "買掛":
                 "案件区分（「その他」のときの案件名）", key="pay_other",
                 placeholder="例：買取専科（案件が「その他」のときだけ使われます）",
                 help=_CASE_LABEL_HELP)
-            note = st.text_input("備考", value=draft.get("note") or "")
+            note = st.text_input("備考", key="pay_note")
             if st.form_submit_button("登録") and amount > 0:
                 case_label, case_error = advalue.resolve_case_label(
                     pay_proj, date_value=inv_date, week_choice=pay_week, free_text=pay_other)

@@ -313,3 +313,108 @@ def test_prompts_tell_the_ai_to_look_near_the_amount_labels():
         assert "請求額" in prompt
         assert "合計" in prompt
         assert "amount_candidates" in prompt
+
+
+# ===== 非定型レシート（駐車場の領収証）の回帰（2026-08-28・大橋様ご報告） =====
+# 実物 `レシートダミー②.jpg`（駐車場ジャンボ1000）を Bedrock に通して得た
+# 実際の応答をそのまま固定する。画像認識自体はモックできないので、
+# 「AIがこう返したときにアプリがどう解釈するか」をここで固める。
+
+_PARKING_RECEIPT_RESPONSE = (
+    '```json\n'
+    '{\n'
+    '  "date": "2015-02-12",\n'
+    '  "amount": 900,\n'
+    '  "item": "駐車場",\n'
+    '  "amount_candidates": [\n'
+    '    {"label": "駐車料金", "value": 900},\n'
+    '    {"label": "合計", "value": 900},\n'
+    '    {"label": "現金領収額", "value": 900},\n'
+    '    {"label": "お預り", "value": 1000},\n'
+    '    {"label": "お釣り", "value": 100}\n'
+    '  ]\n'
+    '}\n'
+    '```'
+)
+
+
+def test_parking_receipt_reads_amount_and_date():
+    """🔴 再現ケース。金額0円・日付空にならないこと。
+    お預り1,000円・お釣り100円に引っ張られず、合計の900円を採る。"""
+    result = ocr.extract_receipt(b"x", client=_FakeClient(_PARKING_RECEIPT_RESPONSE))
+    assert result["amount"] == 900
+    assert result["date"] == "2015-02-12"
+
+
+def test_response_wrapped_in_a_markdown_code_fence_is_parsed():
+    """🔴 Bedrock は ```json ... ``` で囲って返してくる(実測)。
+    囲みごとJSONとして読めること。"""
+    assert ocr._parse_json(_PARKING_RECEIPT_RESPONSE)["amount"] == 900
+
+
+def test_old_date_is_not_rejected():
+    """2015年のような古い日付でも弾かない(妥当性チェックで消さない)。
+    領収証は後から精算することがあり、日付が古いのは異常ではない。"""
+    fake = _FakeClient('{"date":"2015-02-12","amount":900,"item":"駐車場"}')
+    assert ocr.extract_receipt(b"x", client=fake)["date"] == "2015-02-12"
+
+
+def test_receipt_without_any_total_label_falls_back_to_amount():
+    """自作ダミー: 「合計」も「請求額」も無いレシート(駐車料金だけ)。
+    候補から選べないときはAIの本命(amount)をそのまま使う＝空にしない。"""
+    fake = _FakeClient('{"date":"2026-08-01","amount":900,"item":"駐車料金",'
+                       '"amount_candidates":[{"label":"駐車料金","value":900}]}')
+    assert ocr.extract_receipt(b"x", client=fake)["amount"] == 900
+
+
+def test_receipt_with_many_unrelated_numbers_still_picks_the_total():
+    """自作ダミー: 精算No・発券No・駐車時間など関係ない数字が多いレシート。
+    見出しで判断するので、桁の大きい発券No(079376)を金額にしない。"""
+    fake = _FakeClient(
+        '{"date":"2026-08-01","amount":900,"item":"駐車場",'
+        '"amount_candidates":['
+        '{"label":"精算No","value":60},'
+        '{"label":"発券No","value":79376},'
+        '{"label":"駐車時間","value":924},'
+        '{"label":"合計","value":900},'
+        '{"label":"お預り","value":1000}]}')
+    assert ocr.extract_receipt(b"x", client=fake)["amount"] == 900
+
+
+def test_receipt_where_azukari_is_larger_is_not_picked():
+    """🔴 お預り金額の方が大きい。「大きい方が総額」という素朴な選び方をしていたら落ちる。"""
+    d = {"amount": 780, "amount_candidates": [
+        {"label": "合計", "value": 780},
+        {"label": "お預り", "value": 5000},
+        {"label": "お釣り", "value": 4220},
+    ]}
+    assert ocr.pick_amount(d) == 780
+
+
+def test_convenience_store_receipt_picks_goukei_over_uchizei():
+    """自作ダミー: コンビニのレシート(内税・小計・お預り付き)。"""
+    d = {"amount": 550, "amount_candidates": [
+        {"label": "小計", "value": 500},
+        {"label": "内税", "value": 50},
+        {"label": "合計", "value": 550},
+        {"label": "お預り", "value": 1000},
+        {"label": "お釣り", "value": 450},
+    ]}
+    assert ocr.pick_amount(d) == 550
+
+
+def test_ryoushuusho_with_uwagaki_picks_the_total():
+    """自作ダミー: 但し書き付きの領収書(「金 3,300円」表記)。"""
+    d = {"amount": 3300, "amount_candidates": [
+        {"label": "金額", "value": 3300},
+        {"label": "内消費税等", "value": 300},
+    ]}
+    # 「金額」は総額の見出しとして扱わない(内訳にも使われるため)ので amount に落ちる
+    assert ocr.pick_amount(d) == 3300
+
+
+def test_pick_amount_survives_a_broken_candidate_list():
+    """AIが候補を配列以外・要素が文字列などで返しても落ちないこと。"""
+    assert ocr.pick_amount({"amount": 100, "amount_candidates": "こわれた"}) == 100
+    assert ocr.pick_amount({"amount": 100, "amount_candidates": ["合計 900円"]}) == 100
+    assert ocr.pick_amount({"amount": 100, "amount_candidates": [None]}) == 100
