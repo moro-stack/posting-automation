@@ -125,7 +125,7 @@ with tab_atehagi:
                 label, data, fname = out
                 st.caption(f"作成しました：{label}")
                 st.download_button(f"{fname} をダウンロード", data=data, file_name=fname,
-                                   mime=XLSX_MIME, key="keihan_dl")
+                                   mime=XLSX_MIME, key="keihan_dl", type="primary")
 
             st.divider()
             st.markdown("**担当地区コードを指定して、その分だけ出す**（刷り直し用）")
@@ -162,7 +162,7 @@ with tab_atehagi:
                 st.caption(f"{n_sel}地区分のあて紙を作成しました")
                 st.download_button(f"{sname} をダウンロード", data=sdata_bytes,
                                    file_name=sname, mime=XLSX_MIME,
-                                   key="keihan_single_dl")
+                                   key="keihan_single_dl", type="primary")
 
 with tab_shiwake:
     st.caption("配送管理表（CSV / Excel）をアップロードすると、配布員ごとの仕分け表を作ります。"
@@ -215,7 +215,7 @@ with tab_shiwake:
                 s_name = SH.shiwake_filename(gou=s_gou, haifubi=s_haifubi)
                 st.download_button(f"{s_name} をダウンロード", data=s_data,
                                    file_name=s_name, mime=XLSX_MIME,
-                                   key="shiwake_dl")
+                                   key="shiwake_dl", type="primary")
                 with st.expander("中身を確認する（先頭5名）"):
                     for g in s_groups[:5]:
                         st.markdown(f"**{g['name']}**　配送順位 {g['junni']}　"
@@ -251,6 +251,7 @@ with tab_proceed:
                     file_name=PR.proceed_atehagi_filename(parsed),
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key="proceed_dl",
+                    type="primary",
                 )
 
 with tab_advalue:
@@ -289,6 +290,7 @@ with tab_advalue:
                 file_name=AV.advalue_filename(adv_case.strip() or None),
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="adv_dl",
+                type="primary",
             )
     elif up_irai is not None or up_minami is not None:
         st.info("依頼表と京阪南版 配送管理表の**両方**をアップロードしてください。")
