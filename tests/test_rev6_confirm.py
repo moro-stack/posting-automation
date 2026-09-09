@@ -86,12 +86,12 @@ def test_pay_pending_confirm_uses_hai_iie(tmp_path, monkeypatch):
 
 
 def test_recv_pending_confirm_uses_hai_iie(tmp_path, monkeypatch):
-    """売掛の重複確認(recv_pending)。mode の radio を「売掛」に切り替えてから出す。"""
+    """売上の重複確認(recv_pending)。mode の radio を「売上」に切り替えてから出す。"""
     db = os.path.join(tmp_path, "t.db")
     _seed(db, monkeypatch)
     at = AppTest.from_file(PAGE01, default_timeout=30)
     at.run()
-    at.segmented_control[0].set_value("売掛").run()
+    at.segmented_control[0].set_value("売上").run()
     at.session_state["recv_pending"] = {
         "month": "2026-07", "client_id": None, "amount": 2000,
         "note": None, "project_id": None, "other_label": None,

@@ -45,7 +45,7 @@ def test_parse_haifu_irai():
     assert [a["size"] for a in p["advertisers"]] == ["B4", "A4"]
     assert len(p["areas"]) == 2
     assert p["areas"][0] == {"code": "サンプル-1-1", "media_busuu": 300,
-                             "town": "サンプル町1", "ads": [300, 0]}
+                             "town": "サンプル町1", "ads": [300, 0], "suriwake_b": False}
     assert p["areas"][1]["ads"] == [500, 200]
 
 
@@ -78,6 +78,51 @@ def test_build_proceed_atehagi_cells():
     assert s2["C8"].value == "サンプル広告主B/企画"
     assert s2["I8"].value == 200
     assert s2["I48"].value == 2
+
+
+def _sample_irai_with_suriwake(row1_flag, row2_flag):
+    """刷り分けＢ版列（A列）付きの合成テーブル。"""
+    return [
+        _row([(8, "配布依頼書　兼　配布終了報告書【サンプル市】")]),
+        _row([(0, "刷り分けＢ版"), (5, "2025年09月26日号\n※納期は…"), (6, "チラシ名\n（広告主）"),
+              (7, "サンプル広告主A/企画"), (15, "チラシ\n枚数")]),
+        _row([]),
+        _row([]),
+        _row([(6, "サイズ"), (7, "B4")]),
+        _row([]),
+        _row([]),
+        _row([(0, "件数"), (1, "配布エリア"), (2, "ページ数"),
+              (3, "各戸ﾎﾟｽﾄ"), (4, "集合ﾎﾟｽﾄ"), (5, "媒体部数")]),
+        _row([(0, row1_flag), (1, "サンプル-1-1"), (5, 300), (7, 300)]),
+        _row([(1, "サンプル町1")]),
+        _row([(0, row2_flag), (1, "サンプル-1-2"), (5, 500), (7, 500)]),
+        _row([(1, "サンプル町2")]),
+        _row([(0, "合 計")]),
+    ]
+
+
+def test_parse_haifu_irai_reads_suriwake_b_flag():
+    p = P.parse_haifu_irai(_sample_irai_with_suriwake("B", None))
+    assert p["areas"][0]["suriwake_b"] is True
+    assert p["areas"][1]["suriwake_b"] is False
+
+
+def test_parse_haifu_irai_suriwake_b_defaults_false_without_column():
+    p = P.parse_haifu_irai(_sample_irai())
+    assert p["areas"][0]["suriwake_b"] is False
+
+
+def test_build_proceed_atehagi_fills_c6_yellow_only_when_suriwake_b():
+    p = P.parse_haifu_irai(_sample_irai_with_suriwake("B", "A"))
+    data = P.build_proceed_atehagi_workbook(p)
+    wb = openpyxl.load_workbook(io.BytesIO(data))
+
+    s1 = wb["サンプル-1-1"]   # B版 → 黄色
+    assert s1["C6"].fill.patternType == "solid"
+    assert s1["C6"].fill.fgColor.rgb == "FFFFFF00"
+
+    s2 = wb["サンプル-1-2"]   # B版でない → 塗りなし
+    assert s2["C6"].fill.patternType is None
 
 
 def test_build_proceed_is_deterministic():

@@ -111,26 +111,28 @@ def test_petty_advalue_week_uses_the_picked_date(tmp_path, monkeypatch):
     (2026-08-27 の依頼⑥の動きを保つ)。"""
     db = os.path.join(tmp_path, "t.db")
     at = _page(db, monkeypatch, "小口")
+    # 案件選択は st.form の外にあり、選んだ直後に画面を再描画してはじめて
+    # 「アドバリューの週」欄が現れる(常時表示しない・2026-09-04)。
+    at.selectbox(key="petty_proj").set_value("アドバリュー").run()
     at.date_input(key="petty_date").set_value(_dt.date(2026, 10, 2))
-    at.selectbox(key="petty_proj").set_value("アドバリュー")
     at.number_input(key="petty_amount").set_value(500)
     at.selectbox(key="petty_week").set_value("1週目")
     at.button(key="FormSubmitter:petty-登録").click().run()
     assert store.list_petty_cash(db_path=db)[0]["other_label"] == "10-1"
 
 
-# ===== 売掛（月度） =====
+# ===== 売上（月度） =====
 
 
 def test_receivable_month_is_a_calendar(tmp_path, monkeypatch):
-    at = _page(os.path.join(tmp_path, "t.db"), monkeypatch, "売掛")
+    at = _page(os.path.join(tmp_path, "t.db"), monkeypatch, "売上")
     assert at.date_input(key="recv_month").value == _dt.date.today()
 
 
 def test_receivable_saves_the_month_in_iso(tmp_path, monkeypatch):
     """🔴 実DBに "2026/8/28" が入っていた欄。月度は YYYY-MM で保存する。"""
     db = os.path.join(tmp_path, "t.db")
-    at = _page(db, monkeypatch, "売掛")
+    at = _page(db, monkeypatch, "売上")
     at.date_input(key="recv_month").set_value(_dt.date(2026, 8, 28))
     at.number_input(key="recv_amount").set_value(50000)
     at.button(key="FormSubmitter:receivable-登録").click().run()
@@ -141,9 +143,10 @@ def test_receivable_saves_the_month_in_iso(tmp_path, monkeypatch):
 
 def test_receivable_advalue_week_uses_the_picked_month(tmp_path, monkeypatch):
     db = os.path.join(tmp_path, "t.db")
-    at = _page(db, monkeypatch, "売掛")
+    at = _page(db, monkeypatch, "売上")
+    # 案件選択は st.form の外にあり、選んだ直後に再描画してはじめて週欄が現れる。
+    at.selectbox(key="recv_proj").set_value("アドバリュー").run()
     at.date_input(key="recv_month").set_value(_dt.date(2026, 9, 15))
-    at.selectbox(key="recv_proj").set_value("アドバリュー")
     at.number_input(key="recv_amount").set_value(1000)
     at.selectbox(key="recv_week").set_value("3週目")
     at.button(key="FormSubmitter:receivable-登録").click().run()

@@ -21,9 +21,9 @@ force_environment_camera()
 st.title("原価・売上登録")
 
 # 🔴 segmented_control は選択を解除でき、そのとき None を返す。None のまま下の
-# if/elif/else に流すと else に落ちて「売掛」の画面が開いてしまうため、
-# 明示的に既定へ戻す。
-_MODES = ["小口", "買掛", "売掛", "車両"]
+# if/elif/else に流すと else(車両)に落ちてしまうため、明示的に既定へ戻す。
+# 🔴 2026-09-04大橋様ご依頼: 「売掛」は会計用語で分かりにくいため「売上」表記に統一。
+_MODES = ["小口", "買掛", "売上", "車両"]
 
 # 🔴 依頼①(2026-08-19大橋様→2026-08-20詳細確認): アドバリューは週ごとに案件が来て
 # 「8-1」「8-2」「8-3」のように区分して管理している。「その他」向けに元々あった
@@ -272,6 +272,20 @@ if mode == "小口":
         # 🔴 2026-08-28 オーナー指示: 日付は手入力だと必ず表記がズレる
         # (実DBに "2026-07/06" が入っていた)。カレンダー入力に統一する。
         st.session_state.setdefault("petty_date", _date.today())
+        # 🔴 2026-09-04 大橋様ご依頼: 週選択・案件区分欄は「アドバリュー」「その他」を
+        # 選んだときだけ出す(常時表示しない)。st.form内のウィジェットは送信までrerun
+        # されないため、案件選択だけはformの外に出して選択直後に切り替わるようにする。
+        projs = _project_options()
+        week = other_label = None
+        with st.container(key="case-select-box"):
+            proj = st.selectbox("案件", ["(なし)"] + list(projs.keys()), key="petty_proj")
+            if proj == advalue.ADVALUE_PROJECT:
+                week = st.selectbox("アドバリューの週（必須）", _WEEK_OPTIONS, key="petty_week",
+                                    help=_CASE_LABEL_HELP)
+            elif proj == advalue.SONOTA_PROJECT:
+                other_label = st.text_input(
+                    "案件区分（「その他」のときの案件名）", key="petty_other",
+                    placeholder="例：買取専科", help=_CASE_LABEL_HELP)
         with st.form("petty", clear_on_submit=True):
             date = st.date_input("日付", key="petty_date", format="YYYY/MM/DD")
             cats = {c["name"]: c["id"] for c in store.list_expense_categories(only_active=True)}
@@ -279,18 +293,10 @@ if mode == "小口":
                                key="petty_cat")
             amount = st.number_input("金額(税込)", min_value=0, step=1,
                                      key="petty_amount")
-            projs = _project_options()
-            proj = st.selectbox("案件(任意)", ["(なし)"] + list(projs.keys()), key="petty_proj")
             dists = _distributor_options()
             dist = st.selectbox("配布員(任意)", ["(なし)"] + list(dists.keys()),
                                 key="petty_dist",
                                 help="この費用が誰の分か。号別明細の雑費の内訳に出ます。")
-            week = st.selectbox("アドバリューの週（必須）", _WEEK_OPTIONS, key="petty_week",
-                                help=_CASE_LABEL_HELP)
-            other_label = st.text_input(
-                "案件区分（「その他」のときの案件名）", key="petty_other",
-                placeholder="例：買取専科（案件が「その他」のときだけ使われます）",
-                help=_CASE_LABEL_HELP)
             memo = st.text_input("メモ", key="petty_memo")
             if st.form_submit_button("登録") and amount > 0:
                 case_label, case_error = advalue.resolve_case_label(
@@ -417,6 +423,19 @@ elif mode == "買掛":
 
         # ⚠️ 小口と同じく、値は session_state で持つ。value= は渡さないこと。
         st.session_state.setdefault("pay_date", _date.today())
+        # 週選択・案件区分欄を選んだ案件に応じて出し分けるため、案件選択のみformの外へ。
+        pay_projs = _project_options()
+        pay_week = pay_other = None
+        with st.container(key="case-select-box"):
+            pay_proj = st.selectbox("案件", ["(なし)"] + list(pay_projs.keys()),
+                                    key="pay_proj")
+            if pay_proj == advalue.ADVALUE_PROJECT:
+                pay_week = st.selectbox("アドバリューの週（必須）", _WEEK_OPTIONS, key="pay_week",
+                                        help=_CASE_LABEL_HELP)
+            elif pay_proj == advalue.SONOTA_PROJECT:
+                pay_other = st.text_input(
+                    "案件区分（「その他」のときの案件名）", key="pay_other",
+                    placeholder="例：買取専科", help=_CASE_LABEL_HELP)
         with st.form("payable", clear_on_submit=True):
             inv_date = st.date_input("請求書の日付", key="pay_date")
             vendor = st.text_input("取引先（請求元の会社名）", key="pay_vendor")
@@ -431,15 +450,6 @@ elif mode == "買掛":
             # 「既定『◯◯』を反映しました」と嘘の案内が出る。
             if _auto in _ORIGINAL_STATUSES:
                 st.caption(f"✔️ 買掛先マスタの既定「{_auto}」を反映しました（変更できます）。")
-            pay_projs = _project_options()
-            pay_proj = st.selectbox("案件(任意)", ["(なし)"] + list(pay_projs.keys()),
-                                    key="pay_proj")
-            pay_week = st.selectbox("アドバリューの週（必須）", _WEEK_OPTIONS, key="pay_week",
-                                    help=_CASE_LABEL_HELP)
-            pay_other = st.text_input(
-                "案件区分（「その他」のときの案件名）", key="pay_other",
-                placeholder="例：買取専科（案件が「その他」のときだけ使われます）",
-                help=_CASE_LABEL_HELP)
             note = st.text_input("備考", key="pay_note")
             if st.form_submit_button("登録") and amount > 0:
                 case_label, case_error = advalue.resolve_case_label(
@@ -485,8 +495,8 @@ elif mode == "買掛":
                             filename="買掛_選択一覧", section="payable",
                             delete_fn=store.delete_payable)
 
-elif mode == "売掛":
-    st.subheader("売掛（売上）")
+elif mode == "売上":
+    st.subheader("売上")
     tab_reg, tab_list = st.tabs([_REG_TAB, _LIST_TAB])
 
     with tab_reg:
@@ -499,7 +509,14 @@ elif mode == "売掛":
             if cc1.button("はい", type="primary", key="recv_ok"):
                 store.add_receivable(p["month"], p["client_id"], p["amount"],
                                      note=p["note"], project_id=p["project_id"],
-                                     other_label=p.get("other_label"))
+                                     other_label=p.get("other_label"),
+                                     hakko_gou=p.get("hakko_gou"),
+                                     pado_busuu=p.get("pado_busuu"), pado_uriage=p.get("pado_uriage"),
+                                     chirashi_busuu=p.get("chirashi_busuu"),
+                                     chirashi_uriage=p.get("chirashi_uriage"),
+                                     shiwake_busuu=p.get("shiwake_busuu"),
+                                     shiwake_uriage=p.get("shiwake_uriage"),
+                                     sonota_uriage=p.get("sonota_uriage"))
                 del st.session_state["recv_pending"]
                 flash("登録しました")
                 st.rerun()
@@ -510,24 +527,52 @@ elif mode == "売掛":
         # 月度もカレンダーで選ぶ(実DBに "2026/8/28" が入っていた欄)。
         # 選んだ日の「月」を YYYY-MM として保存する。
         st.session_state.setdefault("recv_month", _date.today())
+        # 週選択・案件区分欄を選んだ案件に応じて出し分けるため、案件選択のみformの外へ。
+        projs = _project_options()
+        recv_week = recv_other = None
+        with st.container(key="case-select-box"):
+            proj = st.selectbox("案件", ["(なし)"] + list(projs.keys()), key="recv_proj")
+            if proj == advalue.ADVALUE_PROJECT:
+                recv_week = st.selectbox("アドバリューの週（必須）", _WEEK_OPTIONS, key="recv_week",
+                                         help=_CASE_LABEL_HELP)
+            elif proj == advalue.SONOTA_PROJECT:
+                recv_other = st.text_input(
+                    "案件区分（「その他」のときの案件名）", key="recv_other",
+                    placeholder="例：買取専科", help=_CASE_LABEL_HELP)
         with st.form("receivable", clear_on_submit=True):
             month = st.date_input("月度（その月のどの日でも構いません）",
                                   key="recv_month", format="YYYY/MM/DD")
             st.caption(f"この売上は **{posting_logic.iso_month(st.session_state['recv_month'])}** "
                        "の月度として登録されます。")
             clients = {c["name"]: c["id"] for c in store.list_receivables_clients(only_active=True)}
-            client = st.selectbox("売掛先", list(clients.keys()) or ["(売掛先マスタを登録)"],
+            client = st.selectbox("売上先", list(clients.keys()) or ["(売上先マスタを登録)"],
                                   key="recv_client")
             amount = st.number_input("金額(税込)", min_value=0, step=1, key="recv_amount")
             note = st.text_input("備考(号)", key="recv_note")
-            projs = _project_options()
-            proj = st.selectbox("案件(任意)", ["(なし)"] + list(projs.keys()), key="recv_proj")
-            recv_week = st.selectbox("アドバリューの週（必須）", _WEEK_OPTIONS, key="recv_week",
-                                     help=_CASE_LABEL_HELP)
-            recv_other = st.text_input(
-                "案件区分（「その他」のときの案件名）", key="recv_other",
-                placeholder="例：買取専科（案件が「その他」のときだけ使われます）",
-                help=_CASE_LABEL_HELP)
+            # 🔴 2026-09-04大橋様ご依頼: 会議用売上表の内訳(発行号・ぱど/チラシ/仕分けの
+            # 部数・売上税抜・その他)を、売上登録のときに一緒に入れられるようにする。
+            # 分かる分だけでよいので任意項目にして折りたたんでおく。
+            with st.expander("📋 売上表の内訳を入力する（任意）", expanded=False):
+                st.caption("ここに入れた分は「大阪支社売上」ページの月次売上表にそのまま反映されます。"
+                           "分からない項目は空欄のままでOKです。")
+                hakko_gou = st.text_input("発行号", key="recv_hakko_gou",
+                                          placeholder="例：8/21")
+                bd1, bd2 = st.columns(2)
+                pado_busuu = bd1.number_input("ぱど部数", min_value=0, step=1, key="recv_pado_busuu")
+                pado_uriage = bd2.number_input("ぱど売上（税抜）", min_value=0, step=1,
+                                               key="recv_pado_uriage")
+                bd3, bd4 = st.columns(2)
+                chirashi_busuu = bd3.number_input("チラシ部数", min_value=0, step=1,
+                                                  key="recv_chirashi_busuu")
+                chirashi_uriage = bd4.number_input("チラシ売上（税抜）", min_value=0, step=1,
+                                                   key="recv_chirashi_uriage")
+                bd5, bd6 = st.columns(2)
+                shiwake_busuu = bd5.number_input("仕分け部数", min_value=0, step=1,
+                                                 key="recv_shiwake_busuu")
+                shiwake_uriage = bd6.number_input("仕分け売上（税抜）", min_value=0, step=1,
+                                                  key="recv_shiwake_uriage")
+                sonota_uriage = st.number_input("その他（税抜）", min_value=0, step=1,
+                                                key="recv_sonota_uriage")
             if st.form_submit_button("登録") and amount > 0:
                 case_label, case_error = advalue.resolve_case_label(
                     proj, date_value=month, week_choice=recv_week, free_text=recv_other)
@@ -537,32 +582,46 @@ elif mode == "売掛":
                 payload = {"month": posting_logic.iso_month(month),
                            "client_id": clients.get(client),
                            "amount": int(amount), "note": note or None, "project_id": projs.get(proj),
-                           "other_label": case_label}
+                           "other_label": case_label,
+                           "hakko_gou": hakko_gou.strip() or None,
+                           "pado_busuu": pado_busuu or None, "pado_uriage": pado_uriage or None,
+                           "chirashi_busuu": chirashi_busuu or None,
+                           "chirashi_uriage": chirashi_uriage or None,
+                           "shiwake_busuu": shiwake_busuu or None,
+                           "shiwake_uriage": shiwake_uriage or None,
+                           "sonota_uriage": sonota_uriage or None}
                 if store.find_duplicate_receivable(payload["month"], payload["client_id"], payload["amount"]):
                     st.session_state["recv_pending"] = payload
                     st.rerun()
                 store.add_receivable(payload["month"], payload["client_id"], payload["amount"],
                                      note=payload["note"], project_id=payload["project_id"],
-                                     other_label=payload["other_label"])
+                                     other_label=payload["other_label"],
+                                     hakko_gou=payload["hakko_gou"],
+                                     pado_busuu=payload["pado_busuu"], pado_uriage=payload["pado_uriage"],
+                                     chirashi_busuu=payload["chirashi_busuu"],
+                                     chirashi_uriage=payload["chirashi_uriage"],
+                                     shiwake_busuu=payload["shiwake_busuu"],
+                                     shiwake_uriage=payload["shiwake_uriage"],
+                                     sonota_uriage=payload["sonota_uriage"])
                 flash("登録しました")
                 st.rerun()
 
     with tab_list:
         show_flash("receivable")
-        st.markdown("**登録済みの売掛一覧**")
+        st.markdown("**登録済みの売上一覧**")
         _clients, _projs = _names(store.list_receivables_clients), _names(store.list_projects)
-        _rows = _period_filter(store.list_receivables(), "month", "recv_period", "売掛")
+        _rows = _period_filter(store.list_receivables(), "month", "recv_period", "売上")
         _disp = [{"No.": r["id"], "月度": r.get("month") or "",
-                  "売掛先": _clients.get(r["client_id"], ""),
+                  "売上先": _clients.get(r["client_id"], ""),
                   "金額": _yen(r["amount"]), "備考": r.get("note") or "",
                   "案件": _projs.get(r["project_id"], ""),
                   "登録日": (r.get("created_at") or "")[:10]} for r in _rows]
         if not _disp:
-            st.caption("売掛の登録はまだありません。")
+            st.caption("売上の登録はまだありません。")
         else:
             edited, selected_ids = selectable_list(_disp, key="recv")
-            list_action_bar(edited, key="recv", title="売掛一覧",
-                            filename="売掛_選択一覧", section="receivable",
+            list_action_bar(edited, key="recv", title="売上一覧",
+                            filename="売上_選択一覧", section="receivable",
                             delete_fn=store.delete_receivable)
 
 else:  # 車両
@@ -574,6 +633,23 @@ else:  # 車両
     with tab_reg:
         show_flash()
         st.session_state.setdefault("vehicle_date", _date.today())
+        # 🔴 2026-09-04 大橋様ご依頼: どの案件で使ったか登録できるようにする。
+        # 週選択欄を案件に応じて出し分けるため、案件選択のみformの外に出す
+        # (小口・買掛・売掛と同じ理由・同じやり方)。
+        # 🔴 2026-09-04 追加ご依頼: 案件登録の行が見にくいので枠で目立たせる。
+        # 週選択も案件のすぐ下に表示する(formの中に埋もれさせない)。
+        vehicle_week = vehicle_other_label = None
+        with st.container(key="case-select-box"):
+            vehicle_projs = _project_options()
+            vehicle_proj = st.selectbox("案件", ["(なし)"] + list(vehicle_projs.keys()),
+                                        key="vehicle_proj")
+            if vehicle_proj == advalue.ADVALUE_PROJECT:
+                vehicle_week = st.selectbox("アドバリューの週（必須）", _WEEK_OPTIONS,
+                                            key="vehicle_week", help=_CASE_LABEL_HELP)
+            elif vehicle_proj == advalue.SONOTA_PROJECT:
+                vehicle_other_label = st.text_input(
+                    "案件区分（「その他」のときの案件名）", key="vehicle_other_label",
+                    placeholder="例：買取専科", help=_CASE_LABEL_HELP)
         with st.form("vehicle", clear_on_submit=True):
             v_date = st.date_input("日付", key="vehicle_date", format="YYYY/MM/DD")
             v_kind = st.selectbox("車両", _VEHICLE_PRESETS)
@@ -588,15 +664,22 @@ else:  # 車両
             fuel = st.number_input("給油量(L・任意)", min_value=0.0, step=0.1, value=0.0, format="%.2f")
             if st.form_submit_button("登録"):
                 vehicle_name = (v_other.strip() if v_kind == "その他" else v_kind)
+                case_label, case_error = advalue.resolve_case_label(
+                    vehicle_proj, date_value=v_date, week_choice=vehicle_week,
+                    free_text=vehicle_other_label)
                 if not vehicle_name:
                     st.error("車両名を入力してください。")
+                elif case_error:
+                    st.error(case_error)
                 else:
                     store.add_vehicle_log(
                         posting_logic.iso_date(v_date), vehicle_name,
                         driver.strip() or None,
                         odo_start or None, odo_end or None,
                         purpose=purpose.strip() or None,
-                        fuel_liters=fuel or None)
+                        fuel_liters=fuel or None,
+                        project_id=vehicle_projs.get(vehicle_proj),
+                        other_label=case_label)
                     flash("登録しました")
                     st.rerun()
 
@@ -610,6 +693,14 @@ else:  # 車両
         # period_picker の key に車種を入れて別々の状態にする)。
         _kind_rows = posting_logic.split_vehicle_logs(store.list_vehicle_logs())
         _v_tabs = st.tabs([kind for kind, _ in _kind_rows])
+        _veh_projs = _names(store.list_projects)
+
+        def _veh_case(r):
+            name = _veh_projs.get(r.get("project_id"), "")
+            label = r.get("other_label")
+            if name and label:
+                return f"{name}（{advalue.week_display(label)}）"
+            return name
 
         for _tab, (_kind, _all_rows) in zip(_v_tabs, _kind_rows):
             with _tab:
@@ -619,6 +710,7 @@ else:  # 車両
                 _disp = [{"No.": r["id"], "日付": r.get("date") or "",
                           "車両": r.get("vehicle") or "",
                           "ドライバー": r.get("driver") or "",
+                          "案件": _veh_case(r),
                           "走行距離": f'{r["distance"]}km' if r.get("distance") is not None else "",
                           "使用用途": r.get("purpose") or "",
                           "給油量": f'{r["fuel_liters"]}L' if r.get("fuel_liters") is not None else "",

@@ -79,6 +79,21 @@ def _find_col_in_row(row, kw):
     return None
 
 
+# 🔴 2026-09-04 大橋様ご依頼: あて紙6行目「リビング」の黄色塗りは、これまで常時固定
+# だったが、加工前ファイルの「刷り分けＢ版」列（表記ゆれで「摺り分け」とも書かれる）に
+# "B" が入っている行だけ黄色にしたい。列位置は号・エリアで動く可能性があるため、
+# 他の項目と同じくヘッダー語で検出する（固定列にすると1列ずれたときに黙って誤る）。
+_SURIWAKE_B_KEYWORDS = ("刷り分け", "摺り分け")
+
+
+def _find_suriwake_b_col(table):
+    for kw in _SURIWAKE_B_KEYWORDS:
+        hit = _find_cell(table, kw)
+        if hit:
+            return hit[1]
+    return None
+
+
 def parse_haifu_irai(table):
     """配布依頼書テーブル(list[list]) を構造化する。
 
@@ -130,6 +145,7 @@ def parse_haifu_irai(table):
     dh_row = dh[0]
     area_col = _find_col_in_row(table[dh_row], "配布エリア")
     media_col = _find_col_in_row(table[dh_row], "媒体部数")
+    suriwake_col = _find_suriwake_b_col(table)
 
     areas = []
     r = dh_row + 1
@@ -140,7 +156,9 @@ def parse_haifu_irai(table):
         media = _to_int(_at(table[r], media_col)) or 0
         ads = [(_to_int(_at(table[r], ad["col"])) or 0) for ad in advertisers]
         town = _s(_at(table[r + 1], area_col)) if r + 1 < len(table) else ""
-        areas.append({"code": code, "media_busuu": media, "town": town, "ads": ads})
+        suriwake_b = (suriwake_col is not None and _s(_at(table[r], suriwake_col)) == "B")
+        areas.append({"code": code, "media_busuu": media, "town": town, "ads": ads,
+                      "suriwake_b": suriwake_b})
         r += 2
 
     return {"group": group, "gou": gou, "advertisers": advertisers, "areas": areas}
@@ -158,11 +176,16 @@ def _unique_title(title, used):
     return t
 
 
+_YELLOW_FILL = openpyxl.styles.PatternFill(fill_type="solid", fgColor="FFFFFF00")
+_NO_FILL = openpyxl.styles.PatternFill(fill_type=None)
+
+
 def _fill_proceed(ws, parsed, area):
     ws["F3"] = parsed["group"]
     ws["E4"] = area["code"]
     ws["G2"] = area["media_busuu"]
     ws["C6"] = MEDIA_NAME
+    ws["C6"].fill = _YELLOW_FILL if area.get("suriwake_b") else _NO_FILL
     ws["H6"] = MEDIA_SIZE
     ws["I6"] = area["media_busuu"]
     for r in range(_FIRST_DETAIL_ROW, _LAST_DETAIL_ROW + 1):   # 明細クリア(C/H/I)

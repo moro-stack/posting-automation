@@ -156,6 +156,24 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     ven_cols = {r[1] for r in conn.execute("PRAGMA table_info(payables_vendors)")}
     if "default_original_status" not in ven_cols:
         conn.execute("ALTER TABLE payables_vendors ADD COLUMN default_original_status TEXT")
+    # 車両使用履歴に「どの案件で使ったか」を持たせる(2026-09-04大橋様ご依頼)。
+    # 小口・買掛・売掛と同じく project_id(案件) + other_label(アドバリューの週等)。
+    veh_cols = {r[1] for r in conn.execute("PRAGMA table_info(vehicle_logs)")}
+    if "project_id" not in veh_cols:
+        conn.execute("ALTER TABLE vehicle_logs ADD COLUMN project_id INTEGER")
+    if "other_label" not in veh_cols:
+        conn.execute("ALTER TABLE vehicle_logs ADD COLUMN other_label TEXT")
+    # 売上(受取)に、会議用売上表の内訳列(発行号・ぱど/チラシ/仕分けの部数・売上税抜・
+    # その他)を持たせる(2026-09-04大橋様ご依頼＝登録時に一緒に入れて、売上表を
+    # 空欄なしで出したい)。版名は案件から自動で決まるため列を持たない。
+    # 備考は既存の note 列をそのまま使う。
+    recv_cols = {r[1] for r in conn.execute("PRAGMA table_info(receivables)")}
+    for col, typ in (("hakko_gou", "TEXT"), ("pado_busuu", "INTEGER"),
+                     ("pado_uriage", "INTEGER"), ("chirashi_busuu", "INTEGER"),
+                     ("chirashi_uriage", "INTEGER"), ("shiwake_busuu", "INTEGER"),
+                     ("shiwake_uriage", "INTEGER"), ("sonota_uriage", "INTEGER")):
+        if col not in recv_cols:
+            conn.execute(f"ALTER TABLE receivables ADD COLUMN {col} {typ}")
     conn.commit()
 
 
@@ -449,27 +467,33 @@ def delete_petty_cash(row_id, *, db_path=None):
 
 # --- vehicle_logs ---
 def add_vehicle_log(date, vehicle, driver, odo_start, odo_end, *, purpose=None,
-                    fuel_liters=None, db_path=None, now=None):
+                    fuel_liters=None, project_id=None, other_label=None,
+                    db_path=None, now=None):
     """車両の使用履歴を1件登録する。開始/終了メーターが両方あれば走行距離を
-    引き算で出す(片方でも欠けていれば0kmと決めつけずnullのままにする)。"""
+    引き算で出す(片方でも欠けていれば0kmと決めつけずnullのままにする)。
+    project_id/other_label はどの案件で使ったか(2026-09-04大橋様ご依頼)。"""
     start = _int_or_none(odo_start)
     end = _int_or_none(odo_end)
     distance = end - start if start is not None and end is not None else None
     fuel = None if fuel_liters in (None, "") else float(fuel_liters)
     return _add("vehicle_logs",
                 ["date", "vehicle", "driver", "odo_start", "odo_end", "distance",
-                 "purpose", "fuel_liters", "created_at"],
+                 "purpose", "fuel_liters", "project_id", "other_label", "created_at"],
                 [_iso_date(date), vehicle, driver or None, start, end, distance,
-                 purpose or None, fuel, _now(now)], db_path)
+                 purpose or None, fuel, _int_or_none(project_id), other_label, _now(now)],
+                db_path)
 
 
-def list_vehicle_logs(*, vehicle=None, date_from=None, date_to=None, db_path=None):
+def list_vehicle_logs(*, vehicle=None, project_id=None, date_from=None, date_to=None,
+                      db_path=None):
     conn = _connect(db_path)
     try:
         sql = "SELECT * FROM vehicle_logs WHERE 1=1"
         args = []
         if vehicle is not None:
             sql += " AND vehicle=?"; args.append(vehicle)
+        if project_id is not None:
+            sql += " AND project_id=?"; args.append(int(project_id))
         if date_from is not None:
             sql += " AND date>=?"; args.append(date_from)
         if date_to is not None:
@@ -566,12 +590,25 @@ def delete_payable(row_id, *, db_path=None):
 
 # --- receivables ---
 def add_receivable(month, client_id, amount, *, note=None, project_id=None,
-                   other_label=None, db_path=None, now=None):
+                   other_label=None, hakko_gou=None, pado_busuu=None, pado_uriage=None,
+                   chirashi_busuu=None, chirashi_uriage=None, shiwake_busuu=None,
+                   shiwake_uriage=None, sonota_uriage=None, db_path=None, now=None):
+    """売上(売掛)を1件登録する。
+
+    hakko_gou以降は会議用売上表の内訳列(2026-09-04大橋様ご依頼)。どれも任意で、
+    分かる分だけ入れれば良い(空なら売上表もこれまでどおり空欄で出る)。
+    """
     return _add("receivables",
-                ["month", "client_id", "amount", "note", "project_id",
-                 "other_label", "created_at"],
+                ["month", "client_id", "amount", "note", "project_id", "other_label",
+                 "hakko_gou", "pado_busuu", "pado_uriage", "chirashi_busuu",
+                 "chirashi_uriage", "shiwake_busuu", "shiwake_uriage", "sonota_uriage",
+                 "created_at"],
                 [_iso_month(month), _int_or_none(client_id), int(amount), note,
-                 _int_or_none(project_id), other_label, _now(now)], db_path)
+                 _int_or_none(project_id), other_label, hakko_gou or None,
+                 _int_or_none(pado_busuu), _int_or_none(pado_uriage),
+                 _int_or_none(chirashi_busuu), _int_or_none(chirashi_uriage),
+                 _int_or_none(shiwake_busuu), _int_or_none(shiwake_uriage),
+                 _int_or_none(sonota_uriage), _now(now)], db_path)
 
 
 def list_receivables(*, month=None, project_id=None, db_path=None):

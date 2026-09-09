@@ -370,6 +370,14 @@ button[data-testid="stBaseButton-segmented_controlActive"] p{ color:#fff !import
   }
   [data-testid="stHeading"] h1, .stMarkdown h1{ font-size:1.15rem !important; }
 }
+
+/* ===== 案件選択を目立たせる枠（2026-09-04 大橋様ご依頼） =====
+   st.container(key=...) は .st-key-<key> でCSS対象にできる(Streamlit 1.3x〜)。
+   案件登録する行が見にくい、という指摘への対応。使う画面側は key="case-select-box" を渡す。 */
+.st-key-case-select-box{
+  background:var(--primary-soft); border:1px solid var(--primary);
+  border-radius:12px; padding:.75rem 1rem .25rem; margin-bottom:.5rem;
+}
 </style>
 """
 
@@ -493,7 +501,7 @@ PERIOD_ORDER_MONTH_FIRST = ("今月", "今週", "全期間", _PERIOD_CUSTOM)
 
 
 def period_picker(*, key: str, default: str = "全期間",
-                  order=PERIOD_ORDER_DEFAULT):
+                  order=PERIOD_ORDER_DEFAULT, only=None):
     """全期間 / 今月 / 今週 / 期間指定 を同じ並びのボタンで選ばせる共通の期間フィルタ。
     「期間指定」を選んだ時だけカレンダーを出す。(lo, hi, 表示ラベル) を返す。
     lo/hi は 'YYYY-MM-DD' 文字列、全期間なら (None, None)。
@@ -502,6 +510,9 @@ def period_picker(*, key: str, default: str = "全期間",
     売上が見えていてほしい(依頼⑧・2026-08-27 大橋様)ので "今月" を渡す。
     order: ボタンの並び順。大阪支社売上は PERIOD_ORDER_MONTH_FIRST を渡して
     「今月」を先頭にする(2026-08-28 大橋様)。
+    only: 渡すと、この一覧に無い期間ボタンを削る(2026-09-04大橋様ご依頼＝
+    号別明細のアドバリューは「期間指定」だけでよい)。選択肢が1つしかない
+    ときはボタン自体を出さず、直接その期間として扱う。省略時は今までどおり全部出す。
     """
     from common import posting_logic
 
@@ -510,12 +521,17 @@ def period_picker(*, key: str, default: str = "全期間",
     known = list(_PERIOD_PRESETS.keys()) + [_PERIOD_CUSTOM]
     options = [o for o in order if o in known]
     options += [o for o in known if o not in options]
+    if only is not None:
+        options = [o for o in options if o in only]
     if default not in options:
         default = options[0]
-    sel = st.pills("期間", options, selection_mode="single", default=default,
-                   label_visibility="collapsed", key=f"{key}_pills")
-    if not sel:
-        sel = default
+    if len(options) == 1:
+        sel = options[0]
+    else:
+        sel = st.pills("期間", options, selection_mode="single", default=default,
+                       label_visibility="collapsed", key=f"{key}_pills")
+        if not sel:
+            sel = default
 
     if sel == _PERIOD_CUSTOM:
         custom = st.date_input(":material/calendar_month: 期間を指定（クリックでカレンダー）",

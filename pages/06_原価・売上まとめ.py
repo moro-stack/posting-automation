@@ -196,7 +196,7 @@ def _render_tab(tab_rows, *, key, title, filename):
     list_action_bar(edited, key=key, title=title, filename=filename, id_col=None,
                     delete_fn=None,
                     delete_note="この画面は集計を見るためのものです。"
-                                "元のデータは『小口／買掛／売掛』『業務委託登録』から"
+                                "元のデータは『小口／買掛／売上』『業務委託登録』から"
                                 "削除してください。")
 
 

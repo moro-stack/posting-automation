@@ -24,7 +24,9 @@ HEADERS = [
 
 
 def build_row(*, hakko_gou, ban_mei, uriage_zeikomi, genka_goukei_zeikomi,
-             koutsuhi=0, nomimono=0):
+             koutsuhi=0, nomimono=0, pado_busuu=None, pado_uriage=None,
+             chirashi_busuu=None, chirashi_uriage=None, shiwake_busuu=None,
+             shiwake_uriage=None, sonota_uriage=None, bikou=None):
     """1号ぶんのデータを売上表の1行(dict)にする。
 
     genka_goukei_zeikomi は号別明細の「配布原価(税込)」＝アプリの原価集計の
@@ -34,7 +36,9 @@ def build_row(*, hakko_gou, ban_mei, uriage_zeikomi, genka_goukei_zeikomi,
     (配布原価＝総額－交通費－飲み物、原価合計＝総額のまま)。
 
     売上合計(税抜)は税込から逆算(10%)。
-    ぱど/チラシ/仕分け/その他/備考はアプリに区分の記録が無いため空欄で返す。
+    🔴 2026-09-04大橋様ご依頼: 以前は「ぱど/チラシ/仕分け/その他/備考はアプリに
+    区分の記録が無いため空欄」だったが、売上登録画面に内訳欄を追加したので、
+    渡された分はそのまま列に反映する(渡されなければ従来どおり空欄)。
     交通費/飲み物は実物の表にならい、0円(記録が無い)なら空欄にする。
     """
     uriage_zeikomi = int(uriage_zeikomi or 0)
@@ -45,12 +49,12 @@ def build_row(*, hakko_gou, ban_mei, uriage_zeikomi, genka_goukei_zeikomi,
     haifu_genka = genka_goukei - koutsuhi - nomimono
     return {
         "発行号": hakko_gou, "版名": ban_mei,
-        "ぱど部数": None, "ぱど売上（税抜）": None,
-        "チラシ部数": None, "チラシ売上（税抜）": None,
-        "仕分け部数": None, "仕分け売上（税抜）": None,
-        "その他": None,
+        "ぱど部数": pado_busuu or None, "ぱど売上（税抜）": pado_uriage or None,
+        "チラシ部数": chirashi_busuu or None, "チラシ売上（税抜）": chirashi_uriage or None,
+        "仕分け部数": shiwake_busuu or None, "仕分け売上（税抜）": shiwake_uriage or None,
+        "その他": sonota_uriage or None,
         "売上合計（税抜）": uriage_zeinuki, "売上合計（税込）": uriage_zeikomi,
-        "備考": None,
+        "備考": bikou or None,
         "交通費（駐車場代含）": koutsuhi or None, "飲み物": nomimono or None,
         "配布原価（税込）": haifu_genka, "原価合計（税込）": genka_goukei,
     }
@@ -97,6 +101,41 @@ def case_label_of(label) -> str:
 # (依頼⑦・2026-08-27＝単独案件が複数あれば行を増やす)。
 BULK_SPLIT_LABEL_PROJECTS = ("アドバリュー", "その他")
 
+# 版名は案件名から自動で決まる(2026-09-04大橋様ご依頼)。単独チラシ・アドバリューは
+# 実物の売上表でも版名欄が空欄のため、ここに無い案件は None のまま。
+_BAN_MEI_SECTIONS = {SECTION_PADO_MINAMI, SECTION_PADO_KITA, SECTION_LIVING}
+
+
+def _ban_mei_of(project_name) -> str | None:
+    section = _PROJECT_SECTIONS.get(str(project_name or "").strip())
+    return section if section in _BAN_MEI_SECTIONS else None
+
+
+_BREAKDOWN_FIELDS = ("pado_busuu", "pado_uriage", "chirashi_busuu", "chirashi_uriage",
+                    "shiwake_busuu", "shiwake_uriage", "sonota_uriage")
+
+
+def _bulk_breakdown(receivables, id2proj, split_labels_for):
+    """(案件名, 区分)ごとに、売上登録画面で入れた内訳列を合算する
+    (2026-09-04大橋様ご依頼＝売上表を空欄なしで出したい)。
+
+    発行号・備考は複数の売上行にまたがっていることがあるため、重複無く
+    「／」でつなげる(atehagiのエリア名寄せと同じ考え方)。"""
+    from common import posting_logic as _pl
+
+    out = {}
+    for r in receivables:
+        pname = id2proj.get(r.get("project_id"), "")
+        key = _pl.project_group_key(pname, r.get("other_label"), split_labels_for)
+        d = out.setdefault(key, {f: 0 for f in _BREAKDOWN_FIELDS} | {"発行号": [], "備考": []})
+        for f in _BREAKDOWN_FIELDS:
+            d[f] += int(r.get(f) or 0)
+        for src, dst in (("hakko_gou", "発行号"), ("note", "備考")):
+            v = str(r.get(src) or "").strip()
+            if v and v not in d[dst]:
+                d[dst].append(v)
+    return out
+
 
 def build_bulk_rows(*, receivables, petty, payables, contract_lines, manual, id2proj, id2cat):
     """月次の全案件ぶんを、会議用売上表の行としてまとめて作る(依頼②・2026-08-20)。
@@ -124,12 +163,22 @@ def build_bulk_rows(*, receivables, petty, payables, contract_lines, manual, id2
         elif cat == "飲み物代":
             nomimono[key] = nomimono.get(key, 0) + amt
 
+    breakdown = _bulk_breakdown(receivables, id2proj, BULK_SPLIT_LABEL_PROJECTS)
+
     out = []
     for s in summary:
         key = (s["案件"], s["区分"])
         label = f'{s["案件"]}　{s["区分"]}' if s["区分"] else s["案件"]
-        row = build_row(hakko_gou=None, ban_mei=None,
-                        uriage_zeikomi=s["売上"], genka_goukei_zeikomi=s["原価"],
-                        koutsuhi=koutsuhi.get(key, 0), nomimono=nomimono.get(key, 0))
+        bd = breakdown.get(key, {})
+        row = build_row(
+            hakko_gou="／".join(bd.get("発行号", [])) or None,
+            ban_mei=_ban_mei_of(s["案件"]),
+            uriage_zeikomi=s["売上"], genka_goukei_zeikomi=s["原価"],
+            koutsuhi=koutsuhi.get(key, 0), nomimono=nomimono.get(key, 0),
+            pado_busuu=bd.get("pado_busuu"), pado_uriage=bd.get("pado_uriage"),
+            chirashi_busuu=bd.get("chirashi_busuu"), chirashi_uriage=bd.get("chirashi_uriage"),
+            shiwake_busuu=bd.get("shiwake_busuu"), shiwake_uriage=bd.get("shiwake_uriage"),
+            sonota_uriage=bd.get("sonota_uriage"),
+            bikou="／".join(bd.get("備考", [])) or None)
         out.append((label, row))
     return out

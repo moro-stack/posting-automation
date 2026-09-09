@@ -343,6 +343,39 @@ def test_delete_vehicle_log(tmp_path):
     assert store.list_vehicle_logs(db_path=db) == []
 
 
+# ===== 車両にどの案件で使ったかを持たせる（2026-09-04大橋様ご依頼） =====
+
+
+def test_add_vehicle_log_stores_project_and_other_label(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    store.seed_masters(db_path=db)
+    pid = next(p["id"] for p in store.list_projects(db_path=db) if p["name"] == "アドバリュー")
+    rid = store.add_vehicle_log("2026-08-04", "ハイエース", "時野", 100, 150,
+                                project_id=pid, other_label="8-1", db_path=db)
+    row = next(r for r in store.list_vehicle_logs(db_path=db) if r["id"] == rid)
+    assert row["project_id"] == pid
+    assert row["other_label"] == "8-1"
+
+
+def test_add_vehicle_log_without_a_project_leaves_it_null(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    rid = store.add_vehicle_log("2026-08-04", "ハイエース", "時野", 100, 150, db_path=db)
+    row = next(r for r in store.list_vehicle_logs(db_path=db) if r["id"] == rid)
+    assert row["project_id"] is None
+    assert row["other_label"] is None
+
+
+def test_list_vehicle_logs_filters_by_project(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    store.seed_masters(db_path=db)
+    pid = next(p["id"] for p in store.list_projects(db_path=db) if p["name"] == "アドバリュー")
+    store.add_vehicle_log("2026-08-04", "ハイエース", "時野", 100, 150,
+                          project_id=pid, db_path=db)
+    store.add_vehicle_log("2026-08-05", "軽バン", "黒瀬", 200, 235, db_path=db)
+    only_pid = store.list_vehicle_logs(project_id=pid, db_path=db)
+    assert len(only_pid) == 1 and only_pid[0]["driver"] == "時野"
+
+
 def test_payable_and_receivable_store_other_label(tmp_path):
     db = os.path.join(tmp_path, "t.db")
     store.add_payable(None, None, 12000, date="2026-07-08", vendor_name="配夢",
@@ -647,6 +680,38 @@ def test_add_receivable_accepts_a_date_object_as_the_month(tmp_path):
     rid = store.add_receivable(datetime.date(2026, 8, 28), None, 100, db_path=db)
     row = [r for r in store.list_receivables(db_path=db) if r["id"] == rid][0]
     assert row["month"] == "2026-08"
+
+
+# ===== 売上表の内訳列（2026-09-04大橋様ご依頼） =====
+
+
+def test_add_receivable_stores_the_uriagehyo_breakdown_columns(tmp_path):
+    db = os.path.join(tmp_path, "t.db")
+    rid = store.add_receivable(
+        "2026-08", None, 847502, hakko_gou="8/21",
+        pado_busuu=69443, pado_uriage=590266,
+        chirashi_busuu=74404, chirashi_uriage=171129,
+        shiwake_busuu=15897, shiwake_uriage=9061,
+        sonota_uriage=85000, db_path=db)
+    row = [r for r in store.list_receivables(db_path=db) if r["id"] == rid][0]
+    assert row["hakko_gou"] == "8/21"
+    assert row["pado_busuu"] == 69443
+    assert row["pado_uriage"] == 590266
+    assert row["chirashi_busuu"] == 74404
+    assert row["chirashi_uriage"] == 171129
+    assert row["shiwake_busuu"] == 15897
+    assert row["shiwake_uriage"] == 9061
+    assert row["sonota_uriage"] == 85000
+
+
+def test_add_receivable_breakdown_columns_default_to_none(tmp_path):
+    """既存の呼び出し(内訳を渡さない)は今までどおり全部空欄で登録できる。"""
+    db = os.path.join(tmp_path, "t.db")
+    rid = store.add_receivable("2026-08", None, 1000, db_path=db)
+    row = [r for r in store.list_receivables(db_path=db) if r["id"] == rid][0]
+    for col in ("hakko_gou", "pado_busuu", "pado_uriage", "chirashi_busuu",
+                "chirashi_uriage", "shiwake_busuu", "shiwake_uriage", "sonota_uriage"):
+        assert row[col] is None
 
 
 def test_add_payable_stores_iso_date_and_month(tmp_path):

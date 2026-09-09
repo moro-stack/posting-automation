@@ -953,7 +953,7 @@ def test_receivable_list_deletes_the_right_row_and_announces(db):
     b = store.add_receivable("2026-07", cid, 2000, db_path=db)
     at = AppTest.from_file(os.path.join(ROOT, "pages", _EXPENSE_PAGE), default_timeout=30)
     at.run()
-    at.segmented_control[0].set_value("売掛").run()
+    at.segmented_control[0].set_value("売上").run()
     keys = {btn.key for btn in at.button}
     assert not any(k and k.startswith("del_recv_") for k in keys)
 
@@ -1469,20 +1469,22 @@ def test_issue_page_houbai_still_shows_mai(db):
     assert "3 日" not in text
 
 
-# ===== アドバリューの案件区分(8-1等)で号別明細をさらに絞る（依頼①・2026-08-20） =====
+# ===== アドバリューの週(1週目〜5週目)で号別明細をさらに絞る（依頼①・2026-08-20→09-04再統一） =====
 
 
-def test_issue_page_advalue_without_labels_has_no_sub_pills(db):
-    """まだ案件区分を登録していないアドバリューは、選択肢が出ず今までどおりの表示。"""
+def test_issue_page_advalue_pills_are_shown_even_without_labels(db):
+    """🔴 2026-09-04: 選択肢は固定の「全体・1週目〜5週目」。データの有無に関わらず出る。"""
     pid = store.add_project("アドバリュー", db_path=db)
     store.add_receivable("2026-07", None, 100000, project_id=pid, db_path=db)
     at = _issue_page(db, project="アドバリュー")
     assert not at.exception
-    assert not any(p.key == "adv_sub_pills" for p in at.pills)
+    sub_pills = [p for p in at.pills if p.key == "adv_sub_pills"]
+    assert len(sub_pills) == 1
+    assert sub_pills[0].options == ["全体", "1週目", "2週目", "3週目", "4週目", "5週目"]
 
 
 def test_issue_page_advalue_sub_case_filters_totals(db):
-    """依頼①: 8-1/8-2を切り替えると、それぞれの売上・案件区分だけが表示されること。"""
+    """依頼①→2026-09-04再統一: 週を切り替えると、その週の売上だけが表示されること。"""
     pid = store.add_project("アドバリュー", db_path=db)
     store.add_receivable("2026-07", None, 495427, project_id=pid, other_label="8-1", db_path=db)
     store.add_receivable("2026-07", None, 194969, project_id=pid, other_label="8-2", db_path=db)
@@ -1491,10 +1493,10 @@ def test_issue_page_advalue_sub_case_filters_totals(db):
     assert not at.exception
     sub_pills = [p for p in at.pills if p.key == "adv_sub_pills"]
     assert len(sub_pills) == 1
-    assert sub_pills[0].options == ["全体", "8-1", "8-2"]
+    assert sub_pills[0].options == ["全体", "1週目", "2週目", "3週目", "4週目", "5週目"]
     assert "¥690,396" in _rendered_text(at)  # 全体表示では合算(495,427+194,969)
 
-    at.session_state["adv_sub_pills"] = "8-1"
+    at.session_state["adv_sub_pills"] = "1週目"
     at.run()
     assert not at.exception
     text = _rendered_text(at)
@@ -1504,15 +1506,20 @@ def test_issue_page_advalue_sub_case_filters_totals(db):
 
 
 def test_issue_page_advalue_manual_cost_tagged_with_selected_sub_case(db):
-    """依頼①: 案件区分を選んだ状態で直接入力を追加すると、その区分で登録されること。"""
+    """依頼①→2026-09-04再統一: 週を選んだ状態で直接入力を追加すると、
+    入力した日付の月と組み合わせた区分("8-1"等)で登録されること。"""
     pid = store.add_project("アドバリュー", db_path=db)
     store.add_petty_cash("2026-07-01", None, 1000, project_id=pid, other_label="8-1", db_path=db)
 
     at = _issue_page(db, project="アドバリュー")
-    at.session_state["adv_sub_pills"] = "8-1"
+    at.session_state["adv_sub_pills"] = "1週目"
     at.run()
     assert not at.exception
-    # 作業/金額はラベル指定で確実に拾う(位置は他の欄の増減で変わりうるため)
+    # 作業/金額/日付はラベル・keyで確実に拾う(位置は他の欄の増減で変わりうるため)
+    # 🔴 2026-09-04: アドバリューは期間フィルタが「期間指定」のカレンダーを常に出す
+    # ようになった(only=["期間指定"])ため、date_input[0]はもうこの欄ではない。
+    # ラベル"日付"で直接入力欄を拾う。
+    next(d for d in at.date_input if d.label == "日付").set_value(_dt.date(2026, 8, 1))
     work_input = next(t for t in at.text_input if t.label == "作業")
     amt_input = next(t for t in at.text_input if t.label == "金額")
     work_input.set_value("配布")
@@ -1883,22 +1890,22 @@ def test_expense_page_mode_is_segmented_control(db):
     at = _run(_EXPENSE_PAGE)
     assert not at.exception
     assert [s.key for s in at.segmented_control] == ["entry_mode"]
-    assert at.segmented_control[0].options == ["小口", "買掛", "売掛", "車両"]
+    assert at.segmented_control[0].options == ["小口", "買掛", "売上", "車両"]
     assert not at.radio
 
 
 def test_expense_page_falls_back_to_petty_when_deselected(db):
     """🔴 segmented_control は選択解除で None を返す。
-    None のまま else に落ちると売掛の画面が開いてしまう。既定へ戻ること。"""
+    None のまま else に落ちると車両の画面が開いてしまう。既定へ戻ること。"""
     at = AppTest.from_file(os.path.join(ROOT, "pages", _EXPENSE_PAGE), default_timeout=30)
     at.session_state["entry_mode"] = None
     at.run()
     assert not at.exception
     # ⚠️ st.subheader は _rendered_text の収集対象外なので、一覧側の文言で見分ける。
-    # ガードが外れると else に落ちて売掛の画面になり、下の2つが入れ替わる。
+    # ガードが外れると else に落ちて車両の画面になり、下の2つが入れ替わる。
     text = _rendered_text(at)
     assert "小口の登録はまだありません" in text
-    assert "売掛の登録はまだありません" not in text
+    assert "車両の使用履歴はまだありません" not in text
 
 
 def test_shiryo_page_version_is_segmented_control(db):

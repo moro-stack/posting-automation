@@ -238,31 +238,19 @@ def test_filter_rows_by_period():
     assert L.filter_rows_by_period(rows, "date", None, None) == rows
 
 
-# ===== アドバリューの案件区分(8-1等)で号別明細をさらに絞る（依頼①・2026-08-20） =====
+# ===== アドバリューの週(1週目〜5週目)で号別明細をさらに絞る（依頼①・2026-08-20〜09-04更新） =====
 
 
-def test_distinct_other_labels_collects_from_multiple_lists_and_sorts():
-    petty = [{"other_label": "8-2"}, {"other_label": "8-1"}]
-    receivables = [{"other_label": "8-1"}, {"other_label": None}]
-    manual = [{"other_label": "8-3"}]
-    got = L.distinct_other_labels(petty, receivables, manual)
-    assert got == ["8-1", "8-2", "8-3"]
-
-
-def test_distinct_other_labels_ignores_blank_and_whitespace():
-    rows = [{"other_label": ""}, {"other_label": "  "}, {"other_label": None}, {}]
-    assert L.distinct_other_labels(rows) == []
-
-
-def test_filter_rows_by_label_returns_all_when_label_is_none():
+def test_filter_rows_by_week_returns_all_when_week_is_none():
     rows = [{"other_label": "8-1"}, {"other_label": "8-2"}]
-    assert L.filter_rows_by_label(rows, None) == rows
+    assert L.filter_rows_by_week(rows, None) == rows
 
 
-def test_filter_rows_by_label_narrows_to_matching_rows():
-    rows = [{"other_label": "8-1", "id": 1}, {"other_label": "8-2", "id": 2},
-            {"other_label": None, "id": 3}]
-    assert L.filter_rows_by_label(rows, "8-1") == [{"other_label": "8-1", "id": 1}]
+def test_filter_rows_by_week_narrows_to_matching_week_regardless_of_month():
+    rows = [{"other_label": "8-1", "id": 1}, {"other_label": "9-1", "id": 2},
+            {"other_label": "8-2", "id": 3}, {"other_label": None, "id": 4}]
+    got = L.filter_rows_by_week(rows, 1)
+    assert got == [{"other_label": "8-1", "id": 1}, {"other_label": "9-1", "id": 2}]
 
 
 def test_payment_method_petty_is_cash():
@@ -479,32 +467,17 @@ def test_split_vehicle_logs_keeps_original_order_inside_each_kind():
     assert [r["id"] for r in got["軽バン"]] == [5, 3, 9]
 
 
-# ===== 区分が未設定の行を見つけられるようにする（2026-08-28） =====
-# アドバリューの配布員代が区分なしで登録されていたため、どの週にも出ず
-# 「1週目しか無い」ように見えた。未設定の行も画面から辿れるようにする。
+# ===== 区分なしの行は「全体」にのみ出す（2026-09-04・（未設定）表示の廃止） =====
+# 🔴 2026-08-28に追加した「（未設定）」の安全装置は、選択肢を月依存の生ラベルから
+# 固定の「1週目〜5週目」に統一する今回の変更(依頼③)で、オーナー了承のうえ廃止した。
+# 区分未設定の行は各週フィルタには出ず、「全体」を選んだときだけ引き続き含まれる
+# (filter_rows_by_week(rows, None) がそのまま全件返すことでカバーされる)。
 
 
-def test_filter_rows_by_label_unset_returns_rows_without_a_label():
+def test_filter_rows_by_week_excludes_unlabeled_rows_from_a_specific_week():
     rows = [{"other_label": "8-1"}, {"other_label": None},
-            {"other_label": ""}, {"other_label": "  "}, {}]
-    got = L.filter_rows_by_label(rows, L.LABEL_UNSET)
-    assert len(got) == 4          # 8-1 以外はすべて「未設定」
-
-
-def test_filter_rows_by_label_still_matches_a_real_label():
-    rows = [{"other_label": "8-1"}, {"other_label": "8-2"}, {"other_label": None}]
-    assert L.filter_rows_by_label(rows, "8-2") == [{"other_label": "8-2"}]
-
-
-def test_filter_rows_by_label_none_returns_everything():
-    rows = [{"other_label": "8-1"}, {"other_label": None}]
-    assert L.filter_rows_by_label(rows, None) == rows
-
-
-def test_has_unlabeled_rows_detects_costs_that_belong_to_no_week():
-    assert L.has_unlabeled_rows([{"other_label": "8-1"}], [{"other_label": None}])
-    assert not L.has_unlabeled_rows([{"other_label": "8-1"}], [{"other_label": "8-2"}])
-    assert not L.has_unlabeled_rows([], [])
+            {"other_label": ""}, {}]
+    assert L.filter_rows_by_week(rows, 1) == [{"other_label": "8-1"}]
 
 
 # ===== 日付の表記をISOに揃える（2026-08-28 オーナー指示） =====

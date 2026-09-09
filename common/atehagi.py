@@ -298,7 +298,9 @@ def _set_print(ws):
         ws.sheet_properties.pageSetUpPr.fitToPage = True
 
 
-def _fill_atehagi(ws, chiku, rows, version):
+def _fill_atehagi(ws, chiku, rows, version, *, course_number=None):
+    from openpyxl.styles import Font
+
     base = pado_row(rows)               # 上部の部数・名前は「ぱど行」が基準
     ws["A1"] = chiku_name(version, chiku)
     ws["A3"] = base["padonna"]
@@ -307,6 +309,17 @@ def _fill_atehagi(ws, chiku, rows, version):
     ws["D4"] = area_code6(chiku)
     ws["C4"] = None
     ws["G2"] = base["busuu"]
+    # 🔴 依頼①(2026-09-09大橋様): 挟み込み実績表の通し番号を見やすいH1セルに、
+    # "No.n"ではなく数字だけで入れる。実績表と同じ assign_course_numbers() の
+    # 番号を渡すことで一致させる。
+    # 挟み込みチラシが無い地区(ぱどのみ)は実績表に対応する枠がないため番号を振らない。
+    # フォントはテンプレ既定(サイズ11)だと他の見出し(A1/A3/D4/G2=いずれもサイズ48・太字)
+    # より小さすぎたため、同じサイズ48・太字に揃える(2026-09-09大橋様ご指摘)。
+    if course_number:
+        ws["H1"] = course_number
+        ws["H1"].font = Font(name=ws["H1"].font.name, size=48, bold=True)
+    else:
+        ws["H1"] = None
     for r in range(5, 19):          # 明細領域をクリア（H18ラベルもクリア=マクロ挙動）
         for c in range(2, 11):
             ws.cell(row=r, column=c).value = None
@@ -320,15 +333,23 @@ def _fill_atehagi(ws, chiku, rows, version):
     _set_print(ws)
 
 
-def build_atehagi_workbook(groups, version, template_path=TEMPLATE_PATH) -> bytes:
-    """担当地区ごとに1シートずつ流し込んだあて紙ブックを bytes で返す。"""
+def build_atehagi_workbook(groups, version, template_path=TEMPLATE_PATH, *, numbers=None) -> bytes:
+    """担当地区ごとに1シートずつ流し込んだあて紙ブックを bytes で返す。
+
+    numbers({担当地区コード: 通し番号})を渡すと、挟み込み実績表と同じ番号を
+    あて紙にも印字する。省略時は groups から自分で計算する
+    (単票の刷り直しでは、元の全地区から計算した numbers を明示的に渡すこと。
+    渡された groups が部分集合だと、番号が最初から振り直されて実績表とズレるため)。"""
+    if numbers is None:
+        numbers = assign_course_numbers(jisseki_courses(groups, version))
     wb = openpyxl.load_workbook(template_path)
     base = wb[wb.sheetnames[0]]
     used = set()
     for chiku, rows in groups.items():
         ws = wb.copy_worksheet(base)
         ws.title = _unique_title(chiku, used)
-        _fill_atehagi(ws, chiku, rows, version)
+        _fill_atehagi(ws, chiku, rows, version,
+                      course_number=numbers.get(area_code6(chiku)))
     wb.remove(base)
     buf = io.BytesIO()
     wb.save(buf)
@@ -377,8 +398,41 @@ def jisseki_courses(groups, version):
             "course_name": f"{code} {name}",
             "flyers": flyers,
             "leader": base["padonna"] or None,
+            "pado_busuu": base["busuu"],
         })
     return out
+
+
+# ===== 通し番号（依頼①・2026-09-04大橋様ご依頼: あて紙と実績表で一致させる） =====
+# リーダー(外注先)が変わるごとに1から始まる。実物の挟み込み実績表と同じ振り方。
+
+
+def assign_course_numbers(courses):
+    """courses(jisseki_courses の戻り値)の並び順だけで決まる、
+    {担当地区コード: 通し番号} の辞書を返す。
+
+    あて紙側とは別々に呼び出す(ボタンが分かれているため)が、同じ groups・version
+    から作った courses を渡す限り、純粋関数なので必ず同じ番号になる。"""
+    numbers = {}
+    counters = {}
+    for c in courses:
+        leader = c.get("leader")
+        n = counters.get(leader, 0) + 1
+        counters[leader] = n
+        numbers[c["code"]] = n
+    return numbers
+
+
+_CIRCLED_DIGITS = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
+
+
+def circled_number(n) -> str:
+    """1〜20は丸数字、それ以外は "(n)" にフォールバックする
+    (実物の挟み込み実績表のチラシ種類数表記)。"""
+    n = int(n)
+    if 1 <= n <= len(_CIRCLED_DIGITS):
+        return _CIRCLED_DIGITS[n - 1]
+    return f"({n})"
 
 
 def _group_by_leader(courses):
@@ -412,13 +466,24 @@ def _md_from(haifubi) -> str:
 _JISSEKI_DEFAULT_SHEET = "実績表"
 
 
-def _fill_jisseki_sheet(ws, courses, *, title, per_row):
-    """1シート分の実績表を書く。1コース=ヘッダー行(コース名)+本文行
-    (案件名/枚数を1チラシ1行)+サイン行(横線付き)。per_row コース/行で折り返す。"""
+def _fill_jisseki_sheet(ws, courses, *, title, per_row, numbers):
+    """1シート分の実績表を書く（実物の台紙スタイルに合わせて2026-09-04作り直し）。
+
+    1コース=1列。ヘッダー行(通し番号のみ＋担当地区コード6桁)＋本文行(①チラシ種類数＋
+    ぱど本誌部数。例「①353」＝1種類のチラシを353部挟み込む)＋サイン行(横線付き・
+    作業実施者が手書きする)。per_row コース/行で折り返す(実物どおり既定20列)。
+
+    🔴 2026-09-04大橋様追加ご依頼: 通し番号の横にエリア名(枚方・交野等)が並ぶと
+    読みにくいとのことで、ヘッダーは通し番号＋担当地区コード(6桁)だけにし、
+    エリア名はシート見出し(title、リーダー名の横)に出す。担当地区コードは
+    「実績表とあて紙の番号が合っているかの確認に使う」ため消さずに残す。
+
+    通し番号は numbers({担当地区コード: 番号})から引く。あて紙側と同じ
+    assign_course_numbers() の結果を渡すことで、両方の紙で番号が一致する。"""
     from openpyxl.styles import Alignment, Font, Border, Side
     from openpyxl.worksheet.properties import PageSetupProperties
 
-    ncol = per_row * 2
+    ncol = per_row
 
     ws.cell(row=1, column=1, value=title)
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncol)
@@ -429,63 +494,64 @@ def _fill_jisseki_sheet(ws, courses, *, title, per_row):
 
     thin = Side(style="thin")
     thick = Side(style="medium")
-    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    topleft = Alignment(horizontal="left", vertical="top", wrap_text=True)
-    topright = Alignment(horizontal="right", vertical="top", wrap_text=True)
-    signalign = Alignment(horizontal="left", vertical="bottom")
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    body_align = Alignment(horizontal="center", vertical="center")
+    # 🔴 大橋様ご指摘: 「サイン：」の文字が幅を取って実際に書くスペースが無い。
+    # 文字を上詰めにし、行の高さを大きく取ることで、ラベルの下に手書き用の
+    # 余白ができるようにする(横幅は20列固定のため広げられない)。
+    signalign = Alignment(horizontal="left", vertical="top")
 
-    ROWS_PER = 3  # ヘッダー・本文・サイン
+    ROWS_PER = 3  # 通し番号・種類数と部数・サイン
     row = 2
 
     for i, c in enumerate(courses):
         grp, col = divmod(i, per_row)
         top = row + grp * ROWS_PER
         rh, rb, rs = top, top + 1, top + 2
-        c0 = 1 + col * 2
-        c1 = c0 + 1
-        ws.merge_cells(start_row=rh, start_column=c0, end_row=rh, end_column=c1)
-        h = ws.cell(row=rh, column=c0, value=c["course_name"])
-        h.font = Font(bold=True, size=11)
-        h.alignment = center
-        names = "\n".join(f["name"] for f in c["flyers"])
-        counts = "\n".join(str(f["count"]) for f in c["flyers"])
-        ws.cell(row=rb, column=c0, value=names).alignment = topleft
-        ws.cell(row=rb, column=c1, value=counts).alignment = topright
-        ws.merge_cells(start_row=rs, start_column=c0, end_row=rs, end_column=c1)
-        s = ws.cell(row=rs, column=c0, value="サイン：")
+        cc = 1 + col
+        num = numbers.get(c["code"])
+        h = ws.cell(row=rh, column=cc,
+                    value=f'{num}\n{c["code"]}' if num else c["code"])
+        h.font = Font(bold=True, size=10)
+        h.alignment = header_align
+        type_count = len(c["flyers"])
+        busuu = c.get("pado_busuu")
+        b = ws.cell(row=rb, column=cc,
+                    value=f'{circled_number(type_count)}{busuu if busuu is not None else ""}')
+        b.font = Font(size=13, bold=True)
+        b.alignment = body_align
+        s = ws.cell(row=rs, column=cc, value="サイン：")
         s.alignment = signalign
-        for (r, cc) in [(rh, c0), (rh, c1), (rb, c0), (rb, c1), (rs, c0), (rs, c1)]:
+        for r in (rh, rb, rs):
             ws.cell(row=r, column=cc).border = Border(
-                left=thick if cc == c0 else thin,
-                right=thick if cc == c1 else thin,
+                left=thick, right=thick,
                 top=thick if r == rh else thin,
                 bottom=thick if r == rs else thin,
             )
 
     ngrp = (len(courses) + per_row - 1) // per_row
     for grp in range(ngrp):
-        block = courses[grp * per_row:(grp + 1) * per_row]
-        max_lines = max(len(c["flyers"]) for c in block)
         top = row + grp * ROWS_PER
-        ws.row_dimensions[top].height = 20
-        ws.row_dimensions[top + 1].height = max(36, max_lines * 18)
-        ws.row_dimensions[top + 2].height = 28
+        ws.row_dimensions[top].height = 30
+        ws.row_dimensions[top + 1].height = 30
+        ws.row_dimensions[top + 2].height = 40    # サインの手書きスペースを広く
     row += ngrp * ROWS_PER
 
     for col in range(per_row):
-        ws.column_dimensions[openpyxl.utils.get_column_letter(1 + col * 2)].width = 24
-        ws.column_dimensions[openpyxl.utils.get_column_letter(2 + col * 2)].width = 6
+        ws.column_dimensions[openpyxl.utils.get_column_letter(1 + col)].width = 9
 
     last_row = row - 1 if row > 2 else 1
     last_col = openpyxl.utils.get_column_letter(ncol)
     ws.print_area = f"A1:{last_col}{last_row}"
     ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = 8   # A3（依頼①・2026-09-04大橋様ご依頼）
     ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
     ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
     return ws
 
 
-def build_jisseki_daishi_workbook(courses, version, gou, haifubi, per_row=4) -> bytes:
+def build_jisseki_daishi_workbook(courses, version, gou, haifubi, per_row=20) -> bytes:
     """実績表を実物台紙スタイルで出力する。
 
     🔴 2026-08-27 大橋様ご指摘(依頼④): 印刷して現場で使うので、外注先/リーダー
@@ -497,6 +563,10 @@ def build_jisseki_daishi_workbook(courses, version, gou, haifubi, per_row=4) -> 
 
     leader を持たないコース(手作りデータ・古い呼び出し)は、以前どおり
     「実績表」1枚にまとめる(後方互換)。
+
+    🔴 2026-09-04大橋様ご依頼: 実物の挟み込み実績表(1コース=1列・20列で折り返し・
+    ①チラシ種類数＋ぱど本誌部数)に作り直した。per_row の既定を20に変更。
+    通し番号はリーダーが変わるごとに1から振り直す(assign_course_numbers)。
     """
     wb = openpyxl.Workbook()
     base = wb.active
@@ -505,6 +575,7 @@ def build_jisseki_daishi_workbook(courses, version, gou, haifubi, per_row=4) -> 
     md = _md_from(haifubi)
     gou_part = f"{gou}号" if gou else "号"
     base_title = f"{md} ／ {gou_part}　{label}"
+    numbers = assign_course_numbers(courses)
 
     used = set()
     for leader, group_courses in _group_by_leader(courses):
@@ -512,13 +583,24 @@ def build_jisseki_daishi_workbook(courses, version, gou, haifubi, per_row=4) -> 
         sheet_title = safe_sheet_title(raw_title, existing=used)
         used.add(sheet_title)
         ws = wb.create_sheet(title=sheet_title)
-        # 印刷したとき誰の紙か分かるよう、見出しにも名前を出す
-        title = f"{base_title}　{leader}" if leader else base_title
-        _fill_jisseki_sheet(ws, group_courses, title=title, per_row=per_row)
+        # 印刷したとき誰の紙か分かるよう、見出しにも名前を出す。
+        # 🔴 2026-09-04大橋様追加ご依頼: 各コース見出しから移したエリア名(枚方・交野等)
+        # は、ここ(リーダー名の横)にまとめて出す。1人が複数エリアを持つこともあるため、
+        # 初出順で重複無く列挙する。
+        areas = []
+        for c in group_courses:
+            if c["chiku_name"] and c["chiku_name"] not in areas:
+                areas.append(c["chiku_name"])
+        title = base_title
+        if leader:
+            title += f"　{leader}"
+        if areas:
+            title += f"　{'／'.join(areas)}"
+        _fill_jisseki_sheet(ws, group_courses, title=title, per_row=per_row, numbers=numbers)
 
     if not used:   # コースが1件も無いとき。空のブックにしない。
         ws = wb.create_sheet(title=_JISSEKI_DEFAULT_SHEET)
-        _fill_jisseki_sheet(ws, [], title=base_title, per_row=per_row)
+        _fill_jisseki_sheet(ws, [], title=base_title, per_row=per_row, numbers=numbers)
 
     wb.remove(base)
     buf = io.BytesIO()

@@ -152,8 +152,12 @@ with tab_atehagi:
                         if missing:
                             st.warning("見つからなかった担当地区："
                                        + "、".join(missing))
+                        # 🔴 2026-09-04大橋様ご依頼: 通し番号は元の全地区から計算した
+                        # ものを渡す。sel(選んだ地区だけ)から計算し直すと、単票の
+                        # 刷り直しのたびに番号が1から振り直されて実績表とズレる。
+                        _numbers = A.assign_course_numbers(A.jisseki_courses(groups, version))
                         st.session_state["keihan_single_out"] = (
-                            A.build_atehagi_workbook(sel, version),
+                            A.build_atehagi_workbook(sel, version, numbers=_numbers),
                             A.atehagi_filename(version, rows, chiku=list(sel.keys())),
                             len(sel))
             single = st.session_state.get("keihan_single_out")

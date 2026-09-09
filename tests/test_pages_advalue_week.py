@@ -38,9 +38,13 @@ def _submit(at, form="petty"):
 
 
 def _petty(at, *, date, proj, week=None, amount=1000):
-    """date は datetime.date（2026-08-28 にカレンダー入力へ統一）。"""
+    """date は datetime.date（2026-08-28 にカレンダー入力へ統一）。
+
+    案件選択は st.form の外にあり、選んだ直後に再描画してはじめて
+    週選択／案件区分欄が現れる(常時表示しない・2026-09-04)ため、
+    proj を設定したら一度 .run() する。"""
+    at.selectbox(key="petty_proj").set_value(proj).run()
     at.date_input(key="petty_date").set_value(date)
-    at.selectbox(key="petty_proj").set_value(proj)
     at.number_input(key="petty_amount").set_value(amount)
     if week is not None:
         at.selectbox(key="petty_week").set_value(week)
@@ -95,14 +99,14 @@ def test_petty_sonota_still_uses_the_free_text(tmp_path, monkeypatch):
     assert store.list_petty_cash(db_path=db)[0]["other_label"] == "買取専科"
 
 
-# ===== 売掛（売上）=====
+# ===== 売上（旧・売掛） =====
 
 
 def test_receivable_advalue_without_a_week_is_refused(tmp_path, monkeypatch):
     db = os.path.join(tmp_path, "t.db")
-    at = _at(db, monkeypatch, "売掛")
+    at = _at(db, monkeypatch, "売上")
+    at.selectbox(key="recv_proj").set_value("アドバリュー").run()
     at.date_input(key="recv_month").set_value(_dt.date(2026, 9, 15))
-    at.selectbox(key="recv_proj").set_value("アドバリュー")
     at.number_input(key="recv_amount").set_value(50000)
     _submit(at, "receivable")
     assert any("週" in str(e.value) for e in at.error)
@@ -110,11 +114,11 @@ def test_receivable_advalue_without_a_week_is_refused(tmp_path, monkeypatch):
 
 
 def test_receivable_advalue_uses_the_month_of_the_gedo(tmp_path, monkeypatch):
-    """売掛は日付ではなく月度(2026-09)を持つ。そこから月を取ること。"""
+    """売上は日付ではなく月度(2026-09)を持つ。そこから月を取ること。"""
     db = os.path.join(tmp_path, "t.db")
-    at = _at(db, monkeypatch, "売掛")
+    at = _at(db, monkeypatch, "売上")
+    at.selectbox(key="recv_proj").set_value("アドバリュー").run()
     at.date_input(key="recv_month").set_value(_dt.date(2026, 9, 15))
-    at.selectbox(key="recv_proj").set_value("アドバリュー")
     at.number_input(key="recv_amount").set_value(50000)
     at.selectbox(key="recv_week").set_value("3週目")
     _submit(at, "receivable")
@@ -127,7 +131,7 @@ def test_receivable_advalue_uses_the_month_of_the_gedo(tmp_path, monkeypatch):
 def test_payable_advalue_without_a_week_is_refused(tmp_path, monkeypatch):
     db = os.path.join(tmp_path, "t.db")
     at = _at(db, monkeypatch, "買掛")
-    at.selectbox(key="pay_proj").set_value("アドバリュー")
+    at.selectbox(key="pay_proj").set_value("アドバリュー").run()
     at.number_input(key="pay_amount").set_value(3000)
     _submit(at, "payable")
     assert any("週" in str(e.value) for e in at.error)
@@ -137,11 +141,21 @@ def test_payable_advalue_without_a_week_is_refused(tmp_path, monkeypatch):
 def test_the_week_options_offered_on_screen_are_month_independent(tmp_path, monkeypatch):
     """選択肢そのものは月を持たない(だから9月・10月になっても作り直しが要らない)。"""
     at = _at(os.path.join(tmp_path, "t.db"), monkeypatch, "小口")
+    at.selectbox(key="petty_proj").set_value("アドバリュー").run()
     options = list(at.selectbox(key="petty_week").options)
     assert options == [advalue.WEEK_PLACEHOLDER] + list(advalue.WEEK_CHOICES)
 
 
-# ===== 号別明細で週ごとに見る（依頼⑥の後半） =====
+def test_week_select_is_hidden_until_advalue_is_chosen(tmp_path, monkeypatch):
+    """🔴 2026-09-04 大橋様ご依頼: 週選択・案件区分欄は常時表示しない。"""
+    at = _at(os.path.join(tmp_path, "t.db"), monkeypatch, "小口")
+    assert not any(s.key == "petty_week" for s in at.selectbox)
+    assert not any(t.key == "petty_other" for t in at.text_input)
+
+
+# ===== 号別明細で週ごとに見る（依頼⑥→2026-09-04 大橋様ご依頼で表示を再統一） =====
+# 選択肢は月に依存する生の区分("8-1"等)ではなく、固定の「1週目〜5週目」にする。
+# 月をまたいでも選択肢を作り直さず、同じ「n週目」を選べば全月分がまとまって出る。
 
 
 def _seed_advalue_weeks(db, monkeypatch):
@@ -151,7 +165,8 @@ def _seed_advalue_weeks(db, monkeypatch):
     pid = next(p["id"] for p in store.list_projects(db_path=db)
                if p["name"] == "アドバリュー")
     cat = store.list_expense_categories(db_path=db)[0]["id"]
-    # わざと月をまたいだ順序で入れる(並べ替えが効いているか見るため)
+    # 月をまたいで同じ週(1週目)のデータを複数入れる(9-1・10-1)。月をまたいでも
+    # 「1週目」1つの選択でまとめて出ることを確認するため。
     for label, amount in [("10-1", 100), ("8-2", 200), ("9-1", 300), ("8-1", 400)]:
         store.add_petty_cash("2026-08-04", cat, amount, project_id=pid,
                              other_label=label, db_path=db)
@@ -167,13 +182,13 @@ def _issue_page(db):
     return at
 
 
-def test_issue_page_lists_advalue_weeks_in_month_then_week_order(tmp_path, monkeypatch):
-    """🔴 文字列順のままだと 10-1 が 8-1 より前に来る。月→週で並べ直すこと。"""
+def test_issue_page_week_pills_are_fixed_regardless_of_data(tmp_path, monkeypatch):
+    """🔴 選択肢は登録済みデータに関わらず常に「全体・1週目〜5週目」の固定表示。"""
     db = os.path.join(tmp_path, "t.db")
     _seed_advalue_weeks(db, monkeypatch)
     at = _issue_page(db)
     pills = at.pills(key="adv_sub_pills")
-    assert list(pills.options) == ["全体", "8-1", "8-2", "9-1", "10-1"]
+    assert list(pills.options) == ["全体", "1週目", "2週目", "3週目", "4週目", "5週目"]
 
 
 def test_issue_page_shows_the_selected_week_in_readable_form(tmp_path, monkeypatch):
@@ -182,15 +197,15 @@ def test_issue_page_shows_the_selected_week_in_readable_form(tmp_path, monkeypat
     at = AppTest.from_file(os.path.join(ROOT, "pages", "03_号別明細.py"),
                            default_timeout=60)
     at.session_state["proj_pills"] = "アドバリュー"
-    at.session_state["adv_sub_pills"] = "9-1"
+    at.session_state["adv_sub_pills"] = "1週目"
     at.run()
     assert not at.exception
     text = "\n".join(str(c.value) for c in at.caption)
-    assert "9月 1週目" in text
+    assert "1週目" in text
 
 
-def test_issue_page_shows_only_the_selected_weeks_numbers(tmp_path, monkeypatch):
-    """週を選んだら、その週の原価だけが集計されること(他の週が混ざらない)。"""
+def test_issue_page_selecting_a_week_combines_every_month_with_that_week(tmp_path, monkeypatch):
+    """🔴 依頼の肝: 「1週目」を選ぶと月を問わず(8-1・9-1・10-1)まとめて出る。"""
     from common import posting_logic
 
     db = os.path.join(tmp_path, "t.db")
@@ -198,11 +213,11 @@ def test_issue_page_shows_only_the_selected_weeks_numbers(tmp_path, monkeypatch)
     at = AppTest.from_file(os.path.join(ROOT, "pages", "03_号別明細.py"),
                            default_timeout=60)
     at.session_state["proj_pills"] = "アドバリュー"
-    at.session_state["adv_sub_pills"] = "8-1"
+    at.session_state["adv_sub_pills"] = "1週目"
     at.run()
     text = "\n".join(str(m.value) for m in at.markdown)
-    assert f"¥{posting_logic.fmt_num(400)}" in text          # 8-1 の 400 だけ
-    assert f"¥{posting_logic.fmt_num(1000)}" not in text     # 全週の合計にはならない
+    assert f"¥{posting_logic.fmt_num(400 + 300 + 100)}" in text   # 8-1+9-1+10-1
+    assert f"¥{posting_logic.fmt_num(200)}" not in text            # 2週目(8-2)は混ざらない
 
 
 # ===== 【バグ】1周目しか表示されない（2026-08-28・大橋様ご報告） =====
@@ -312,13 +327,13 @@ def _issue(db, sub=None):
     return at, "\n".join(str(m.value) for m in at.markdown)
 
 
-def test_issue_page_lists_every_week_that_has_data(tmp_path, monkeypatch):
-    """🔴 報告そのもの: 2〜5週目も選べること。"""
+def test_issue_page_2to5_weeks_are_always_selectable(tmp_path, monkeypatch):
+    """🔴 報告そのもの: 2〜5週目もデータの有無に関わらず常に選べること。"""
     db = os.path.join(tmp_path, "t.db")
     _seed_all_weeks(db, monkeypatch)
     at, _ = _issue(db)
     assert list(at.pills(key="adv_sub_pills").options) == [
-        "全体", "8-1", "8-2", "8-3", "8-4", "8-5"]
+        "全体", "1週目", "2週目", "3週目", "4週目", "5週目"]
 
 
 def test_issue_page_aggregates_each_week_separately(tmp_path, monkeypatch):
@@ -328,9 +343,9 @@ def test_issue_page_aggregates_each_week_separately(tmp_path, monkeypatch):
     db = os.path.join(tmp_path, "t.db")
     _seed_all_weeks(db, monkeypatch)
     for w in range(1, 6):
-        _, text = _issue(db, f"8-{w}")
-        assert f"¥{posting_logic.fmt_num(w * 10000)}" in text, f"8-{w} の売上が出ていない"
-        assert f"¥{posting_logic.fmt_num(w * 100)}" in text, f"8-{w} の原価が出ていない"
+        _, text = _issue(db, f"{w}週目")
+        assert f"¥{posting_logic.fmt_num(w * 10000)}" in text, f"{w}週目の売上が出ていない"
+        assert f"¥{posting_logic.fmt_num(w * 100)}" in text, f"{w}週目の原価が出ていない"
 
 
 def test_issue_page_total_of_all_weeks_matches_the_sum(tmp_path, monkeypatch):
@@ -343,9 +358,58 @@ def test_issue_page_total_of_all_weeks_matches_the_sum(tmp_path, monkeypatch):
     assert f"¥{posting_logic.fmt_num(1500)}" in text       # 原価 1〜5週の合計
 
 
-def test_issue_page_surfaces_rows_that_have_no_week(tmp_path, monkeypatch):
-    """🔴 週なしで登録された既存データが画面から消えないこと。
-    実データではここに配布員代が丸ごと隠れていた。"""
+# ===== 週未設定行の扱い（2026-09-04・（未設定）表示の廃止） =====
+# 8/28に追加した「（未設定）」の安全装置は、選択肢を固定の「1週目〜5週目」に
+# 統一する今回の変更でオーナー了承のうえ廃止した。区分なしの行は各週の絞り込みには
+# 出ず、「全体」を選んだときだけ引き続き含まれる。
+
+
+def test_issue_page_no_longer_offers_an_unset_choice(tmp_path, monkeypatch):
+    db = os.path.join(tmp_path, "t.db")
+    pid = _seed_all_weeks(db, monkeypatch)
+    did = store.list_distributors(db_path=db)[0]["id"]
+    store.add_contract_invoice(
+        did, "2026-08-10", "2026-08-01", "2026-08-07",
+        [{"project_id": pid, "report_qty": 1, "unit_price": 7777,
+          "remark": "配布", "other_label": None, "copies": None}],
+        pay_type="歩合", db_path=db)
+    at, _ = _issue(db)
+    assert list(at.pills(key="adv_sub_pills").options) == [
+        "全体", "1週目", "2週目", "3週目", "4週目", "5週目"]
+
+
+# ===== アドバリューの期間フィルタは「期間指定」だけにする（2026-09-04追加ご依頼） =====
+
+
+def test_issue_page_advalue_has_no_period_preset_pills(tmp_path, monkeypatch):
+    """🔴 全期間/今月/今週のボタンは出さない(週選択と役割が重なるため)。
+    選択肢が1つ(期間指定)しかないので、ボタン自体も出ない。"""
+    db = os.path.join(tmp_path, "t.db")
+    _seed_advalue_weeks(db, monkeypatch)
+    at = _issue_page(db)
+    assert not any(p.key == "issue_period_pills" for p in at.pills)
+    assert not any(p.key == "issue_period_adv_pills" for p in at.pills)
+    # 「期間指定」のカレンダー欄そのものは出ている
+    assert any(d.key == "issue_period_adv_custom" for d in at.date_input)
+
+
+def test_issue_page_non_advalue_still_has_all_period_presets(tmp_path, monkeypatch):
+    """他の案件は今までどおり4択のまま。並び順は大阪支社売上ページに合わせて
+    今月/今週/全期間/期間指定（2026-09-09大橋様ご依頼）。"""
+    db = os.path.join(tmp_path, "t.db")
+    monkeypatch.setenv("POSTING_DB_PATH", db)
+    store.init_db(db)
+    store.seed_masters(db_path=db)
+    at = AppTest.from_file(os.path.join(ROOT, "pages", "03_号別明細.py"), default_timeout=60)
+    at.session_state["proj_pills"] = "関西ぱど：京阪北版"
+    at.run()
+    assert not at.exception
+    pills = next(p for p in at.pills if p.key == "issue_period_pills")
+    assert list(pills.options) == ["今月", "今週", "全期間", "期間指定"]
+
+
+def test_issue_page_unset_row_only_appears_in_zentai_view(tmp_path, monkeypatch):
+    """区分なしの行は、特定の週を選ぶと集計から消えるが「全体」には含まれる。"""
     from common import posting_logic
 
     db = os.path.join(tmp_path, "t.db")
@@ -356,31 +420,8 @@ def test_issue_page_surfaces_rows_that_have_no_week(tmp_path, monkeypatch):
         [{"project_id": pid, "report_qty": 1, "unit_price": 7777,
           "remark": "配布", "other_label": None, "copies": None}],
         pay_type="歩合", db_path=db)
-    at, _ = _issue(db)
-    assert posting_logic.LABEL_UNSET in list(at.pills(key="adv_sub_pills").options)
-    _, text = _issue(db, posting_logic.LABEL_UNSET)
-    assert f"¥{posting_logic.fmt_num(7777)}" in text
-
-
-def test_no_unset_choice_when_every_row_has_a_week(tmp_path, monkeypatch):
-    from common import posting_logic
-
-    db = os.path.join(tmp_path, "t.db")
-    _seed_all_weeks(db, monkeypatch)
-    at, _ = _issue(db)
-    assert posting_logic.LABEL_UNSET not in list(at.pills(key="adv_sub_pills").options)
-
-
-def test_no_unset_choice_when_weeks_are_not_used_at_all(tmp_path, monkeypatch):
-    """週を1つも使っていない段階では「（未設定）」を出さない。
-    「全体」と同じ意味にしかならず、選択肢が増えて紛らわしいだけのため。"""
-    from common import posting_logic
-
-    db = os.path.join(tmp_path, "t.db")
-    monkeypatch.setenv("POSTING_DB_PATH", db)
-    store.init_db(db)
-    store.seed_masters(db_path=db)
-    pid = next(p["id"] for p in store.list_projects(db_path=db) if p["name"] == "アドバリュー")
-    store.add_receivable("2026-08", None, 100000, project_id=pid, db_path=db)
-    at, _ = _issue(db)
-    assert not any(p.key == "adv_sub_pills" for p in at.pills)
+    _, all_text = _issue(db)                       # 全体 = 1週目〜5週目(1500)＋区分なし(7777)
+    assert f"¥{posting_logic.fmt_num(1500 + 7777)}" in all_text
+    _, week1_text = _issue(db, "1週目")             # 1週目だけなら100のまま(区分なし行は混ざらない)
+    assert f"¥{posting_logic.fmt_num(100)}" in week1_text
+    assert f"¥{posting_logic.fmt_num(1500 + 7777)}" not in week1_text

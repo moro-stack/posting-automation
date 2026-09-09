@@ -10,7 +10,7 @@ from common import posting_logic
 from common import posting_store as store
 from common.excel_io import freeze_xlsx_bytes
 from common.ui import (apply_app_style, nice_table, period_picker, flash, show_flash,
-                       selectable_list, list_action_bar)
+                       selectable_list, list_action_bar, PERIOD_ORDER_MONTH_FIRST)
 
 apply_app_style()
 show_flash()
@@ -54,57 +54,38 @@ st.markdown(
     f'<div style="font-size:1.9rem;font-weight:800;color:#0f87b8;margin:.1rem 0 .5rem">{sel}</div>',
     unsafe_allow_html=True)
 
-# ===== アドバリューだけ、週次の案件区分(8-1等)でさらに絞れるようにする =====
+# ===== アドバリューだけ、週(1週目〜5週目)でさらに絞れるようにする =====
 # 🔴 依頼①(2026-08-19大橋様→2026-08-20詳細確認): アドバリューは週ごとに案件が来て
-# 「8-1」「8-2」「8-3」のように区分して管理している。号別明細でも区分ごとに集計を
-# 見られるようにする。登録済みのデータに含まれる区分だけを選択肢に出す(期間を問わず)。
-sub_label = None
+# 区分して管理している。号別明細でも週ごとに集計を見られるようにする。
+# 🔴 2026-09-04 大橋様ご依頼: 選択肢は月に依存する生の区分("8-1"等)ではなく
+# 「1週目〜5週目」の固定表示に統一する(月をまたいでも選択肢を作り直さない)。
+selected_week = None
 if sel == "アドバリュー":
-    _all_contract = []
-    for _inv in store.list_contract_invoices():
-        _all_contract.extend(store.get_contract_invoice(_inv["id"])["lines"])
-    _own = [store.list_petty_cash(project_id=pid),
-            store.list_receivables(project_id=pid),
-            store.list_issue_manual_costs(project_id=pid),
-            [ln for ln in _all_contract if ln.get("project_id") == pid]]
-    _labels = posting_logic.distinct_other_labels(*_own)
-    # 🔴 依頼⑥(2026-08-27 大橋様): 週ごとに分けて見られるようにする。
-    # 素の文字列順だと「10-1」が「8-1」より前に来て、月をまたいだ瞬間に
-    # 並びが壊れるため、月→週の順に並べ直す(週でないラベルは末尾に残す)。
-    _labels = advalue.sort_week_labels(_labels)
-    # 🔴 2026-08-28 バグ(大橋様＝1週目しか出ない)の再発防止:
-    # 週が付いていない行(古いデータ・業務委託の入れ忘れ)は、どの週にも出ないため
-    # 画面から存在ごと消えてしまう。「（未設定）」の選択肢を出して必ず辿れるようにし、
-    # 直すべきデータがあることに気づけるようにする。
-    # 週を1つも使っていないうちは今までどおり選択肢を出さない(「全体」と同じ意味に
-    # なるだけで邪魔)。週の登録が始まっていて、なお週なしの行が混ざっているときだけ出す。
-    _has_unset = bool(_labels) and posting_logic.has_unlabeled_rows(*_own)
-    if _has_unset:
-        _labels = _labels + [posting_logic.LABEL_UNSET]
-    if _labels:
-        _sub_sel = st.pills("案件区分", ["全体"] + _labels, selection_mode="single",
-                            default="全体", key="adv_sub_pills")
-        sub_label = None if (not _sub_sel or _sub_sel == "全体") else _sub_sel
-        if sub_label == posting_logic.LABEL_UNSET:
-            st.warning("週が設定されていない行です。『業務委託登録』『小口／買掛／売掛』で"
-                       "登録し直すと、その週の集計に入ります。")
-        elif sub_label:
-            st.caption(f"表示中の週：{advalue.week_display(sub_label)}")
-    if _has_unset:
-        st.caption("※ 週が未設定の登録があります。「全体」には含まれますが、"
-                   "各週の集計には出ません。")
+    _week_sel = st.pills("週", ["全体"] + list(advalue.WEEK_CHOICES), selection_mode="single",
+                         default="全体", key="adv_sub_pills")
+    selected_week = advalue.week_index(_week_sel) if _week_sel and _week_sel != "全体" else None
+    if selected_week is not None:
+        st.caption(f"表示中の週：{_week_sel}（月を問わずこの週のデータをまとめて表示）")
 
 # ===== 期間指定：全期間 / 今月 / 今週 / 期間指定 を同じ並びのボタンで =====
-lo, hi, period_note = period_picker(key="issue_period")
+# 🔴 2026-09-04 大橋様ご依頼: アドバリューは週(1週目〜5週目)で絞るのが基本なので、
+# 全期間/今月/今週のボタンは無くし「期間指定」だけにする(週選択と役割が重なるため)。
+# キーを分けて、他の案件から切り替えても選択状態が衝突しないようにする。
+if sel == "アドバリュー":
+    lo, hi, period_note = period_picker(key="issue_period_adv", only=["期間指定"])
+else:
+    # 並び順は大阪支社売上ページに合わせて今月/今週/全期間/期間指定
+    # (2026-09-09大橋様ご依頼)。
+    lo, hi, period_note = period_picker(key="issue_period", order=PERIOD_ORDER_MONTH_FIRST)
 st.caption(f"表示期間: {period_note}")
 
 # ===== コストを集める =====
 petty = posting_logic.filter_rows_by_period(
     store.list_petty_cash(project_id=pid), "date", lo, hi)
-petty = posting_logic.filter_rows_by_label(petty, sub_label)
+petty = posting_logic.filter_rows_by_week(petty, selected_week)
 receivables = posting_logic.filter_rows_by_period(
     store.list_receivables(project_id=pid), "month", lo, hi)
-receivables = posting_logic.filter_rows_by_label(receivables, sub_label)
+receivables = posting_logic.filter_rows_by_week(receivables, selected_week)
 
 _dist_names = {d["id"]: d["name"] for d in store.list_distributors()}  # 停止中も含めて引く
 
@@ -119,13 +100,13 @@ for inv in store.list_contract_invoices():
         ln["distributor_name"] = _dist_names.get(inv.get("distributor_id"), "")
         ln["pay_type"] = inv.get("pay_type")       # 登録時点の支払形態(マスタの現在値は使わない)
         contract_lines.append(ln)
-contract_lines = posting_logic.filter_rows_by_label(contract_lines, sub_label)
+contract_lines = posting_logic.filter_rows_by_week(contract_lines, selected_week)
 
 # 直接入力(配布員代): work_date で期間絞り込み。日付なしは常に計上。
 all_manual = store.list_issue_manual_costs(project_id=pid)
 manual = [r for r in all_manual
           if r.get("work_date") is None or posting_logic.in_period(r.get("work_date"), lo, hi)]
-manual = posting_logic.filter_rows_by_label(manual, sub_label)
+manual = posting_logic.filter_rows_by_week(manual, selected_week)
 
 agg = posting_logic.aggregate_issue(
     pid, petty=petty, payables=[], contract_lines=contract_lines, manual=manual)
@@ -200,15 +181,18 @@ with st.expander(f":material/groups: 配布員代の内訳（業務委託＋直�
 
     with st.form("add_labor", clear_on_submit=True):
         st.caption("配布員代を直接追加（日給の人・後からの追加もここで）"
-                   + ("　※現在の案件区分「" + sub_label + "」で登録されます" if sub_label else ""))
+                   + (f"　※現在選んでいる「{advalue.WEEK_CHOICES[selected_week - 1]}」"
+                      "と、下で入力する日付の月を組み合わせた区分で登録されます"
+                      if selected_week else ""))
         a1, a2, a3 = st.columns([1, 2, 1])
         w = a1.date_input("日付", value=_date.today(), format="YYYY/MM/DD")
         work = a2.text_input("作業", placeholder="例：配布 / 丁合・配布")
         amt_str = a3.text_input("金額", placeholder="例：50000")
         if st.form_submit_button("追加") and _parse_int(amt_str) > 0:
+            _manual_label = advalue.week_label(w.month, selected_week) if selected_week else None
             store.add_issue_manual_cost(pid, work.strip() or "配布",
                                         _parse_int(amt_str), work_date=str(w),
-                                        other_label=sub_label)
+                                        other_label=_manual_label)
             flash("配布員代を追加しました")
             st.rerun()
 
@@ -268,7 +252,21 @@ with st.expander(f":material/receipt_long: 雑費の内訳（小口）　—　�
     _misc_edited, _ = selectable_list(_misc, key="issue_misc", id_col=None)
     list_action_bar(_misc_edited, key="issue_misc", title=f"雑費（{sel}）",
                     filename=f"雑費_{sel}", id_col=None, delete_fn=None,
-                    delete_note="雑費の元データは『小口／買掛／売掛』の小口から削除してください。")
+                    delete_note="雑費の元データは『小口／買掛／売上』の小口から削除してください。")
+
+# ===== 車両使用履歴（2026-09-04大橋様ご依頼・参考情報。金額集計には含めない） =====
+_vehicle_rows = posting_logic.filter_rows_by_period(
+    store.list_vehicle_logs(project_id=pid), "date", lo, hi)
+_vehicle_rows = posting_logic.filter_rows_by_week(_vehicle_rows, selected_week)
+if _vehicle_rows:
+    with st.expander(f":material/directions_car: 車両使用履歴（{len(_vehicle_rows)}件）",
+                     expanded=False):
+        st.caption("この案件で使われた車両の記録です。金額の集計には含まれません。")
+        _veh_disp = [{"日付": r.get("date") or "", "車両": r.get("vehicle") or "",
+                      "ドライバー": r.get("driver") or "",
+                      "走行距離": f'{r["distance"]}km' if r.get("distance") is not None else "",
+                      "使用用途": r.get("purpose") or ""} for r in _vehicle_rows]
+        nice_table(_veh_disp, "")
 
 # ===== 号原価まとめ 出力 =====
 _buf = io.BytesIO()

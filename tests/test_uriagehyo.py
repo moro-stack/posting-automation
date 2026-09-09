@@ -49,6 +49,64 @@ def test_build_row_zero_koutsuhi_and_nomimono_are_blank_not_zero():
     assert row["飲み物"] is None
 
 
+# ===== 内訳列を売上登録から反映する（2026-09-04大橋様ご依頼） =====
+
+
+def test_build_row_uses_the_breakdown_when_given():
+    """渡された分はそのまま列に入る(渡さなければ従来どおり空欄。上のテストで確認済み)。"""
+    row = U.build_row(hakko_gou="8/21", ban_mei="京阪南",
+                      uriage_zeikomi=847502, genka_goukei_zeikomi=324505,
+                      pado_busuu=69443, pado_uriage=590266,
+                      chirashi_busuu=74404, chirashi_uriage=171129,
+                      shiwake_busuu=15897, shiwake_uriage=9061,
+                      sonota_uriage=None, bikou="南版チラシ総受注　90,301部")
+    assert row["ぱど部数"] == 69443
+    assert row["ぱど売上（税抜）"] == 590266
+    assert row["チラシ部数"] == 74404
+    assert row["チラシ売上（税抜）"] == 171129
+    assert row["仕分け部数"] == 15897
+    assert row["仕分け売上（税抜）"] == 9061
+    assert row["その他"] is None
+    assert row["備考"] == "南版チラシ総受注　90,301部"
+
+
+def test_ban_mei_of_derives_from_project_name():
+    """版名は案件から自動で決まる。単独/アドバリューは空欄のまま。"""
+    assert U._ban_mei_of("関西ぱど：京阪北版") == "京阪北"
+    assert U._ban_mei_of("関西ぱど：京阪南版") == "京阪南"
+    assert U._ban_mei_of("リビングプロシード") == "リビング"
+    assert U._ban_mei_of("アドバリュー") is None
+    assert U._ban_mei_of("その他") is None
+    assert U._ban_mei_of("知らない案件") is None
+
+
+def test_build_bulk_rows_fills_ban_mei_and_breakdown_from_receivables():
+    rows = U.build_bulk_rows(
+        receivables=[{"project_id": 1, "amount": 847502, "hakko_gou": "8/21",
+                     "pado_busuu": 69443, "pado_uriage": 590266,
+                     "chirashi_busuu": 74404, "chirashi_uriage": 171129,
+                     "note": "南版チラシ総受注　90,301部"}],
+        petty=[], payables=[], contract_lines=[], manual=[],
+        id2proj={1: "関西ぱど：京阪南版"}, id2cat={})
+    label, row = rows[0]
+    assert row["版名"] == "京阪南"
+    assert row["発行号"] == "8/21"
+    assert row["ぱど部数"] == 69443
+    assert row["チラシ売上（税抜）"] == 171129
+    assert row["備考"] == "南版チラシ総受注　90,301部"
+
+
+def test_build_bulk_rows_joins_multiple_hakko_gou_with_slash():
+    """同じ案件区分に複数の号が登録されていたら、発行号を「／」でつなぐ。"""
+    rows = U.build_bulk_rows(
+        receivables=[{"project_id": 1, "amount": 100000, "hakko_gou": "8/21"},
+                    {"project_id": 1, "amount": 50000, "hakko_gou": "8/28"}],
+        petty=[], payables=[], contract_lines=[], manual=[],
+        id2proj={1: "その他"}, id2cat={})
+    label, row = rows[0]
+    assert row["発行号"] == "8/21／8/28"
+
+
 # ===== 月次一括生成（依頼②・2026-08-20） =====
 
 

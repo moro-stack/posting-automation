@@ -8,7 +8,7 @@ from common.ui import apply_app_style, period_picker
 apply_app_style()
 st.title("⬇️ 経理提出用データ出力")
 
-kind = st.selectbox("データ種別", ["小口一覧", "買掛一覧", "売掛一覧", "業務委託費一覧"])
+kind = st.selectbox("データ種別", ["小口一覧", "買掛一覧", "売上一覧", "業務委託費一覧"])
 # 🔴 2026-08-28 オーナー指示: 日付の手入力をやめる。
 # ここは「期間 開始/終了(YYYY-MM-DD もしくは 空)」の自由入力だったが、
 # 他の画面と同じ共通の期間フィルタ(全期間/今月/今週/期間指定＝カレンダー)に揃える。
@@ -34,7 +34,7 @@ elif kind == "買掛一覧":
     rows = [r for r in store.list_payables() if _within(r.get("month"), d_from[:7], d_to[:7])] \
         if (d_from or d_to) else store.list_payables()
     df = pd.DataFrame(rows)
-elif kind == "売掛一覧":
+elif kind == "売上一覧":
     rows = [r for r in store.list_receivables() if _within(r.get("month"), d_from[:7], d_to[:7])] \
         if (d_from or d_to) else store.list_receivables()
     df = pd.DataFrame(rows)  # noqa: E501 - 月度は YYYY-MM なので先頭7文字で比較する

@@ -82,7 +82,7 @@ def _edit_dialog(master, row, *, update_fn, fields_fn, with_daily=False):
 
 
 def _name_fields(master, label_name):
-    """名前だけを直すマスタ(案件・費目・売掛先)の入力欄。"""
+    """名前だけを直すマスタ(案件・費目・売上先)の入力欄。"""
     def _fields(row):
         name = st.text_input(f"{label_name}名", value=row["name"],
                              key=f"edit_name_{master}_{row['id']}")
@@ -258,7 +258,7 @@ def _simple_master(label, master, list_fn, add_fn, update_fn):
 
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["案件", "費目（小口）", "買掛先", "売掛先", "業務委託"])
+    ["案件", "費目（小口）", "買掛先", "売上先", "業務委託"])
 
 with tab1:
     _simple_master("案件", "project", store.list_projects,
@@ -278,7 +278,7 @@ with tab3:
                 label_name="買掛先", fields_fn=_vendor_fields)
 
 with tab4:
-    _simple_master("売掛先", "receivables_client", store.list_receivables_clients,
+    _simple_master("売上先", "receivables_client", store.list_receivables_clients,
                    store.add_receivables_client, store.update_receivables_client)
 
 with tab5:
